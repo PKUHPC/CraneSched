@@ -370,6 +370,30 @@ inline void CanonicalizeCranedIdList(std::list<CranedId>* craned_ids) {
   }
 }
 
+// Every multi-node operation must acquire CranedMeta mutexes in this order.
+// The source lists may come from unordered partition metadata or from a
+// caller-supplied hostlist, so their iteration order is not a lock-order
+// contract. NodeOrder is populated from the Nodes configuration declaration;
+// IDs outside that declaration sort after configured IDs lexicographically.
+inline void OrderCranedIdListByNodeOrder(std::list<CranedId>* craned_ids) {
+  std::unordered_map<CranedId, std::size_t> order;
+  order.reserve(g_config.NodeOrder.size());
+  for (std::size_t index = 0; index < g_config.NodeOrder.size(); ++index)
+    order.emplace(g_config.NodeOrder[index], index);
+
+  const auto rank = [&order](const CranedId& craned_id) {
+    auto it = order.find(craned_id);
+    return it == order.end() ? order.size() : it->second;
+  };
+
+  craned_ids->sort([&rank](const CranedId& left, const CranedId& right) {
+    const auto left_rank = rank(left);
+    const auto right_rank = rank(right);
+    if (left_rank != right_rank) return left_rank < right_rank;
+    return left < right;
+  });
+}
+
 struct InteractiveMeta {
   InteractiveMeta() = default;
 

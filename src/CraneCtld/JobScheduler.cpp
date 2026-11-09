@@ -18,6 +18,7 @@
 
 #include "JobScheduler.h"
 
+#include <absl/cleanup/cleanup.h>
 #include <absl/strings/str_join.h>
 #include <absl/time/internal/cctz/src/time_zone_if.h>
 #include <google/protobuf/util/time_util.h>
@@ -4864,12 +4865,33 @@ std::expected<void, std::string> JobScheduler::CreateResv_(
   }
 
   g_meta_container->LockResReduceEvents();
+  auto unlock_res_reduce_events =
+      absl::MakeCleanup([&] { g_meta_container->UnlockResReduceEvents(); });
   std::vector<CranedMetaContainer::CranedMetaPtr> craned_meta_vec;
   ResourceV3 allocated_res;
   {
     LockGuard running_guard(&m_running_job_map_mtx_);
     std::vector<CranedId> nodes_not_found;
     std::vector<CranedId> nodes_conflicted;
+    std::list<CranedId> selected_craned_ids;
+    const auto check_node = [&](const CranedId& craned_id,
+                                const CranedMeta& meta) {
+      for (job_id_t job_id : meta.rn_job_res_map | std::views::keys) {
+        const auto& job = m_running_job_map_.at(job_id);
+        if (job->EndTime() > start_time) {
+          nodes_conflicted.emplace_back(craned_id);
+          return false;
+        }
+      }
+
+      for (const auto& [st, ed] : meta.resv_in_node_map | std::views::values) {
+        if (st < end_time && ed > start_time) {
+          nodes_conflicted.emplace_back(craned_id);
+          return false;
+        }
+      }
+      return true;
+    };
 
     for (CranedId const& craned_id : craned_ids) {
       auto craned_meta = g_meta_container->GetCranedMetaPtr(craned_id);
@@ -4878,35 +4900,49 @@ std::expected<void, std::string> JobScheduler::CreateResv_(
         continue;
       }
 
-      bool failed = false;
-      for (job_id_t job_id : craned_meta->rn_job_res_map | std::views::keys) {
-        const auto& job = m_running_job_map_.at(job_id);
-        absl::Time job_end_time = job->EndTime();
+      if (!check_node(craned_id, *craned_meta)) continue;
 
-        if (job_end_time > start_time) {
-          nodes_conflicted.emplace_back(craned_id);
-          failed = true;
-          break;
-        }
+      selected_craned_ids.emplace_back(craned_id);
+      if (selected_craned_ids.size() >= node_num) {
+        break;
       }
-      if (failed) continue;
+    }
 
-      for (const auto& [st, ed] :
-           craned_meta->resv_in_node_map | std::views::values) {
-        if (st < end_time && ed > start_time) {
-          nodes_conflicted.emplace_back(craned_id);
-          failed = true;
-          break;
-        }
+    if (selected_craned_ids.size() < node_num) {
+      std::string failed_msg = fmt::format(
+          "Not enough nodes available for reservation. "
+          "Requested: {}, Available: {}",
+          node_num, selected_craned_ids.size());
+      if (!nodes_not_found.empty()) {
+        failed_msg +=
+            ". " + fmt::format("Nodes not found: {}",
+                               util::HostNameListToStr(nodes_not_found));
       }
-      if (failed) continue;
+      if (!nodes_conflicted.empty()) {
+        failed_msg +=
+            ". " +
+            fmt::format(
+                "Nodes conflicted by running jobs or other reservation: {}",
+                util::HostNameListToStr(nodes_conflicted));
+      }
+      return std::unexpected(failed_msg);
+    }
+
+    // Preserve the existing candidate selection order above. Only the
+    // selected members are reordered before retaining their node locks.
+    OrderCranedIdListByNodeOrder(&selected_craned_ids);
+    for (const CranedId& craned_id : selected_craned_ids) {
+      auto craned_meta = g_meta_container->GetCranedMetaPtr(craned_id);
+      if (!craned_meta) {
+        nodes_not_found.emplace_back(craned_id);
+        continue;
+      }
+
+      if (!check_node(craned_id, *craned_meta)) continue;
 
       // use static_meta in case of craned dead
       allocated_res.AddResourceInNode(craned_id, craned_meta->static_meta.res);
       craned_meta_vec.emplace_back(std::move(craned_meta));
-      if (craned_meta_vec.size() >= node_num) {
-        break;
-      }
     }
 
     if (craned_meta_vec.size() < node_num) {
@@ -4926,7 +4962,7 @@ std::expected<void, std::string> JobScheduler::CreateResv_(
                 "Nodes conflicted by running jobs or other reservation: {}",
                 util::HostNameListToStr(nodes_conflicted));
       }
-      g_meta_container->UnlockResReduceEvents();
+      craned_meta_vec.clear();
       return std::unexpected(failed_msg);
     }
   }
@@ -4934,14 +4970,13 @@ std::expected<void, std::string> JobScheduler::CreateResv_(
   // Keep the selected membership, not the partition's candidate set. Recovery
   // must restore the same nodes instead of running node selection again.
   craned_ids.clear();
-  for (const auto& id : allocated_res.EachNodeResMap() | std::views::keys)
+  for (const auto& [id, _] : allocated_res.EachNodeResMap())
     craned_ids.push_back(id);
 
   const ResvId& resv_name = request.reservation_name();
   {
     auto resv_meta_map = g_meta_container->GetResvMetaMapExclusivePtr();
     if (resv_meta_map->contains(resv_name)) {
-      g_meta_container->UnlockResReduceEvents();
       return std::unexpected("Reservation name already exists");
     }
 
@@ -4960,6 +4995,7 @@ std::expected<void, std::string> JobScheduler::CreateResv_(
 
     g_meta_container->AddResReduceEventsAndUnlock(
         {std::make_pair(start_time, std::move(affected_nodes_vec))});
+    std::move(unlock_res_reduce_events).Cancel();
 
     creation_order = ++m_reservation_creation_order_;
     ResvMeta resv{.name = resv_name,
