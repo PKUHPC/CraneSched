@@ -274,6 +274,18 @@ struct Config {
   std::string Hostname;
   std::unordered_map<std::string, std::shared_ptr<Node>> Nodes;
   std::vector<std::string> NodeOrder;
+  // Derived from NodeOrder once during configuration loading; read-only while
+  // the controller is running, including reservation recovery.
+  std::unordered_map<CranedId, std::size_t> NodeOrderIndex;
+
+  void BuildNodeOrderIndex() {
+    std::unordered_map<CranedId, std::size_t> index;
+    index.reserve(NodeOrder.size());
+    for (std::size_t rank = 0; rank < NodeOrder.size(); ++rank)
+      index.emplace(NodeOrder[rank], rank);
+    NodeOrderIndex.swap(index);
+  }
+
   std::vector<std::string> GresOrder;
   // Maps NodeName and NodeHostname to the canonical CranedId used by the
   // scheduler.
@@ -376,11 +388,9 @@ inline void CanonicalizeCranedIdList(std::list<CranedId>* craned_ids) {
 // contract. NodeOrder is populated from the Nodes configuration declaration;
 // IDs outside that declaration sort after configured IDs lexicographically.
 inline void OrderCranedIdListByNodeOrder(std::list<CranedId>* craned_ids) {
-  std::unordered_map<CranedId, std::size_t> order;
-  order.reserve(g_config.NodeOrder.size());
-  for (std::size_t index = 0; index < g_config.NodeOrder.size(); ++index)
-    order.emplace(g_config.NodeOrder[index], index);
+  if (craned_ids->size() < 2) return;
 
+  const auto& order = g_config.NodeOrderIndex;
   const auto rank = [&order](const CranedId& craned_id) {
     auto it = order.find(craned_id);
     return it == order.end() ? order.size() : it->second;

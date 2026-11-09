@@ -707,6 +707,7 @@ class CranedIdOrderTest : public ::testing::Test {
       g_config.NodeOrder.emplace_back(id);
       g_config.Partitions["batch"].nodes.emplace(id);
     }
+    g_config.BuildNodeOrderIndex();
     g_config.PartitionOrder = {"batch"};
     nodes_.InitFromConfig(g_config);
   }
@@ -719,12 +720,52 @@ class CranedIdOrderTest : public ::testing::Test {
 
 TEST_F(CranedIdOrderTest, UsesConfiguredNodeOrderForEveryInputList) {
   g_config.NodeOrder = {"n2", "n1", "n3"};
+  g_config.BuildNodeOrderIndex();
 
   std::list<CranedId> ids{"n3", "n1", "n2"};
   Ctld::OrderCranedIdListByNodeOrder(&ids);
 
   EXPECT_EQ((std::vector<CranedId>{ids.begin(), ids.end()}),
             (std::vector<CranedId>{"n2", "n1", "n3"}));
+}
+
+TEST_F(CranedIdOrderTest, PreservesSubsetsDuplicatesAndUnknownIds) {
+  g_config.NodeOrder = {"n2", "n1", "n3"};
+  g_config.BuildNodeOrderIndex();
+
+  std::list<CranedId> ids{"z-unknown", "n3", "a-unknown", "n2", "n2"};
+  Ctld::OrderCranedIdListByNodeOrder(&ids);
+
+  EXPECT_EQ(ids,
+            (std::list<CranedId>{"n2", "n2", "n3", "a-unknown", "z-unknown"}));
+}
+
+TEST_F(CranedIdOrderTest, RebuildingIndexUsesOnlyTheNewConfiguration) {
+  g_config.NodeOrder = {"n3", "n1", "n2"};
+  g_config.BuildNodeOrderIndex();
+  std::list<CranedId> ids{"n2", "n1", "n3"};
+  Ctld::OrderCranedIdListByNodeOrder(&ids);
+  EXPECT_EQ(ids, (std::list<CranedId>{"n3", "n1", "n2"}));
+
+  g_config.NodeOrder = {"n2"};
+  g_config.BuildNodeOrderIndex();
+  Ctld::OrderCranedIdListByNodeOrder(&ids);
+  EXPECT_EQ(ids, (std::list<CranedId>{"n2", "n1", "n3"}));
+
+  g_config.NodeOrder.clear();
+  g_config.BuildNodeOrderIndex();
+  Ctld::OrderCranedIdListByNodeOrder(&ids);
+  EXPECT_EQ(ids, (std::list<CranedId>{"n1", "n2", "n3"}));
+}
+
+TEST_F(CranedIdOrderTest, LeavesEmptyAndSingletonListsUnchanged) {
+  std::list<CranedId> ids;
+  Ctld::OrderCranedIdListByNodeOrder(&ids);
+  EXPECT_TRUE(ids.empty());
+
+  ids = {"n3"};
+  Ctld::OrderCranedIdListByNodeOrder(&ids);
+  EXPECT_EQ(ids, (std::list<CranedId>{"n3"}));
 }
 
 TEST_F(CranedIdOrderTest, OppositeRequestsHaveOneLockAcquisitionOrder) {
