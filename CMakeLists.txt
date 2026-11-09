@@ -81,7 +81,7 @@ option(ENABLE_ROCKSDB "Enable RocksDB as the embedded db backend" ON)
 option(CRANE_ENABLE_LUA "Enable lua support" ON)
 
 option(CRANE_ENABLE_PMIX "Enable PMIx support" ON)
-option(CRANE_ENABLE_PMI2 "Enable native PMI-2 support" ON)
+option(CRANE_ENABLE_PMI2 "Enable native PMI runtime with PMI-1.1 compatibility" ON)
 option(CRANE_ENABLE_UCX "Enable UCX transport for PMIx" OFF)
 
 option(CRANE_ENABLE_TESTS "Enable test targets" OFF)

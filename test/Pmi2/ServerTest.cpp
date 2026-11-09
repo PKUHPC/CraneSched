@@ -29,6 +29,7 @@
 #include <chrono>
 #include <thread>
 
+#include "Pmi1Codec.h"
 #include "Pmi2.h"
 #include "protos/Crane.grpc.pb.h"
 
@@ -48,7 +49,8 @@ class Clients {
     }
   }
   bool Start(mpi::LaunchInfo launch, const char* mapping,
-             const char* mode = "normal") {
+             const char* mode = "normal",
+             const char* client = PMI2_TEST_CLIENT) {
     constexpr int kClientFd = 198;
     launch.env["PMI_FD"] = std::to_string(kClientFd);
     launch.env["EXPECTED_MAPPING"] = mapping;
@@ -66,13 +68,13 @@ class Clients {
     posix_spawn_file_actions_t actions;
     if (posix_spawn_file_actions_init(&actions) != 0) return false;
     int rc = posix_spawn_file_actions_adddup2(&actions, launch.fd, kClientFd);
-    char* argv[] = {const_cast<char*>(PMI2_TEST_CLIENT),
-                    const_cast<char*>(mode), nullptr};
+    char* argv[] = {const_cast<char*>(client), const_cast<char*>(mode),
+                    nullptr};
     pid_t pid;
     if (rc == 0)
-      rc = posix_spawn(&pid, PMI2_TEST_CLIENT, &actions, nullptr, argv,
-                       envp.data());
+      rc = posix_spawn(&pid, client, &actions, nullptr, argv, envp.data());
     posix_spawn_file_actions_destroy(&actions);
+    close(launch.fd);
     if (rc != 0) return false;
     pids_.push_back(pid);
     return true;
@@ -90,6 +92,21 @@ class Clients {
       it = pids_.erase(it);
       EXPECT_TRUE(WIFEXITED(status));
       if (WIFEXITED(status)) EXPECT_EQ(WEXITSTATUS(status), expected);
+    }
+  }
+  void ExpectFailure() {
+    auto deadline = std::chrono::steady_clock::now() + 10s;
+    for (auto it = pids_.begin(); it != pids_.end();) {
+      int status{};
+      auto pid = waitpid(*it, &status, WNOHANG);
+      if (pid == 0 && std::chrono::steady_clock::now() < deadline) {
+        std::this_thread::sleep_for(10ms);
+        continue;
+      }
+      ASSERT_EQ(pid, *it) << "PMI client did not fail in time";
+      it = pids_.erase(it);
+      ASSERT_TRUE(WIFEXITED(status));
+      EXPECT_NE(WEXITSTATUS(status), 0);
     }
   }
 
@@ -131,6 +148,21 @@ void Send(int fd, std::string_view message) {
 }
 }  // namespace
 
+TEST(Pmi1Codec, ParsesAndEncodesLinesAndRejectsMalformedFields) {
+  auto fields =
+      pmi2::pmi1::Codec::ParseLine("cmd=put kvsname=42.3 key=rank value=0\n");
+  ASSERT_TRUE(fields);
+  EXPECT_EQ(fields->at("cmd"), "put");
+  EXPECT_EQ(fields->at("value"), "0");
+  auto line = pmi2::pmi1::Codec::EncodeLine("put_result",
+                                            {{"rc", "0"}, {"value", "a=b"}});
+  ASSERT_TRUE(line);
+  EXPECT_EQ(*line, "cmd=put_result rc=0 value=a=b\n");
+  EXPECT_FALSE(pmi2::pmi1::Codec::ParseLine("cmd=put key=x key=y value=z\n"));
+  EXPECT_FALSE(pmi2::pmi1::Codec::ParseLine("cmd=put key\n"));
+  EXPECT_FALSE(pmi2::pmi1::Codec::ParseLine("cmd=put key=x\nextra\n"));
+}
+
 TEST(Pmi2Server, RealClientInitializesExchangesDataAndFinalizes) {
   pmi2::Server server;
   ASSERT_TRUE(server.Init(Config(), Step(), {}, 3s));
@@ -142,6 +174,70 @@ TEST(Pmi2Server, RealClientInitializesExchangesDataAndFinalizes) {
   ASSERT_TRUE(clients.Start(std::move(*launch), "(vector,(0,1,1))"));
   clients.ExpectExit();
   server.TaskExited(0);
+}
+
+TEST(Pmi2Server, Pmi1ClientInitializesAndExchangesKvsAcrossRanks) {
+  auto step = Step(8);
+  step.add_task_node_list(0);
+  step.add_task_node_list(0);
+  pmi2::Server server;
+  ASSERT_TRUE(server.Init(Config(), step, {}, 3s));
+  Clients clients;
+  for (uint32_t rank = 0; rank < 3; ++rank) {
+    auto launch = server.PrepareTask(rank);
+    ASSERT_TRUE(launch);
+    ASSERT_TRUE(clients.Start(std::move(*launch), "unused", "normal",
+                              PMI1_TEST_CLIENT));
+  }
+  clients.ExpectExit();
+  for (uint32_t rank = 0; rank < 3; ++rank) server.TaskExited(rank);
+}
+
+TEST(Pmi2Server, RejectsMixedProtocolsOnOneNode) {
+  auto step = Step(9);
+  step.add_task_node_list(0);
+  std::atomic<unsigned> failures{};
+  pmi2::Server server;
+  ASSERT_TRUE(server.Init(Config(), step, [&] { ++failures; }, 3s));
+  auto pmi1_launch = server.PrepareTask(0);
+  auto pmi2_launch = server.PrepareTask(1);
+  ASSERT_TRUE(pmi1_launch);
+  ASSERT_TRUE(pmi2_launch);
+  Send(pmi1_launch->fd, "cmd=init pmi_version=1 pmi_subversion=1\n");
+  Send(pmi2_launch->fd, "cmd=init pmi_version=2 pmi_subversion=0\n");
+  EXPECT_TRUE(WaitFor(failures, 1));
+}
+
+TEST(Pmi2Server, RejectsMixedProtocolsAcrossNodesAtFence) {
+  auto step = Step(10);
+  step.add_nodelist("node1");
+  step.add_task_node_list(1);
+  mpi::Config config = Config();
+  config.CranedIdToNodeHostname["node1"] = "localhost";
+  config.CranedIdToNodeAddr["node1"] = "127.0.0.1";
+  std::vector<std::unique_ptr<pmi2::Server>> servers;
+  for (const auto& id : step.nodelist()) {
+    config.CranedIdOfThisNode = id;
+    auto server = std::make_unique<pmi2::Server>();
+    ASSERT_TRUE(server->Init(config, step, {}, 3s));
+    servers.push_back(std::move(server));
+  }
+  for (size_t i = 0; i < servers.size(); ++i) {
+    std::vector<std::pair<CranedId, std::string>> peers;
+    for (size_t j = 0; j < servers.size(); ++j)
+      if (i != j) peers.emplace_back(step.nodelist(j), servers[j]->Port());
+    ASSERT_TRUE(servers[i]->ReceivePeers(peers));
+  }
+  auto pmi1_launch = servers[0]->PrepareTask(0);
+  auto pmi2_launch = servers[1]->PrepareTask(1);
+  ASSERT_TRUE(pmi1_launch);
+  ASSERT_TRUE(pmi2_launch);
+  Clients clients;
+  ASSERT_TRUE(clients.Start(std::move(*pmi1_launch), "unused", "normal",
+                            PMI1_TEST_CLIENT));
+  ASSERT_TRUE(
+      clients.Start(std::move(*pmi2_launch), "(vector,(0,1,1),(1,1,1))"));
+  clients.ExpectFailure();
 }
 
 TEST(Pmi2Runtime, AnnouncesEndpointThroughCranedUnixSocket) {
@@ -224,7 +320,7 @@ TEST(Pmi2Server, ThreeNodeTreeExchangesNonuniformRankData) {
   clients.ExpectExit();
 }
 
-TEST(Pmi2Server, PartialFramesAndPmi1Rejection) {
+TEST(Pmi2Server, PartialFramesAndPmi1Negotiation) {
   pmi2::Server server;
   ASSERT_TRUE(server.Init(Config(), Step(), {}, 3s));
   auto launch = server.PrepareTask(0);
@@ -248,8 +344,15 @@ TEST(Pmi2Server, PartialFramesAndPmi1Rejection) {
   auto old = legacy.PrepareTask(0);
   ASSERT_TRUE(old);
   Send(old->fd, "cmd=init pmi_version=1 pmi_subversion=1\n");
-  EXPECT_NE(Read(old->fd).find("rc=1"), std::string::npos);
-  EXPECT_TRUE(Read(old->fd).empty());
+  auto init = Read(old->fd);
+  EXPECT_NE(init.find("cmd=response_to_init"), std::string::npos);
+  EXPECT_NE(init.find("rc=0"), std::string::npos);
+  Send(old->fd, "cmd=get_appnum\n");
+  auto appnum = Read(old->fd);
+  EXPECT_NE(appnum.find("cmd=appnum"), std::string::npos);
+  EXPECT_NE(appnum.find("appnum=-1"), std::string::npos);
+  Send(old->fd, "cmd=finalize\n");
+  EXPECT_NE(Read(old->fd).find("cmd=finalize_ack"), std::string::npos);
 }
 
 TEST(Pmi2Server, IncompleteInitializationHasBoundedLifetime) {
