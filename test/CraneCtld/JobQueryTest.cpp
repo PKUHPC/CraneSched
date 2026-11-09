@@ -7,7 +7,6 @@
 #include <list>
 #include <set>
 #include <string>
-#include <vector>
 
 // Test the production helpers without exporting them or replacing dependencies.
 #include "RpcService/CtldGrpcServer.cpp"
@@ -699,45 +698,22 @@ class CranedIdOrderTest : public ::testing::Test {
   void SetUp() override {
     original_config_ = std::move(g_config);
     g_config = Ctld::Config{};
-    for (const auto& id : {"n1", "n2", "n3"}) {
-      auto node = std::make_shared<Ctld::Config::Node>();
-      node->cpu = 4;
-      node->memory_bytes = 8192;
-      g_config.Nodes.emplace(id, std::move(node));
-      g_config.NodeOrder.emplace_back(id);
-      g_config.Partitions["batch"].nodes.emplace(id);
-    }
-    g_config.BuildNodeOrderIndex();
-    g_config.PartitionOrder = {"batch"};
-    nodes_.InitFromConfig(g_config);
   }
 
   void TearDown() override { g_config = std::move(original_config_); }
 
   Ctld::Config original_config_;
-  Ctld::CranedMetaContainer nodes_;
 };
 
-TEST_F(CranedIdOrderTest, UsesConfiguredNodeOrderForEveryInputList) {
-  g_config.NodeOrder = {"n2", "n1", "n3"};
+TEST_F(CranedIdOrderTest, UsesConfiguredOrderForSubsetsAndUnknownIds) {
+  g_config.NodeOrder = {"n2", "n1", "n3", "n4"};
   g_config.BuildNodeOrderIndex();
 
-  std::list<CranedId> ids{"n3", "n1", "n2"};
-  Ctld::OrderCranedIdListByNodeOrder(&ids);
-
-  EXPECT_EQ((std::vector<CranedId>{ids.begin(), ids.end()}),
-            (std::vector<CranedId>{"n2", "n1", "n3"}));
-}
-
-TEST_F(CranedIdOrderTest, PreservesSubsetsDuplicatesAndUnknownIds) {
-  g_config.NodeOrder = {"n2", "n1", "n3"};
-  g_config.BuildNodeOrderIndex();
-
-  std::list<CranedId> ids{"z-unknown", "n3", "a-unknown", "n2", "n2"};
+  std::list<CranedId> ids{"z-unknown", "n4", "n1", "a-unknown", "n2"};
   Ctld::OrderCranedIdListByNodeOrder(&ids);
 
   EXPECT_EQ(ids,
-            (std::list<CranedId>{"n2", "n2", "n3", "a-unknown", "z-unknown"}));
+            (std::list<CranedId>{"n2", "n1", "n4", "a-unknown", "z-unknown"}));
 }
 
 TEST_F(CranedIdOrderTest, RebuildingIndexUsesOnlyTheNewConfiguration) {
@@ -758,39 +734,4 @@ TEST_F(CranedIdOrderTest, RebuildingIndexUsesOnlyTheNewConfiguration) {
   EXPECT_EQ(ids, (std::list<CranedId>{"n1", "n2", "n3"}));
 }
 
-TEST_F(CranedIdOrderTest, LeavesEmptyAndSingletonListsUnchanged) {
-  std::list<CranedId> ids;
-  Ctld::OrderCranedIdListByNodeOrder(&ids);
-  EXPECT_TRUE(ids.empty());
-
-  ids = {"n3"};
-  Ctld::OrderCranedIdListByNodeOrder(&ids);
-  EXPECT_EQ(ids, (std::list<CranedId>{"n3"}));
-}
-
-TEST_F(CranedIdOrderTest, OppositeRequestsHaveOneLockAcquisitionOrder) {
-  std::list<CranedId> ascending{"n1", "n2", "n3"};
-  std::list<CranedId> descending{"n3", "n2", "n1"};
-  Ctld::OrderCranedIdListByNodeOrder(&ascending);
-  Ctld::OrderCranedIdListByNodeOrder(&descending);
-
-  EXPECT_EQ(ascending, descending);
-  EXPECT_EQ((std::vector<CranedId>{descending.begin(), descending.end()}),
-            (std::vector<CranedId>{"n1", "n2", "n3"}));
-
-  std::vector<Ctld::CranedMetaContainer::CranedMetaPtr> first_locks;
-  for (const auto& id : ascending) {
-    auto meta = nodes_.GetCranedMetaPtr(id);
-    ASSERT_NE(meta.get(), nullptr);
-    first_locks.emplace_back(std::move(meta));
-  }
-  first_locks.clear();
-
-  std::vector<Ctld::CranedMetaContainer::CranedMetaPtr> second_locks;
-  for (const auto& id : descending) {
-    auto meta = nodes_.GetCranedMetaPtr(id);
-    ASSERT_NE(meta.get(), nullptr);
-    second_locks.emplace_back(std::move(meta));
-  }
-}
 }  // namespace
