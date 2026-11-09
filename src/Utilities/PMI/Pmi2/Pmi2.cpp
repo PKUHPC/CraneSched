@@ -32,6 +32,7 @@
 #include <set>
 #include <thread>
 
+#include "Pmi1Codec.h"
 #include "crane/Logger.h"
 #include "fmt/format.h"
 #include "protos/Pmi2.grpc.pb.h"
@@ -114,9 +115,11 @@ std::string Mapping(const crane::grpc::StepToD& step) {
 }  // namespace
 
 struct Server::Impl : crane::grpc::pmi2::Pmi2::Service {
+  enum class Protocol : uint32_t { kPmi11 = 1, kPmi20 = 2 };
   struct Client {
     int fd{-1};
     uint32_t rank{};
+    std::optional<Protocol> protocol;
     bool negotiated{false};
     bool initialized{false};
     bool finalized{false};
@@ -139,6 +142,7 @@ struct Server::Impl : crane::grpc::pmi2::Pmi2::Service {
   Fields pending_kvs;
   Fields visible_kvs;
   Fields node_attrs;
+  std::optional<Protocol> protocol;
   std::mutex mutex;
   std::condition_variable cv;
   std::thread io_thread;
@@ -189,8 +193,41 @@ struct Server::Impl : crane::grpc::pmi2::Pmi2::Service {
     cv.notify_all();
     Wake();
   }
+  uint32_t ProtocolVersion() const {
+    return protocol ? static_cast<uint32_t>(*protocol) : 0;
+  }
   void Reply(Client& c, const Fields& request, Fields fields, int rc = 0) {
-    fields["cmd"] = request.at("cmd") + "-response";
+    const auto& command = request.at("cmd");
+    if (c.protocol == Protocol::kPmi11) {
+      static const std::map<std::string, std::string> responses{
+          {"get_maxes", "maxes"},        {"get_universe_size", "universe_size"},
+          {"get_appnum", "appnum"},      {"get_my_kvsname", "my_kvsname"},
+          {"put", "put_result"},         {"get", "get_result"},
+          {"barrier_in", "barrier_out"}, {"finalize", "finalize_ack"}};
+      auto response = responses.find(command);
+      if (response == responses.end()) {
+        fields["errmsg"] = "unsupported_command";
+        fields["rc"] = std::to_string(rc == 0 ? 14 : rc);
+        auto line = pmi1::Codec::EncodeLine("error", fields);
+        if (!line || c.output.size() + line->size() > 2 * kMaxFrame) {
+          Fail("PMI-1 response exceeds the protocol limit");
+          return;
+        }
+        c.output += *line;
+      } else {
+        fields["rc"] = std::to_string(rc);
+        auto line = pmi1::Codec::EncodeLine(response->second, fields);
+        if (!line || c.output.size() + line->size() > 2 * kMaxFrame) {
+          Fail("PMI-1 response exceeds the protocol limit");
+          return;
+        }
+        c.output += *line;
+      }
+      Wake();
+      return;
+    }
+
+    fields["cmd"] = command + "-response";
     fields["rc"] = std::to_string(rc);
     if (auto it = request.find("thrid"); it != request.end())
       fields["thrid"] = it->second;
@@ -221,7 +258,9 @@ struct Server::Impl : crane::grpc::pmi2::Pmi2::Service {
   size_t LocalArrivals() const {
     size_t arrived = 0;
     for (const auto& [rank, c] : clients)
-      if (c->waiting && c->waiting->at("cmd") == "kvs-fence") ++arrived;
+      if (c->waiting && (c->waiting->at("cmd") == "kvs-fence" ||
+                         c->waiting->at("cmd") == "barrier_in"))
+        ++arrived;
     return arrived;
   }
   void StartFenceDeadline() {
@@ -238,6 +277,10 @@ struct Server::Impl : crane::grpc::pmi2::Pmi2::Service {
         !children.contains(request->craned_id()))
       return {grpc::StatusCode::INVALID_ARGUMENT,
               "unexpected step or tree member"};
+    if (request->pmi_version() != 0 && ProtocolVersion() != 0 &&
+        request->pmi_version() != ProtocolVersion())
+      return {grpc::StatusCode::FAILED_PRECONDITION,
+              "PMI protocol differs across step nodes"};
     if (completed_epoch == request->epoch()) {
       reply->set_ok(true);
       reply->mutable_kvs()->insert(completed_kvs.begin(), completed_kvs.end());
@@ -307,6 +350,7 @@ struct Server::Impl : crane::grpc::pmi2::Pmi2::Service {
         request.set_step_id(step.step_id());
         request.set_craned_id(config.CranedIdOfThisNode);
         request.set_epoch(round);
+        request.set_pmi_version(ProtocolVersion());
         request.mutable_kvs()->insert(delta.begin(), delta.end());
         outgoing_context = std::make_unique<grpc::ClientContext>();
         outgoing_context->set_deadline(std::chrono::system_clock::now() +
@@ -431,6 +475,81 @@ struct Server::Impl : crane::grpc::pmi2::Pmi2::Service {
       Reply(c, request, {{"errmsg", "operation not supported"}}, 14);
     }
   }
+  void Pmi1InvalidRequest(Client& c, const pmi1::Fields& request) {
+    Reply(c, request, {{"errmsg", "invalid_argument"}}, 3);
+  }
+  void Pmi1GetMaxes(Client& c, const pmi1::Fields& request) {
+    Reply(
+        c, request,
+        {{"kvsname_max", "256"}, {"keylen_max", "64"}, {"vallen_max", "1024"}});
+  }
+  void Pmi1GetUniverseSize(Client& c, const pmi1::Fields& request) {
+    Reply(c, request, {{"size", std::to_string(step.task_node_list_size())}});
+  }
+  void Pmi1GetAppnum(Client& c, const pmi1::Fields& request) {
+    Reply(c, request, {{"appnum", "-1"}});
+  }
+  void Pmi1GetKvsName(Client& c, const pmi1::Fields& request) {
+    Reply(c, request, {{"kvsname", jobid}});
+  }
+  void Pmi1Put(Client& c, const pmi1::Fields& request) {
+    if (!request.contains("key") || !request.contains("value") ||
+        request.at("key").empty() || request.at("key").size() >= kMaxKey ||
+        request.at("value").size() >= kMaxValue) {
+      Pmi1InvalidRequest(c, request);
+      return;
+    }
+    pending_kvs[request.at("key")] = request.at("value");
+    Reply(c, request, {});
+  }
+  void Pmi1Get(Client& c, const pmi1::Fields& request) {
+    if (!request.contains("key") || request.at("key").empty() ||
+        request.at("key").size() >= kMaxKey) {
+      Pmi1InvalidRequest(c, request);
+      return;
+    }
+    auto it = visible_kvs.find(request.at("key"));
+    if (it == visible_kvs.end())
+      Reply(c, request, {}, 1);
+    else
+      Reply(c, request, {{"value", it->second}});
+  }
+  void Pmi1Barrier(Client& c, const pmi1::Fields& request) {
+    c.waiting = Fields(request.begin(), request.end());
+    c.deadline = std::chrono::steady_clock::now() + timeout;
+    StartFenceDeadline();
+  }
+  void Pmi1Finalize(Client& c, const pmi1::Fields& request) {
+    c.finalized = true;
+    c.closing = true;
+    Reply(c, request, {});
+  }
+  void Pmi1Abort(Client&, const pmi1::Fields&) {
+    Fail("PMI-1 client requested Abort");
+  }
+  void RequestPmi11(Client& c, const pmi1::Fields& request) {
+    if (!c.initialized || c.finalized || c.waiting) {
+      Fail("PMI-1 request out of order");
+      return;
+    }
+    using Handler = void (Impl::*)(Client&, const pmi1::Fields&);
+    static const std::map<std::string, Handler> handlers{
+        {"get_maxes", &Impl::Pmi1GetMaxes},
+        {"get_universe_size", &Impl::Pmi1GetUniverseSize},
+        {"get_appnum", &Impl::Pmi1GetAppnum},
+        {"get_my_kvsname", &Impl::Pmi1GetKvsName},
+        {"put", &Impl::Pmi1Put},
+        {"get", &Impl::Pmi1Get},
+        {"barrier_in", &Impl::Pmi1Barrier},
+        {"finalize", &Impl::Pmi1Finalize},
+        {"abort", &Impl::Pmi1Abort}};
+    auto handler = handlers.find(request.at("cmd"));
+    if (handler == handlers.end()) {
+      Reply(c, request, {{"errmsg", "unsupported_command"}}, 14);
+      return;
+    }
+    (this->*handler->second)(c, request);
+  }
   void Decode(Client& c) {
     while (!c.input.empty() && !failed && !c.closing) {
       if (!c.negotiated) {
@@ -439,22 +558,73 @@ struct Server::Impl : crane::grpc::pmi2::Pmi2::Service {
           if (c.input.size() > 1024) Fail("oversized PMI initialization");
           return;
         }
-        auto request = Parse(std::string_view(c.input).substr(0, end), ' ');
+        auto request = pmi1::Codec::ParseLine(
+            std::string_view(c.input).substr(0, end + 1));
         if (!request || request->at("cmd") != "init") {
           Fail("invalid PMI initialization");
           return;
         }
-        bool supported = request->contains("pmi_version") &&
-                         request->at("pmi_version") == "2" &&
-                         request->contains("pmi_subversion") &&
-                         request->at("pmi_subversion") == "0";
-        c.output += fmt::format(
-            "cmd=response_to_init rc={} pmi_version=2 pmi_subversion=0\n",
-            supported ? 0 : 1);
+        auto version = request->contains("pmi_version")
+                           ? Number(request->at("pmi_version"))
+                           : std::nullopt;
+        auto subversion = request->contains("pmi_subversion")
+                              ? Number(request->at("pmi_subversion"))
+                              : std::nullopt;
+        Protocol requested_protocol = Protocol::kPmi20;
+        bool supported = false;
+        if (version && subversion && *version == 1 && *subversion == 1) {
+          requested_protocol = Protocol::kPmi11;
+          supported = true;
+        } else if (version && subversion && *version == 2 && *subversion == 0) {
+          supported = true;
+        }
+        const bool version_supported = supported;
+        const bool consistent =
+            !version_supported || !protocol || *protocol == requested_protocol;
+        supported = version_supported && consistent;
+        if (supported) {
+          protocol = requested_protocol;
+          c.protocol = requested_protocol;
+          c.negotiated = true;
+          c.initialized = requested_protocol == Protocol::kPmi11;
+        }
+        if (!consistent) Fail("inconsistent PMI protocol versions in step");
+        uint32_t response_version = version.value_or(2);
+        uint32_t response_subversion = subversion.value_or(0);
+        if (!consistent && protocol) {
+          response_version = static_cast<uint32_t>(*protocol);
+          response_subversion = *protocol == Protocol::kPmi11 ? 1 : 0;
+        }
+        auto response = pmi1::Codec::EncodeLine(
+            "response_to_init",
+            {{"rc", supported ? "0" : "1"},
+             {"pmi_version", std::to_string(response_version)},
+             {"pmi_subversion", std::to_string(response_subversion)}});
+        if (!response || c.output.size() + response->size() > 2 * kMaxFrame) {
+          Fail("invalid PMI initialization response");
+          return;
+        }
+        c.output += *response;
         c.input.erase(0, end + 1);
-        c.negotiated = true;
         c.closing = !supported;
       } else {
+        if (c.protocol == Protocol::kPmi11) {
+          auto end = c.input.find('\n');
+          if (end == std::string::npos) {
+            if (c.input.size() > pmi1::Codec::kMaxLine)
+              Fail("oversized PMI-1 request");
+            return;
+          }
+          auto request = pmi1::Codec::ParseLine(
+              std::string_view(c.input).substr(0, end + 1));
+          if (!request) {
+            Fail("invalid PMI-1 fields");
+            return;
+          }
+          c.input.erase(0, end + 1);
+          RequestPmi11(c, *request);
+          continue;
+        }
         if (c.input.size() < 6) return;
         auto header = std::string_view(c.input).substr(0, 6);
         while (!header.empty() && header.front() == ' ')
