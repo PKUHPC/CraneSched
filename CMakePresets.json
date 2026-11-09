@@ -36,6 +36,7 @@
             "binaryDir": "${sourceDir}/cmake-build-ci-debug",
             "cacheVariables": {
                 "CMAKE_BUILD_TYPE": "Debug",
+                "CMAKE_EXPORT_COMPILE_COMMANDS": "ON",
                 "CMAKE_C_COMPILER_LAUNCHER": "ccache",
                 "CMAKE_CXX_COMPILER_LAUNCHER": "ccache",
                 "CRANE_ENABLE_TESTS": "ON",
@@ -51,6 +52,7 @@
             "binaryDir": "${sourceDir}/cmake-build-ci-release",
             "cacheVariables": {
                 "CMAKE_BUILD_TYPE": "RelWithDebInfo",
+                "CMAKE_EXPORT_COMPILE_COMMANDS": "ON",
                 "CMAKE_C_COMPILER_LAUNCHER": "ccache",
                 "CMAKE_CXX_COMPILER_LAUNCHER": "ccache",
                 "CRANE_NATIVE_ARCH_OPT": "OFF",
