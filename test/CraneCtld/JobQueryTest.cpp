@@ -698,6 +698,8 @@ class CranedIdOrderTest : public ::testing::Test {
   void SetUp() override {
     original_config_ = std::move(g_config);
     g_config = Ctld::Config{};
+    for (const auto& id : {"n1", "n2", "n3", "n4"})
+      g_config.Nodes.emplace(id, std::make_shared<Ctld::Config::Node>());
   }
 
   void TearDown() override { g_config = std::move(original_config_); }
@@ -707,7 +709,7 @@ class CranedIdOrderTest : public ::testing::Test {
 
 TEST_F(CranedIdOrderTest, UsesConfiguredOrderForSubsetsAndUnknownIds) {
   g_config.NodeOrder = {"n2", "n1", "n3", "n4"};
-  g_config.BuildNodeOrderIndex();
+  g_config.BuildNodeOrderRanks();
 
   std::list<CranedId> ids{"z-unknown", "n4", "n1", "a-unknown", "n2"};
   Ctld::OrderCranedIdListByNodeOrder(&ids);
@@ -716,20 +718,27 @@ TEST_F(CranedIdOrderTest, UsesConfiguredOrderForSubsetsAndUnknownIds) {
             (std::list<CranedId>{"n2", "n1", "n4", "a-unknown", "z-unknown"}));
 }
 
-TEST_F(CranedIdOrderTest, RebuildingIndexUsesOnlyTheNewConfiguration) {
+TEST_F(CranedIdOrderTest, RebuildingRanksUsesOnlyTheNewOrder) {
   g_config.NodeOrder = {"n3", "n1", "n2"};
-  g_config.BuildNodeOrderIndex();
+  g_config.BuildNodeOrderRanks();
   std::list<CranedId> ids{"n2", "n1", "n3"};
   Ctld::OrderCranedIdListByNodeOrder(&ids);
   EXPECT_EQ(ids, (std::list<CranedId>{"n3", "n1", "n2"}));
 
+  // Configuration entries may replace a node without changing its position.
+  g_config.Nodes.at("n2") = std::make_shared<Ctld::Config::Node>();
+  g_config.NodeOrder = {"n2", "n3", "n1"};
+  g_config.BuildNodeOrderRanks();
+  Ctld::OrderCranedIdListByNodeOrder(&ids);
+  EXPECT_EQ(ids, (std::list<CranedId>{"n2", "n3", "n1"}));
+
   g_config.NodeOrder = {"n2"};
-  g_config.BuildNodeOrderIndex();
+  g_config.BuildNodeOrderRanks();
   Ctld::OrderCranedIdListByNodeOrder(&ids);
   EXPECT_EQ(ids, (std::list<CranedId>{"n2", "n1", "n3"}));
 
   g_config.NodeOrder.clear();
-  g_config.BuildNodeOrderIndex();
+  g_config.BuildNodeOrderRanks();
   Ctld::OrderCranedIdListByNodeOrder(&ids);
   EXPECT_EQ(ids, (std::list<CranedId>{"n1", "n2", "n3"}));
 }

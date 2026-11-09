@@ -131,8 +131,13 @@ struct Config {
   CraneCtldConf CtldConf;
 
   struct Node {
+    static constexpr std::size_t kUnranked =
+        std::numeric_limits<std::size_t>::max();
+
     std::string node_hostname;
     std::string node_addr;
+    // Derived from NodeOrder before startup; read-only during operation.
+    std::size_t node_order_rank{kUnranked};
     uint32_t cpu;
     uint64_t memory_bytes;
     DedicatedResourceInNode dedicated_resource;
@@ -274,16 +279,12 @@ struct Config {
   std::string Hostname;
   std::unordered_map<std::string, std::shared_ptr<Node>> Nodes;
   std::vector<std::string> NodeOrder;
-  // Derived from NodeOrder once during configuration loading; read-only while
-  // the controller is running, including reservation recovery.
-  std::unordered_map<CranedId, std::size_t> NodeOrderIndex;
 
-  void BuildNodeOrderIndex() {
-    std::unordered_map<CranedId, std::size_t> index;
-    index.reserve(NodeOrder.size());
+  // Rebuild before scheduler startup/recovery, including after node overrides.
+  void BuildNodeOrderRanks() {
+    for (const auto& [_, node] : Nodes) node->node_order_rank = Node::kUnranked;
     for (std::size_t rank = 0; rank < NodeOrder.size(); ++rank)
-      index.emplace(NodeOrder[rank], rank);
-    NodeOrderIndex.swap(index);
+      Nodes.at(NodeOrder[rank])->node_order_rank = rank;
   }
 
   std::vector<std::string> GresOrder;
@@ -390,10 +391,11 @@ inline void CanonicalizeCranedIdList(std::list<CranedId>* craned_ids) {
 inline void OrderCranedIdListByNodeOrder(std::list<CranedId>* craned_ids) {
   if (craned_ids->size() < 2) return;
 
-  const auto& order = g_config.NodeOrderIndex;
-  const auto rank = [&order](const CranedId& craned_id) {
-    auto it = order.find(craned_id);
-    return it == order.end() ? order.size() : it->second;
+  const auto& nodes = g_config.Nodes;
+  const auto rank = [&nodes](const CranedId& craned_id) {
+    auto it = nodes.find(craned_id);
+    return it == nodes.end() ? Config::Node::kUnranked
+                             : it->second->node_order_rank;
   };
 
   craned_ids->sort([&rank](const CranedId& left, const CranedId& right) {

@@ -674,7 +674,7 @@ void ParseConfig(int argc, char** argv) {
         }
       }
 
-      g_config.BuildNodeOrderIndex();
+      g_config.BuildNodeOrderRanks();
       g_config.CranedIdByAlias.clear();
       auto register_node_alias = [](const std::string& alias,
                                     const std::string& craned_id) {
