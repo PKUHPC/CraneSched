@@ -247,54 +247,15 @@ CraneErrCode SupervisorStub::ShutdownSupervisor() {
   return CraneErrCode::ERR_RPC_FAILURE;
 }
 
-CraneErrCode SupervisorStub::ReceivePmixPort(
-    const std::vector<std::pair<CranedId, std::string>>& pmix_ports) {
-  ClientContext context;
-  crane::grpc::supervisor::ReceivePmixPortRequest request;
-  crane::grpc::supervisor::ReceivePmixPortReply reply;
-
-  auto pmix_port_list = request.mutable_pmix_ports();
-  for (const auto& pmix_port : pmix_ports) {
-    auto pmix_port_req = pmix_port_list->Add();
-    pmix_port_req->set_craned_id(pmix_port.first);
-    pmix_port_req->set_port(pmix_port.second);
-  }
-
-  auto ok = m_stub_->ReceivePmixPort(&context, request, &reply);
-  if (!ok.ok() || !reply.ok()) {
-    CRANE_ERROR("ReceivePmixPort failed: reply {},{}, request size {}, ok {}",
-                reply.ok(), ok.error_message(), request.pmix_ports().size(),
-                ok.ok());
-    return CraneErrCode::ERR_RPC_FAILURE;
-  }
-
-  return CraneErrCode::SUCCESS;
-}
-
-CraneErrCode SupervisorStub::ReceivePmi2Port(
-    const std::vector<std::pair<CranedId, std::string>>& pmi2_ports) {
+CraneErrCode SupervisorStub::ReceiveMpiEndpoints(
+    const crane::grpc::mpi::ReceiveMpiEndpointsRequest& request) {
   ClientContext context;
   context.set_deadline(std::chrono::system_clock::now() +
-                       std::chrono::seconds(5));
-  crane::grpc::supervisor::ReceivePmi2PortRequest request;
-  crane::grpc::supervisor::ReceivePmi2PortReply reply;
-
-  auto pmi2_port_list = request.mutable_pmi2_ports();
-  for (const auto& pmi2_port : pmi2_ports) {
-    auto pmi2_port_req = pmi2_port_list->Add();
-    pmi2_port_req->set_craned_id(pmi2_port.first);
-    pmi2_port_req->set_port(pmi2_port.second);
-  }
-
-  auto ok = m_stub_->ReceivePmi2Port(&context, request, &reply);
-  if (!ok.ok() || !reply.ok()) {
-    CRANE_ERROR("ReceivePmi2Port failed: reply {},{}, request size {}, ok {}",
-                reply.ok(), ok.error_message(), request.pmi2_ports().size(),
-                ok.ok());
-    return CraneErrCode::ERR_RPC_FAILURE;
-  }
-
-  return CraneErrCode::SUCCESS;
+                       std::chrono::seconds(kCranedRpcTimeoutSeconds));
+  crane::grpc::mpi::ReceiveMpiEndpointsReply reply;
+  auto status = m_stub_->ReceiveMpiEndpoints(&context, request, &reply);
+  return status.ok() && reply.ok() ? CraneErrCode::SUCCESS
+                                   : CraneErrCode::ERR_RPC_FAILURE;
 }
 
 void SupervisorStub::InitChannelAndStub_(const std::string& endpoint) {

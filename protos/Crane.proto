@@ -24,6 +24,7 @@ option go_package = "github.com/PKUHPC/CraneSched/go/generated/protos";
 import "google/protobuf/empty.proto";
 import "google/protobuf/timestamp.proto";
 import "PublicDefs.proto";
+import "mpi/Mpi.proto";
 
 message StepStatusChangeRequest {
   uint32 job_id = 1;
@@ -1555,60 +1556,6 @@ message QueryJobSizeSummaryReply {
   repeated JobSizeSummaryItem item_list = 1;
 }
 
-message BroadcastPmixPortRequest {
-  string craned_id = 1;            //  sender
-  repeated string craned_ids = 2;  // nodes
-  uint32 job_id = 3;
-  uint32 step_id = 4;
-  bytes port = 5;  // grpc port or ucx addr (must bytes)
-}
-
-message BroadcastPmi2PortRequest {
-  string craned_id = 1;            //  sender
-  repeated string craned_ids = 2;  // nodes
-  uint32 job_id = 3;
-  uint32 step_id = 4;
-  string port = 5;  // PMI-2 supervisor TCP port
-}
-
-message BroadcastPmixPortReply {
-  bool ok = 1;
-}
-
-message BroadcastPmi2PortReply {
-  bool ok = 1;
-}
-
-message ReceivePmixPortRequest {
-  uint32 job_id = 1;
-  uint32 step_id = 2;
-
-  message PmixPorts {
-    string craned_id = 1;
-    bytes port = 2;  // grpc port or ucx addr (must bytes)
-  }
-  repeated PmixPorts pmix_ports = 3;
-}
-
-message ReceivePmi2PortRequest {
-  uint32 job_id = 1;
-  uint32 step_id = 2;
-
-  message Pmi2Ports {
-    string craned_id = 1;
-    string port = 2;  // PMI-2 supervisor TCP port
-  }
-  repeated Pmi2Ports pmi2_ports = 3;
-}
-
-message ReceivePmixPortReply {
-  bool ok = 1;
-}
-
-message ReceivePmi2PortReply {
-  bool ok = 1;
-}
-
 service CraneCtld {
   /* RPCs called from ccancel */
 
@@ -1843,8 +1790,8 @@ service CraneCtldForInternal {
   rpc CranedTriggerReverseConn(CranedTriggerReverseConnRequest) returns (google.protobuf.Empty);
   rpc CranedRegister(CranedRegisterRequest) returns (CranedRegisterReply);
   rpc CranedPing(CranedPingRequest) returns (CranedPingReply);
-  rpc BroadcastPmixPort(BroadcastPmixPortRequest) returns (BroadcastPmixPortReply);
-  rpc BroadcastPmi2Port(BroadcastPmi2PortRequest) returns (BroadcastPmi2PortReply);
+  rpc BroadcastMpiEndpoint(crane.grpc.mpi.BroadcastMpiEndpointRequest)
+      returns (crane.grpc.mpi.BroadcastMpiEndpointReply);
 
   rpc UpdateNodeDrainState(UpdateNodeDrainStateRequest) returns (UpdateNodeDrainStateReply);
   rpc QueryCranedInfo(QueryCranedInfoRequest) returns (QueryCranedInfoReply);
@@ -1863,8 +1810,7 @@ service Craned {
   rpc AllocSteps(AllocStepsRequest) returns (AllocStepsReply);
   rpc FreeSteps(FreeStepsRequest) returns (FreeStepsReply);
   rpc FreeJobs(FreeJobsRequest) returns (FreeJobsReply);
-  rpc ReceivePmixPort(ReceivePmixPortRequest) returns (ReceivePmixPortReply);
-  rpc ReceivePmi2Port(ReceivePmi2PortRequest) returns (ReceivePmi2PortReply);
+  rpc ReceiveMpiEndpoints(crane.grpc.mpi.ReceiveMpiEndpointsRequest) returns (crane.grpc.mpi.ReceiveMpiEndpointsReply);
   /*
   If the job is an interactive job, the resource uuid is also revoked.
    If there's no process in this interactive job, just deallocate all the resources.
@@ -1888,8 +1834,8 @@ service Craned {
   /* ----------------------------------- Called from Supervisor  --------------------------------------------------- */
   rpc StepStatusChange(StepStatusChangeRequest) returns (StepStatusChangeReply);
   /* ----------------------------------- Called from PMIX  -------------------------------------------------------- */
-  rpc BroadcastPmixPort(BroadcastPmixPortRequest) returns (BroadcastPmixPortReply);
-  rpc BroadcastPmi2Port(BroadcastPmi2PortRequest) returns (BroadcastPmi2PortReply);
+  rpc BroadcastMpiEndpoint(crane.grpc.mpi.BroadcastMpiEndpointRequest)
+      returns (crane.grpc.mpi.BroadcastMpiEndpointReply);
 }
 
 service CranedForPam {

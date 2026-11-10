@@ -1286,8 +1286,3 @@ message JobSizeSummaryItem {
   double total_cpu_time = 5;
   int64 total_count = 6;
 }
-
-message PmixProc {
-  string nspace = 1;
-  uint32 rank = 2;
-}

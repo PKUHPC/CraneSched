@@ -55,6 +55,7 @@ target_link_libraries(cranectld PRIVATE
         concurrentqueue
 
         Utility_PublicHeader
+        Utility_MpiControl
         Utility_PasswordEntry
         Utility_PluginClient
         Utility_PrologEpilogExecutor

@@ -9,12 +9,6 @@ target_link_libraries(dedicated_resource_test
         )
 gtest_discover_tests(dedicated_resource_test)
 
-add_executable(mpi_environment_test MpiEnvironmentTest.cpp)
-target_link_libraries(mpi_environment_test
-        GTest::gtest
-        GTest::gtest_main
-        Utility_Mpi)
-gtest_discover_tests(mpi_environment_test)
 
 add_executable(public_header_test
         AccountingTime_test.cpp

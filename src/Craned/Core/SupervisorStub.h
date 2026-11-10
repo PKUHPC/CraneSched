@@ -65,11 +65,8 @@ class SupervisorStub {
       std::optional<int64_t> deadline_time);
   CraneErrCode MigrateSshProcToCg(pid_t pid);
   CraneErrCode ShutdownSupervisor();
-  CraneErrCode ReceivePmixPort(
-      const std::vector<std::pair<CranedId, std::string>>& pmix_ports);
-
-  CraneErrCode ReceivePmi2Port(
-      const std::vector<std::pair<CranedId, std::string>>& pmi2_ports);
+  CraneErrCode ReceiveMpiEndpoints(
+      const crane::grpc::mpi::ReceiveMpiEndpointsRequest& request);
 
  private:
   void InitChannelAndStub_(const std::string& endpoint);

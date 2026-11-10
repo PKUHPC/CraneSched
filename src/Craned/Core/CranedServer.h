@@ -122,25 +122,15 @@ class CranedServiceImpl : public Craned::Service {
       const crane::grpc::ExecInContainerStepRequest *request,
       crane::grpc::ExecInContainerStepReply *response) override;
 
-  grpc::Status BroadcastPmixPort(
+  grpc::Status BroadcastMpiEndpoint(
       grpc::ServerContext *context,
-      const crane::grpc::BroadcastPmixPortRequest *request,
-      crane::grpc::BroadcastPmixPortReply *response) override;
+      const crane::grpc::mpi::BroadcastMpiEndpointRequest *request,
+      crane::grpc::mpi::BroadcastMpiEndpointReply *response) override;
 
-  grpc::Status BroadcastPmi2Port(
+  grpc::Status ReceiveMpiEndpoints(
       grpc::ServerContext *context,
-      const crane::grpc::BroadcastPmi2PortRequest *request,
-      crane::grpc::BroadcastPmi2PortReply *response) override;
-
-  grpc::Status ReceivePmixPort(
-      grpc::ServerContext *context,
-      const crane::grpc::ReceivePmixPortRequest *request,
-      crane::grpc::ReceivePmixPortReply *response) override;
-
-  grpc::Status ReceivePmi2Port(
-      grpc::ServerContext *context,
-      const crane::grpc::ReceivePmi2PortRequest *request,
-      crane::grpc::ReceivePmi2PortReply *response) override;
+      const crane::grpc::mpi::ReceiveMpiEndpointsRequest *request,
+      crane::grpc::mpi::ReceiveMpiEndpointsReply *response) override;
 };
 
 class CranedServer {
