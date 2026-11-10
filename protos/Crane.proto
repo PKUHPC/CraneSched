@@ -1563,7 +1563,19 @@ message BroadcastPmixPortRequest {
   bytes port = 5;  // grpc port or ucx addr (must bytes)
 }
 
+message BroadcastPmi2PortRequest {
+  string craned_id = 1;            //  sender
+  repeated string craned_ids = 2;  // nodes
+  uint32 job_id = 3;
+  uint32 step_id = 4;
+  string port = 5;  // PMI-2 supervisor TCP port
+}
+
 message BroadcastPmixPortReply {
+  bool ok = 1;
+}
+
+message BroadcastPmi2PortReply {
   bool ok = 1;
 }
 
@@ -1578,7 +1590,22 @@ message ReceivePmixPortRequest {
   repeated PmixPorts pmix_ports = 3;
 }
 
+message ReceivePmi2PortRequest {
+  uint32 job_id = 1;
+  uint32 step_id = 2;
+
+  message Pmi2Ports {
+    string craned_id = 1;
+    string port = 2;  // PMI-2 supervisor TCP port
+  }
+  repeated Pmi2Ports pmi2_ports = 3;
+}
+
 message ReceivePmixPortReply {
+  bool ok = 1;
+}
+
+message ReceivePmi2PortReply {
   bool ok = 1;
 }
 
@@ -1817,6 +1844,7 @@ service CraneCtldForInternal {
   rpc CranedRegister(CranedRegisterRequest) returns (CranedRegisterReply);
   rpc CranedPing(CranedPingRequest) returns (CranedPingReply);
   rpc BroadcastPmixPort(BroadcastPmixPortRequest) returns (BroadcastPmixPortReply);
+  rpc BroadcastPmi2Port(BroadcastPmi2PortRequest) returns (BroadcastPmi2PortReply);
 
   rpc UpdateNodeDrainState(UpdateNodeDrainStateRequest) returns (UpdateNodeDrainStateReply);
   rpc QueryCranedInfo(QueryCranedInfoRequest) returns (QueryCranedInfoReply);
@@ -1836,6 +1864,7 @@ service Craned {
   rpc FreeSteps(FreeStepsRequest) returns (FreeStepsReply);
   rpc FreeJobs(FreeJobsRequest) returns (FreeJobsReply);
   rpc ReceivePmixPort(ReceivePmixPortRequest) returns (ReceivePmixPortReply);
+  rpc ReceivePmi2Port(ReceivePmi2PortRequest) returns (ReceivePmi2PortReply);
   /*
   If the job is an interactive job, the resource uuid is also revoked.
    If there's no process in this interactive job, just deallocate all the resources.
@@ -1860,6 +1889,7 @@ service Craned {
   rpc StepStatusChange(StepStatusChangeRequest) returns (StepStatusChangeReply);
   /* ----------------------------------- Called from PMIX  -------------------------------------------------------- */
   rpc BroadcastPmixPort(BroadcastPmixPortRequest) returns (BroadcastPmixPortReply);
+  rpc BroadcastPmi2Port(BroadcastPmi2PortRequest) returns (BroadcastPmi2PortReply);
 }
 
 service CranedForPam {

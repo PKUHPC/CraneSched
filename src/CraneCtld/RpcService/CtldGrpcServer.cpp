@@ -20,6 +20,8 @@
 
 #include <grpcpp/support/status.h>
 
+#include <charconv>
+
 #include "Account/AccountManager.h"
 #include "Accounting/AccountMetaContainer.h"
 #include "Accounting/LicenseManager.h"
@@ -675,6 +677,89 @@ grpc::Status CtldForInternalServiceImpl::BroadcastPmixPort(
         if (result != CraneErrCode::SUCCESS) {
           CRANE_ERROR(
               "[Step#{}.{}] Failed to broadcast pmix port to craned {}.",
+              job_id, step_id, craned_id);
+        }
+      });
+    }
+  }
+
+  response->set_ok(true);
+  return grpc::Status::OK;
+}
+
+grpc::Status CtldForInternalServiceImpl::BroadcastPmi2Port(
+    grpc::ServerContext* context,
+    const crane::grpc::BroadcastPmi2PortRequest* request,
+    crane::grpc::BroadcastPmi2PortReply* response) {
+  if (!g_runtime_status.srv_ready.load(std::memory_order_acquire))
+    return grpc::Status{grpc::StatusCode::UNAVAILABLE,
+                        "CraneCtld Server is not ready"};
+
+  auto nodes =
+      g_job_scheduler->Pmi2StepNodes(request->job_id(), request->step_id());
+  std::vector<CranedId> requested(request->craned_ids().begin(),
+                                  request->craned_ids().end());
+  if (!nodes || *nodes != requested ||
+      std::ranges::find(*nodes, request->craned_id()) == nodes->end())
+    return {grpc::StatusCode::INVALID_ARGUMENT,
+            "PMI-2 endpoint does not match a live step allocation"};
+
+  uint32_t port;
+  const auto& port_text = request->port();
+  auto [end, error] = std::from_chars(
+      port_text.data(), port_text.data() + port_text.size(), port);
+  if (error != std::errc{} || end != port_text.data() + port_text.size() ||
+      port == 0 || port > 65535)
+    return {grpc::StatusCode::INVALID_ARGUMENT, "invalid PMI-2 TCP port"};
+
+  auto& pmi2_ports_map = g_job_scheduler->GetPmi2PortsMetaMap();
+
+  using Pmi2PortsMetaMapKey = std::pair<job_id_t, step_id_t>;
+  using Pmi2PortsMetaMapValue = std::unordered_map<CranedId, std::string>;
+
+  Pmi2PortsMetaMapKey map_key(request->job_id(), request->step_id());
+
+  // Snapshot of the completed port map, populated inside the locked callback.
+  // Empty means not all ports have arrived yet and no broadcast is needed.
+  std::optional<Pmi2PortsMetaMapValue> ports_to_broadcast;
+
+  bool conflict = false;
+  bool live = pmi2_ports_map.modify_if(map_key, [&](auto& pair) {
+    auto [it, inserted] =
+        pair.second.emplace(request->craned_id(), request->port());
+    if (!inserted && it->second != request->port()) {
+      conflict = true;
+      return;
+    }
+    if (pair.second.size() == nodes->size()) ports_to_broadcast = pair.second;
+  });
+  if (!live || conflict)
+    return {grpc::StatusCode::FAILED_PRECONDITION,
+            "expired or conflicting PMI-2 rendezvous"};
+
+  // The map lock has been released at this point.  Perform the fanout now.
+  if (ports_to_broadcast.has_value()) {
+    auto ports_shared =
+        std::make_shared<Pmi2PortsMetaMapValue>(std::move(*ports_to_broadcast));
+
+    job_id_t job_id = request->job_id();
+    step_id_t step_id = request->step_id();
+
+    for (const auto& craned_id : request->craned_ids()) {
+      g_thread_pool->detach_task([craned_id, ports_shared, job_id, step_id]() {
+        auto craned_stub = g_craned_keeper->GetCranedStub(craned_id);
+        if (!craned_stub) {
+          CRANE_ERROR(
+              "[Step#{}.{}] Craned {} stub not found when broadcasting "
+              "pmi2 port.",
+              job_id, step_id, craned_id);
+          return;
+        }
+        auto result =
+            craned_stub->ReceivePmi2Port(job_id, step_id, *ports_shared);
+        if (result != CraneErrCode::SUCCESS) {
+          CRANE_ERROR(
+              "[Step#{}.{}] Failed to broadcast pmi2 port to craned {}.",
               job_id, step_id, craned_id);
         }
       });

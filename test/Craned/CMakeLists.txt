@@ -19,5 +19,5 @@ target_link_libraries(container_identity_test
         craned_common
         Utility_CriClient
         Utility_BindFs
-        Utility_Pmix)
+        Utility_Mpi)
 gtest_discover_tests(container_identity_test)

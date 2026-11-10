@@ -34,8 +34,9 @@ Path to configuration file. Default: "/etc/crane/config.yaml".
 **--mpi=<type>**
 
 :   **Applies to:** `job`, `step`  
-Select MPI integration. Currently supported: `pmix`. When set to `pmix`, CraneSched acts as the process manager via the built-in PMIx server (rank/namespace assignment, modex/fence) and no `mpirun` is required.  
+Select MPI integration. Currently supported: `pmix`, `pmi2`. When set to `pmix`, CraneSched acts as the process manager via the built-in PMIx server (rank/namespace assignment, modex/fence) and no `mpirun` is required.
 Note: If PMIx is not enabled in this build, you will see “PMIx support is not compiled in.”  
+See [Native PMI-2 launch](../deployment/configuration/pmi2.md) for client installation, Intel MPI configuration and limitations.
 See PMIx Guide: ../deployment/configuration/pmix.md
 **-d, --dependency=&lt;string&gt;**
 

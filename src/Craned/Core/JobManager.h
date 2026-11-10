@@ -128,6 +128,10 @@ class JobManager {
       const std::vector<std::pair<CranedId, std::string>>& pmix_ports,
       job_id_t job_id, step_id_t step_id);
 
+  bool ReceivePmi2Port(
+      const std::vector<std::pair<CranedId, std::string>>& pmi2_ports,
+      job_id_t job_id, step_id_t step_id);
+
   CraneExpected<void> ChangeStepTimeConstraint(
       job_id_t job_id, step_id_t step_id,
       std::optional<int64_t> time_limit_seconds,
@@ -192,6 +196,10 @@ class JobManager {
   void SetSigintCallback(std::function<void()> cb);
 
  private:
+  bool ReceiveMpiPorts_(
+      const std::vector<std::pair<CranedId, std::string>>& ports,
+      job_id_t job_id, step_id_t step_id, std::string_view protocol);
+
   template <class T>
   using ConcurrentQueue = moodycamel::ConcurrentQueue<T>;
   using JobMap = util::AtomicHashMap<absl::flat_hash_map, job_id_t, JobInD>;

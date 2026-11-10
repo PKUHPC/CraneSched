@@ -1,0 +1,7 @@
+add_library(Utility_Mpi Mpi.cpp)
+target_include_directories(Utility_Mpi PUBLIC ${CMAKE_CURRENT_SOURCE_DIR})
+target_link_libraries(Utility_Mpi PUBLIC Utility_Pmix)
+if (CRANE_ENABLE_PMI2)
+    target_compile_definitions(Utility_Mpi PRIVATE HAVE_PMI2)
+    target_link_libraries(Utility_Mpi PUBLIC Utility_Pmi2)
+endif ()

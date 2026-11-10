@@ -549,6 +549,46 @@ CraneErrCode CranedStub::ReceivePmixPort(
   return CraneErrCode::SUCCESS;
 }
 
+CraneErrCode CranedStub::ReceivePmi2Port(
+    job_id_t job_id, step_id_t step_id,
+    const std::unordered_map<CranedId, std::string> &pmi2_ports) {
+  using crane::grpc::ReceivePmi2PortReply;
+  using crane::grpc::ReceivePmi2PortRequest;
+
+  ClientContext context;
+  context.set_deadline(std::chrono::system_clock::now() +
+                       std::chrono::seconds(kProxiedCriReqTimeoutSeconds));
+  Status status;
+  ReceivePmi2PortRequest request;
+  ReceivePmi2PortReply reply;
+
+  request.set_job_id(job_id);
+  request.set_step_id(step_id);
+  auto pmi2_port_list = request.mutable_pmi2_ports();
+  for (const auto &[craned_id, port] : pmi2_ports) {
+    auto pmi2_port_req = pmi2_port_list->Add();
+    pmi2_port_req->set_craned_id(craned_id);
+    pmi2_port_req->set_port(port);
+  }
+
+  status = m_stub_->ReceivePmi2Port(&context, request, &reply);
+
+  if (!status.ok()) {
+    CRANE_ERROR("[Step#{}.{}] ReceivePmi2Port grpc to Craned {} failed: {} ",
+                job_id, step_id, m_craned_id_, status.error_message());
+    HandleGrpcErrorCode_(status.error_code());
+    return CraneErrCode::ERR_RPC_FAILURE;
+  }
+
+  if (!reply.ok()) {
+    CRANE_ERROR("[Step#{}.{}] Craned {} failed to receive PMI2 port", job_id,
+                step_id, m_craned_id_);
+    return CraneErrCode::ERR_GENERIC_FAILURE;
+  }
+
+  return CraneErrCode::SUCCESS;
+}
+
 void CranedStub::HandleGrpcErrorCode_(grpc::StatusCode code) {
   if (code == grpc::UNAVAILABLE) {
     CRANE_INFO(

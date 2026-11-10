@@ -75,6 +75,11 @@ class SupervisorServiceImpl : public Supervisor::Service {
       grpc::ServerContext* context,
       const crane::grpc::supervisor::ReceivePmixPortRequest* request,
       crane::grpc::supervisor::ReceivePmixPortReply* response) override;
+
+  grpc::Status ReceivePmi2Port(
+      grpc::ServerContext* context,
+      const crane::grpc::supervisor::ReceivePmi2PortRequest* request,
+      crane::grpc::supervisor::ReceivePmi2PortReply* response) override;
 };
 
 class SupervisorServer {

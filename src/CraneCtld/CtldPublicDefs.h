@@ -754,6 +754,12 @@ struct StepInCtld {
                crane::grpc::InteractiveJobType::Crun &&
            m_step_to_ctld_.interactive_meta().mpi() == kMpiTypePmix;
   }
+  bool IsPmi2() const {
+    return type == crane::grpc::JobType::Interactive &&
+           m_step_to_ctld_.interactive_meta().interactive_type() ==
+               crane::grpc::InteractiveJobType::Crun &&
+           m_step_to_ctld_.interactive_meta().mpi() == kMpiTypePmi2;
+  }
 
   void SetStepType(crane::grpc::StepType type);
   crane::grpc::StepType StepType() const;
@@ -1144,6 +1150,12 @@ struct JobInCtld {
            job_to_ctld.interactive_meta().interactive_type() ==
                crane::grpc::InteractiveJobType::Crun &&
            job_to_ctld.interactive_meta().mpi() == kMpiTypePmix;
+  }
+  bool IsPmi2() const {
+    return type == crane::grpc::JobType::Interactive &&
+           job_to_ctld.interactive_meta().interactive_type() ==
+               crane::grpc::InteractiveJobType::Crun &&
+           job_to_ctld.interactive_meta().mpi() == kMpiTypePmi2;
   }
 
   bool IsContainer() const { return type == crane::grpc::Container; }

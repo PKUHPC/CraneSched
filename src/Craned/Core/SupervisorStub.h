@@ -68,6 +68,9 @@ class SupervisorStub {
   CraneErrCode ReceivePmixPort(
       const std::vector<std::pair<CranedId, std::string>>& pmix_ports);
 
+  CraneErrCode ReceivePmi2Port(
+      const std::vector<std::pair<CranedId, std::string>>& pmi2_ports);
+
  private:
   void InitChannelAndStub_(const std::string& endpoint);
   std::shared_ptr<grpc::Channel> m_channel_;
