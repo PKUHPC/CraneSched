@@ -163,6 +163,24 @@ TEST(Pmi1Codec, ParsesAndEncodesLinesAndRejectsMalformedFields) {
   EXPECT_FALSE(pmi2::pmi1::Codec::ParseLine("cmd=put key=x\nextra\n"));
 }
 
+TEST(Pmi1Codec, PreservesTerminalKvsValuesAndEscapesReplies) {
+  // Open MPI s1 replaces base64 padding with spaces before appending '-'.
+  auto fields = pmi2::pmi1::Codec::ParseLine(
+      "cmd=put kvsname=42.3 key=modex value=cG1peA  -\n");
+  ASSERT_TRUE(fields);
+  EXPECT_EQ(fields->at("value"), "cG1peA  -");
+  auto reply = pmi2::pmi1::Codec::EncodeLine(
+      "get_result", {{"rc", "0"}, {"value", "cG1peA  -"}});
+  ASSERT_TRUE(reply);
+  EXPECT_EQ(*reply, "cmd=get_result rc=0 value=cG1peA\\ \\ -\n");
+  auto decoded = pmi2::pmi1::Codec::ParseLine(*reply);
+  ASSERT_TRUE(decoded);
+  EXPECT_EQ(decoded->at("value"), fields->at("value"));
+  EXPECT_FALSE(pmi2::pmi1::Codec::ParseLine(
+      "cmd=put key=x value=" + std::string(1024, ' ') + "\n"));
+  EXPECT_FALSE(pmi2::pmi1::Codec::ParseLine("cmd=put key=x value=a\rb\n"));
+}
+
 TEST(Pmi2Server, RealClientInitializesExchangesDataAndFinalizes) {
   pmi2::Server server;
   ASSERT_TRUE(server.Init(Config(), Step(), {}, 3s));

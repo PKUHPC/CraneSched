@@ -60,14 +60,21 @@ static int Field(const char* line, const char* key, char* value,
   while (*current != '\0' && *current != '\n') {
     while (*current == ' ') ++current;
     const char* end = current;
-    while (*end != '\0' && *end != '\n' && *end != ' ') ++end;
+    while (*end != '\0' && *end != '\n' && *end != ' ') {
+      if (*end == '\\' && end[1] != '\0') ++end;
+      ++end;
+    }
     const char* equal = memchr(current, '=', (size_t)(end - current));
     if (equal != NULL && (size_t)(equal - current) == key_length &&
         memcmp(current, key, key_length) == 0) {
       size_t length = (size_t)(end - equal - 1);
       if (length + 1 > capacity) return 0;
-      memcpy(value, equal + 1, length);
-      value[length] = '\0';
+      size_t written = 0;
+      for (const char* ch = equal + 1; ch < end; ++ch) {
+        if (*ch == '\\' && ch + 1 < end) ++ch;
+        value[written++] = *ch;
+      }
+      value[written] = '\0';
       return 1;
     }
     current = end;
@@ -116,7 +123,8 @@ int main(void) {
     return 6;
 
   snprintf(request, sizeof(request),
-           "cmd=put kvsname=%s key=rank_%d value=%d\n", jobid, rank, rank);
+           "cmd=put kvsname=%s key=rank_%d value=%d  padding-\n", jobid, rank,
+           rank);
   if (!Exchange(fd, request, response, sizeof(response)) ||
       !Has(response, "cmd=put_result") || !Has(response, "rc=0"))
     return 7;
@@ -125,11 +133,14 @@ int main(void) {
     return 8;
 
   for (int peer = 0; peer < size; ++peer) {
+    char expected[128];
+    snprintf(expected, sizeof(expected), "%d  padding-", peer);
     snprintf(request, sizeof(request), "cmd=get kvsname=%s key=rank_%d\n",
              jobid, peer);
     if (!Exchange(fd, request, response, sizeof(response)) ||
         !Has(response, "cmd=get_result") || !Has(response, "rc=0") ||
-        !Field(response, "value", value, sizeof(value)) || atoi(value) != peer)
+        !Field(response, "value", value, sizeof(value)) ||
+        strcmp(value, expected) != 0)
       return 9;
   }
 

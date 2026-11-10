@@ -595,17 +595,28 @@ bool PmixServer::PmixInit_() {
 
   pmix_info_t* server_info;
   int server_info_size = 2;
-  if (PMIX_VERSION_MAJOR < 5) server_info_size = 3;
+  if (PMIX_VERSION_MAJOR < 5) ++server_info_size;
+#  ifdef PMIX_HOSTNAME_KEEP_FQDN
+  ++server_info_size;
+#  endif
 
   PMIX_INFO_CREATE(server_info, server_info_size);
+  int index = 0;
   if (PMIX_VERSION_MAJOR < 5)
-    PMIX_INFO_LOAD(&server_info[0], PMIX_USERID, &m_pmix_step_info_.uid,
+    PMIX_INFO_LOAD(&server_info[index++], PMIX_USERID, &m_pmix_step_info_.uid,
                    PMIX_UINT32);
+#  ifdef PMIX_HOSTNAME_KEEP_FQDN
+  // PMIx 5 otherwise shortens FQDN node-map entries. Its legacy peer encoding
+  // sends local node keys only when the server and namespace hostnames match.
+  bool keep_fqdn = true;
+  PMIX_INFO_LOAD(&server_info[index++], PMIX_HOSTNAME_KEEP_FQDN, &keep_fqdn,
+                 PMIX_BOOL);
+#  endif
 
-  PMIX_INFO_LOAD(&server_info[server_info_size - 2], PMIX_SERVER_TMPDIR,
+  PMIX_INFO_LOAD(&server_info[index++], PMIX_SERVER_TMPDIR,
                  m_pmix_step_info_.server_tmpdir.c_str(), PMIX_STRING);
   PMIX_INFO_LOAD(
-      &server_info[server_info_size - 1], PMIX_HOSTNAME,
+      &server_info[index], PMIX_HOSTNAME,
       m_pmix_step_info_.node_hostnames[m_pmix_step_info_.node_id].c_str(),
       PMIX_STRING);
   rc = PMIx_server_init(&s_crane_pmix_module, server_info, server_info_size);
@@ -740,7 +751,12 @@ bool PmixServer::JobSet_() {
     for (auto& info : info_list) PMIX_INFO_DESTRUCT(&info);
     return false;
   }
-  info_list.emplace_back(InfoLoad_(PMIX_NODE_MAP, regex, PMIX_STRING));
+#  ifdef PMIX_REGEX
+  constexpr auto regex_type = PMIX_REGEX;
+#  else
+  constexpr auto regex_type = PMIX_STRING;
+#  endif
+  info_list.emplace_back(InfoLoad_(PMIX_NODE_MAP, regex, regex_type));
 
   // proc_map "0,1,2;3,4" (per-node rank lists, separated by ';')
   // Use task_map (block-ordered) to build the correct per-node rank lists,
@@ -764,8 +780,7 @@ bool PmixServer::JobSet_() {
     for (auto& info : info_list) PMIX_INFO_DESTRUCT(&info);
     return false;
   }
-  info_list.emplace_back(InfoLoad_(PMIX_PROC_MAP, ppn, PMIX_STRING));
-  info_list.emplace_back(InfoLoad_(PMIX_ANL_MAP, ppn, PMIX_STRING));
+  info_list.emplace_back(InfoLoad_(PMIX_PROC_MAP, ppn, regex_type));
 
   std::string ranks_str = absl::StrJoin(local_ranks, ",");
   if (local_ranks.empty()) {
