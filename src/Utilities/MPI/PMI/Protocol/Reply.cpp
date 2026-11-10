@@ -32,24 +32,20 @@ void Server::Impl::Reply_(Client& c, const Fields& request, Fields fields,
         {"put", "put_result"},         {"get", "get_result"},
         {"barrier_in", "barrier_out"}, {"finalize", "finalize_ack"}};
     auto response = responses.find(command);
+    std::string_view response_command = "error";
     if (response == responses.end()) {
       fields["errmsg"] = "unsupported_command";
-      fields["rc"] = std::to_string(rc == 0 ? 14 : rc);
-      auto line = pmi1::Codec::EncodeLine("error", fields);
-      if (!line || c.output.size() + line->size() > 2 * kMaxFrame) {
-        Fail_("PMI-1 response exceeds the protocol limit");
-        return;
-      }
-      c.output += *line;
+      if (rc == 0) rc = 14;
     } else {
-      fields["rc"] = std::to_string(rc);
-      auto line = pmi1::Codec::EncodeLine(response->second, fields);
-      if (!line || c.output.size() + line->size() > 2 * kMaxFrame) {
-        Fail_("PMI-1 response exceeds the protocol limit");
-        return;
-      }
-      c.output += *line;
+      response_command = response->second;
     }
+    fields["rc"] = std::to_string(rc);
+    auto line = pmi1::Codec::EncodeLine(response_command, fields);
+    if (!line || c.output.size() + line->size() > 2 * kMaxFrame) {
+      Fail_("PMI-1 response exceeds the protocol limit");
+      return;
+    }
+    c.output += *line;
     Wake_();
     return;
   }

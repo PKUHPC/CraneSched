@@ -64,10 +64,10 @@ bool Server::Init(const mpi::Config& config, const crane::grpc::StepToD& step,
   s.m_on_failure_ = std::move(on_failure);
   // Legacy Open MPI PMI-2 components parse this as a numeric job.step pair.
   s.m_jobid_ = fmt::format("{}.{}", step.job_id(), step.step_id());
-  s.m_mapping_ = BuildProcessMapping(step);
-  if (s.m_mapping_.size() >= kMaxValue) return false;
+  auto mapping = BuildProcessMapping(step);
+  if (mapping.size() >= kMaxValue) return false;
   s.m_job_attrs_ = {
-      {"PMI_process_mapping", s.m_mapping_},
+      {"PMI_process_mapping", std::move(mapping)},
       {"universeSize", std::to_string(step.task_node_list_size())}};
   s.m_wake_fd_ = eventfd(0, EFD_CLOEXEC | EFD_NONBLOCK);
   if (s.m_wake_fd_ < 0) return false;

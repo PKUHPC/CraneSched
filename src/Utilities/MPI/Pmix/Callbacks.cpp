@@ -26,8 +26,7 @@
 #  include "crane/Logger.h"
 
 namespace pmix {
-// Each wrapper is a one-line forward to PmixServerCallbacks so that all PMIx
-// C callbacks have the correct ABI while the actual logic stays in a C++ class.
+// PMIx invokes these adapters through its C ABI callback table.
 #  ifdef HAVE_PMIX
 extern "C" {
 
@@ -42,18 +41,24 @@ static pmix_status_t ClientFinalizedWrapper(const pmix_proc_t* p, void* s,
 static pmix_status_t AbortWrapper(const pmix_proc_t* p, void* s, int st,
                                   const char m[], pmix_proc_t ps[], size_t np,
                                   pmix_op_cbfunc_t cb, void* d) {
-  return pmix::PmixServerCallbacks::Abort(p, s, st, m, ps, np, cb, d);
+  auto* server = PmixServer::GetInstance();
+  if (!server) return PMIX_ERR_INIT;
+  return server->Abort(p, s, st, m, ps, np, cb, d);
 }
 static pmix_status_t FenceNbWrapper(const pmix_proc_t pv[], size_t np,
                                     const pmix_info_t inf[], size_t ni,
                                     char* data, size_t nd,
                                     pmix_modex_cbfunc_t cb, void* d) {
-  return pmix::PmixServerCallbacks::FenceNb(pv, np, inf, ni, data, nd, cb, d);
+  auto* server = PmixServer::GetInstance();
+  if (!server) return PMIX_ERR_INIT;
+  return server->FenceNb(pv, np, inf, ni, data, nd, cb, d);
 }
 static pmix_status_t DModexWrapper(const pmix_proc_t* p,
                                    const pmix_info_t inf[], size_t ni,
                                    pmix_modex_cbfunc_t cb, void* d) {
-  return pmix::PmixServerCallbacks::DModex(p, inf, ni, cb, d);
+  auto* server = PmixServer::GetInstance();
+  if (!server) return PMIX_ERR_INIT;
+  return server->DModex(p, inf, ni, cb, d);
 }
 static pmix_status_t JobControlWrapper(const pmix_proc_t* p,
                                        const pmix_proc_t t[], size_t nt,
@@ -167,37 +172,6 @@ pmix_status_t PmixServerCallbacks::ClientFinalized(const pmix_proc_t* proc,
   CRANE_DEBUG("ClientFinalized: proc=[{}:{}]", proc->nspace, proc->rank);
   if (cbfunc) cbfunc(PMIX_SUCCESS, cbdata);
   return PMIX_SUCCESS;
-}
-
-pmix_status_t PmixServerCallbacks::Abort(const pmix_proc_t* pmix_proc,
-                                         void* server_object, int status,
-                                         const char msg[],
-                                         pmix_proc_t pmix_procs[],
-                                         size_t nprocs, pmix_op_cbfunc_t cbfunc,
-                                         void* cbdata) {
-  auto* server = PmixServer::GetInstance();
-  if (!server) return PMIX_ERR_INIT;
-  return server->Abort(pmix_proc, server_object, status, msg, pmix_procs,
-                       nprocs, cbfunc, cbdata);
-}
-
-pmix_status_t PmixServerCallbacks::FenceNb(
-    const pmix_proc_t procs_v2[], size_t nprocs, const pmix_info_t info[],
-    size_t ninfo, char* data, size_t ndata, pmix_modex_cbfunc_t cbfunc,
-    void* cbdata) {
-  auto* server = PmixServer::GetInstance();
-  if (!server) return PMIX_ERR_INIT;
-  return server->FenceNb(procs_v2, nprocs, info, ninfo, data, ndata, cbfunc,
-                         cbdata);
-}
-
-pmix_status_t PmixServerCallbacks::DModex(const pmix_proc_t* proc,
-                                          const pmix_info_t* info, size_t ninfo,
-                                          pmix_modex_cbfunc_t cbfunc,
-                                          void* cbdata) {
-  auto* server = PmixServer::GetInstance();
-  if (!server) return PMIX_ERR_INIT;
-  return server->DModex(proc, info, ninfo, cbfunc, cbdata);
 }
 
 pmix_status_t PmixServerCallbacks::JobControl(

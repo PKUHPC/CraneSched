@@ -47,6 +47,9 @@ class Session final {
                     std::string_view expected, Fields* response);
   int AttributeGetLocked(std::string_view command, const char* name,
                          char* value, int value_length, int* found, bool wait);
+  int AttributeGetIntArray(std::string_view command, const char* name,
+                           int* array, int array_length, int* output_length,
+                           int* found);
   int CopyValue(std::string_view source, char* destination, int capacity,
                 int* value_length) const;
   int CopyArray(std::string_view source, int* array, int array_length,
@@ -59,7 +62,6 @@ class Session final {
   std::string m_jobid_;
   int m_rank_{0};
   int m_size_{1};
-  int m_appnum_{-1};
 };
 
 Session& GetSession();

@@ -127,8 +127,7 @@ void Server::Impl::IoLoop_() {
     std::lock_guard lock(m_mutex_);
     for (auto& [rank, c] : m_clients_)
       if (c->fd >= 0) close(std::exchange(c->fd, -1));
-    report = m_failed_ && !m_failure_reported_;
-    m_failure_reported_ = true;
+    report = m_failed_;
   }
   if (report) {
     // Propagate only along tree edges. Each server reports failure once, so

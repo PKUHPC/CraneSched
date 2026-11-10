@@ -32,6 +32,7 @@
 #include "Protocol/Pmi1Codec.h"
 #include "Server/Server.h"
 #include "protos/Crane.grpc.pb.h"
+#include "protos/mpi/Pmi.grpc.pb.h"
 
 extern char** environ;
 
@@ -371,8 +372,85 @@ TEST(Pmi2Server, PartialFramesAndPmi1Negotiation) {
   auto appnum = Read(old->fd);
   EXPECT_NE(appnum.find("cmd=appnum"), std::string::npos);
   EXPECT_NE(appnum.find("appnum=-1"), std::string::npos);
+  Send(old->fd, "cmd=get key=missing\n");
+  auto missing = pmi::pmi1::Codec::ParseLine(Read(old->fd));
+  ASSERT_TRUE(missing);
+  EXPECT_EQ(missing->at("cmd"), "get_result");
+  EXPECT_EQ(missing->at("rc"), "1");
+  Send(old->fd, "cmd=unsupported\n");
+  auto unsupported = pmi::pmi1::Codec::ParseLine(Read(old->fd));
+  ASSERT_TRUE(unsupported);
+  EXPECT_EQ(unsupported->at("cmd"), "error");
+  EXPECT_EQ(unsupported->at("rc"), "14");
+  EXPECT_EQ(unsupported->at("errmsg"), "unsupported_command");
   Send(old->fd, "cmd=finalize\n");
   EXPECT_NE(Read(old->fd).find("cmd=finalize_ack"), std::string::npos);
+}
+
+TEST(Pmi2Server, IntegerAttributesPreserveDecodingAndErrorSemantics) {
+  pmi::Server server;
+  ASSERT_TRUE(server.Init(Config(), Step(), {}, 3s));
+  auto launch = server.PrepareTask(0);
+  ASSERT_TRUE(launch);
+  Clients clients;
+  ASSERT_TRUE(
+      clients.Start(std::move(*launch), "(vector,(0,1,1))", "int-attributes"));
+  clients.ExpectExit();
+}
+
+TEST(Pmi2Server, CompletedFenceRetryDoesNotExposeNextEpochPendingData) {
+  auto config = Config();
+  config.CranedIdToNodeHostname["node1"] = "localhost";
+  config.CranedIdToNodeAddr["node1"] = "127.0.0.1";
+  auto step = Step();
+  step.add_nodelist("node1");
+  step.add_task_node_list(1);
+  pmi::Server root, child;
+  ASSERT_TRUE(root.Init(config, step, {}, 3s));
+  config.CranedIdOfThisNode = "node1";
+  ASSERT_TRUE(child.Init(config, step, {}, 3s));
+  ASSERT_TRUE(root.ReceivePeers({{"node1", child.Port()}}));
+  auto launch = root.PrepareTask(0);
+  ASSERT_TRUE(launch);
+  Send(launch->fd, "cmd=init pmi_version=1 pmi_subversion=1\n");
+  EXPECT_NE(Read(launch->fd).find("rc=0"), std::string::npos);
+  auto stub = crane::grpc::mpi::pmi::Pmi::NewStub(grpc::CreateChannel(
+      "127.0.0.1:" + root.Port(), grpc::InsecureChannelCredentials()));
+
+  crane::grpc::mpi::pmi::FenceRequest request;
+  request.set_job_id(step.job_id());
+  request.set_step_id(step.step_id());
+  request.set_craned_id("node1");
+  request.set_pmi_version(1);
+  for (uint64_t epoch = 0; epoch < 3; ++epoch) {
+    auto value = std::to_string(epoch);
+    Send(launch->fd, "cmd=put key=local value=" + value + '\n');
+    EXPECT_NE(Read(launch->fd).find("rc=0"), std::string::npos);
+    Send(launch->fd, "cmd=barrier_in\n");
+    if (epoch > 0) {
+      // Retry the previous child contribution after the local client has
+      // submitted its next value, but before this epoch can complete.
+      grpc::ClientContext retry_context;
+      retry_context.set_deadline(std::chrono::system_clock::now() + 3s);
+      crane::grpc::mpi::pmi::FenceReply retry;
+      ASSERT_TRUE(stub->Fence(&retry_context, request, &retry).ok());
+      ASSERT_TRUE(retry.ok());
+      EXPECT_EQ(retry.kvs().at("local"), std::to_string(epoch - 1));
+      EXPECT_EQ(retry.kvs().at("child"), std::to_string(epoch - 1));
+    }
+    request.set_epoch(epoch);
+    (*request.mutable_kvs())["child"] = value;
+    grpc::ClientContext context;
+    context.set_deadline(std::chrono::system_clock::now() + 3s);
+    crane::grpc::mpi::pmi::FenceReply reply;
+    ASSERT_TRUE(stub->Fence(&context, request, &reply).ok());
+    ASSERT_TRUE(reply.ok());
+    EXPECT_EQ(reply.kvs().at("local"), value);
+    EXPECT_EQ(reply.kvs().at("child"), value);
+    EXPECT_NE(Read(launch->fd).find("cmd=barrier_out"), std::string::npos);
+  }
+  Send(launch->fd, "cmd=finalize\n");
+  EXPECT_NE(Read(launch->fd).find("cmd=finalize_ack"), std::string::npos);
 }
 
 TEST(Pmi2Server, IncompleteInitializationHasBoundedLifetime) {

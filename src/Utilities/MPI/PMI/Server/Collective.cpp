@@ -53,8 +53,7 @@ grpc::Status Server::Impl::Fence(
             "PMI protocol differs across step nodes"};
   if (m_completed_epoch_ == request->epoch()) {
     reply->set_ok(true);
-    reply->mutable_kvs()->insert(m_completed_kvs_.begin(),
-                                 m_completed_kvs_.end());
+    reply->mutable_kvs()->insert(m_visible_kvs_.begin(), m_visible_kvs_.end());
     return grpc::Status::OK;
   }
   if (request->epoch() != m_epoch_)
@@ -77,8 +76,7 @@ grpc::Status Server::Impl::Fence(
   if (m_failed_ || m_stopping_ || context->IsCancelled())
     return {grpc::StatusCode::CANCELLED, "step fence did not complete"};
   reply->set_ok(true);
-  reply->mutable_kvs()->insert(m_completed_kvs_.begin(),
-                               m_completed_kvs_.end());
+  reply->mutable_kvs()->insert(m_visible_kvs_.begin(), m_visible_kvs_.end());
   return grpc::Status::OK;
 }
 
@@ -148,7 +146,6 @@ void Server::Impl::FenceLoop_() {
     }
     // Publish the complete snapshot before releasing either local clients or
     // child RPCs. KVS_Put data is intentionally invisible until this point.
-    m_completed_kvs_ = m_visible_kvs_;
     m_completed_epoch_ = round;
     ++m_epoch_;
     m_pending_kvs_.clear();

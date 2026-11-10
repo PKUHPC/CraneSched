@@ -22,6 +22,7 @@
 #include <barrier>
 #include <thread>
 
+#include "Callbacks.h"
 #include "Collective/CollectiveManager.h"
 #include "Modex/ModexManager.h"
 #include "Server.h"
@@ -196,6 +197,24 @@ TEST(PmixModex, ServerRejectsInvalidRequestsWithoutCallingCompletion) {
   EXPECT_EQ(
       server.DModex(&process, nullptr, 0, Completion::Callback, &completion),
       PMIX_ERR_INIT);
+  EXPECT_EQ(completion.calls, 0);
+}
+TEST(PmixCallbacks, MissingServerRejectsWithoutTakingCallbackOwnership) {
+  ASSERT_EQ(pmix::PmixServer::GetInstance(), nullptr);
+  auto* module = pmix::PmixServerCallbacks::Module();
+  Completion completion;
+  auto operation_callback = [](pmix_status_t, void* context) {
+    ++static_cast<Completion*>(context)->calls;
+  };
+  EXPECT_EQ(module->abort(nullptr, nullptr, 1, "abort", nullptr, 0,
+                          operation_callback, &completion),
+            PMIX_ERR_INIT);
+  EXPECT_EQ(module->fence_nb(nullptr, 0, nullptr, 0, nullptr, 0,
+                             Completion::Callback, &completion),
+            PMIX_ERR_INIT);
+  EXPECT_EQ(module->direct_modex(nullptr, nullptr, 0, Completion::Callback,
+                                 &completion),
+            PMIX_ERR_INIT);
   EXPECT_EQ(completion.calls, 0);
 }
 TEST(PmixCollective, AbortPreventsLateMessagesFromRecreatingState) {
