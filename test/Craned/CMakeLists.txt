@@ -10,6 +10,7 @@ gtest_discover_tests(execution_groups_test)
 
 add_executable(container_identity_test
         ContainerIdentityTest.cpp
+        TaskEnvironmentTest.cpp
         ../../src/Craned/Supervisor/CranedClient.cpp
         ../../src/Craned/Supervisor/CforedClient.cpp
         ../../src/Craned/Supervisor/SupervisorServer.cpp)

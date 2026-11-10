@@ -339,7 +339,12 @@ EnvMap StepInstance::GetStepProcessEnv() const {
 
   if (IsPrimary() && (IsBatch() || m_step_to_supv_.has_batch_meta())) {
     env_map.insert_or_assign("ENVIRONMENT", "BATCH");
-    env_map.insert_or_assign("HOSTNAME", g_config.CranedIdOfThisNode);
+    if (auto hostname = util::os::GetHostname(); hostname) {
+      env_map.insert_or_assign("HOSTNAME", std::move(hostname.value()));
+    } else {
+      // Do not report the submit host or the scheduler's node alias.
+      env_map.erase("HOSTNAME");
+    }
   }
 
   int64_t time_limit_sec = m_step_to_supv_.time_limit().seconds();

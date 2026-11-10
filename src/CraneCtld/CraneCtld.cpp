@@ -232,6 +232,9 @@ void ParseConfig(int argc, char** argv) {
           YamlValueOr(config["CraneCtldForInternalListenPort"],
                       kCtldForInternalDefaultPort);
 
+      g_config.EnableSlurmCompatibleEnv =
+          YamlValueOr<bool>(config["EnableSlurmCompatibleEnv"], false);
+
       if (config["JobLifecycleHook"]) {
         const auto& hook_config = config["JobLifecycleHook"];
 

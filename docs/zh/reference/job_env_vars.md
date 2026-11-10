@@ -246,7 +246,41 @@ CraneSched 为执行单元设置任务数量和任务标识。`CRANE_STEP_ID`、
 
 启用 X11 的原生 `crun` 任务会将 `DISPLAY` 设置为配置的 X11 端点，将 `XAUTHORITY` 设置为生成的认证文件路径，覆盖传播的同名值。未启用 X11 时，这些变量仍可能通过普通环境传播存在。
 
+### TMPDIR
+
+原生任务在 TaskProlog 完成后，仅当 `TMPDIR` 缺失时补为 `/tmp`；已有值（包括空字符串）保持不变。
+此默认值逻辑不负责创建目录或校验目录权限。
+
+### ENVIRONMENT / HOSTNAME
+
+批处理 PRIMARY（含 `cbatch --pod` 的原生脚本）生成 `ENVIRONMENT=BATCH`，并将 `HOSTNAME` 设置为执行节点的
+操作系统 hostname，而非配置中的 Craned 节点别名或提交主机名。Task prolog 仍可覆盖或删除这两个变量；
+其他步骤不主动生成它们，但可能继承提交环境中的值。
+
 ## 钩子环境
+
+### 控制节点 Prolog/Epilog
+
+`CranectldProlog` 和 `CranectldEpilog` 以控制服务的有效 UID/GID 运行，使用从内部作业记录单独构造的环境。
+它们不继承提交环境或控制服务的进程环境；`PATH`、`HOME` 和用户自定义变量不会自动传入。
+脚本需要的搜索路径由管理员在脚本中设置。提交环境中的同名 `CRANE_*`、`SLURM_*` 也不能覆盖这些字段。
+
+| 原生变量 | 来源与语义 |
+| --- | --- |
+| `CRANE_CLUSTER_NAME`、`CRANE_JOB_ID` | 配置的集群名、控制器分配的作业 ID |
+| `CRANE_JOB_UID`、`CRANE_JOB_USER` | 作业 UID、内部作业记录中的用户名；无用户名时省略名字字段 |
+| `CRANE_JOB_GID`、`CRANE_JOB_GROUP` | 作业的有效执行 GID、该 GID 对应的组名；组查询失败时保留 GID，省略组名 |
+| `CRANE_JOB_NAME`、`CRANE_JOB_ACCOUNT`、`CRANE_JOB_PARTITION`、`CRANE_JOB_QOS` | 内部作业记录中的名称、账户、分区、QoS |
+| `CRANE_JOB_NODELIST`、`CRANE_JOB_NUM_NODES` | 已分配节点列表及其数量；列表以分号分隔 |
+| `CRANE_JOB_WORK_DIR`、`CRANE_WORKING_DIR` | 作业工作目录，两个变量值相同 |
+| `CRANE_ARRAY_JOB_ID`、`CRANE_ARRAY_TASK_ID` | 已物化数组子任务的父 ID 和索引；普通作业与数组父作业不设置 |
+
+开启 `EnableSlurmCompatibleEnv` 后，除 `CRANE_WORKING_DIR` 外，上表字段同时提供 `SLURM_` 同后缀变量，
+另提供 `SLURM_JOBID`。`SLURM_JOB_NODELIST` 使用逗号分隔。Prolog/Epilog 的字段集合相同，
+不包含退出码等结束信息。
+变量中的作业名称、路径等仍是数据，管理员脚本应正常引用与校验，不能将其当作命令执行。
+
+### 计算节点与任务钩子
 
 | 变量 | CraneSched 设置的位置 |
 | --- | --- |
@@ -287,7 +321,7 @@ Task prolog 使用准备好的任务环境，并可通过输出 `export name=val
 
 在集群 `config.yaml` 顶层设置 `EnableSlurmCompatibleEnv: true` 后，CraneSched 会额外生成下列变量；默认值为 `false`。参见[集群配置](../deployment/configuration/config.md)。这些变量用于脚本和启动器兼容，不表示所有 Slurm 命令选项都已实现。
 
-下表描述开关启用后的自动生成行为。关闭开关不会清除用户传播的 `SLURM_*` 变量，原生 PMIx 也仍会生成前述四个变量。
+下表描述计算节点任务在开关启用后的自动生成行为。关闭开关不会清除用户传播的 `SLURM_*` 变量，原生 PMIx 也仍会生成前述四个变量。控制节点钩子使用[控制节点 Prolog/Epilog](#控制节点-prologepilog)中单独列出的字段集合。
 
 ### 作业信息
 
@@ -296,6 +330,7 @@ Task prolog 使用准备好的任务环境，并可通过输出 `export name=val
 | `SLURM_JOB_ID`、`SLURM_JOBID` | 作业 ID |
 | `SLURM_JOB_NAME`、`SLURM_JOB_ACCOUNT`、`SLURM_JOB_PARTITION`、`SLURM_JOB_QOS` | 作业名称、账户、分区及 QoS |
 | `SLURM_JOB_UID`、`SLURM_JOB_GID` | 作业用户 UID 和有效 GID |
+| `SLURM_JOB_USER` | 初始化作业步环境时，按执行 UID 查询到的用户名；账户查询成功时生成 |
 | `SLURM_CLUSTER_NAME`、`SLURMD_NODENAME` | 集群名和当前 Craned 节点名 |
 | `SLURM_JOB_NODELIST`、`SLURM_NODELIST` | 完整作业分配的节点名，逗号分隔，不使用 `node[01-03]` 压缩格式 |
 | `SLURM_JOB_NUM_NODES`、`SLURM_JOB_NODES` | 作业分配的节点数量 |
@@ -321,6 +356,7 @@ Task prolog 使用准备好的任务环境，并可通过输出 `export name=val
 | `SLURM_PROCID`、`SLURM_LOCALID` | 任务进程及 task epilog 中的全局任务编号、节点内任务编号，从 0 开始 |
 | `SLURM_STEP_PROCID`、`SLURM_STEP_LOCALID` | `crun` 作业步任务进程及 task epilog 中对应的任务编号；PMIx 任务按 rank 设置 |
 | `SLURM_GTIDS` | 当前节点承载的全局任务编号，逗号分隔 |
+| `SLURM_TASK_PID` | 原生任务子进程 PID，在 TaskProlog 前设置；容器任务和重建的 TaskEpilog 环境不生成此字段 |
 | `SLURM_CPUS_ON_NODE`、`SLURM_CPUS_PER_TASK` | 当前执行单元在本节点的 CPU 分配量，以及每任务请求的 CPU 数 |
 | `SLURM_MEM_PER_NODE` | 当前执行单元在本节点的内存，按 1024² 字节换算的整数，不带 `M` 后缀 |
 | `SLURM_GPUS_ON_NODE` | 本节点上非零的作业 GPU 数；作业步 GPU 数大于零时会替换该值。零 GPU 的作业步不会清除继承值，因此不能仅凭此变量判断该步已分配 GPU。 |

@@ -246,6 +246,7 @@ struct Config {
   JobLifecycleHookConfig JobLifecycleHook;
 
   bool CompressedRpc{};
+  bool EnableSlurmCompatibleEnv{false};
 
   std::string CraneClusterName;
   uint32_t ConfigCrcVal;
@@ -978,6 +979,9 @@ struct JobInCtld {
   };
 
   std::optional<ArrayTaskIdentity> GetArrayTaskIdentity() const;
+
+  // Controller hooks run as the service user with job metadata only.
+  RunPrologEpilogArgs GetControllerHookArgs(bool is_epilog) const;
 
  private:
   /* ------------- [2] -------------

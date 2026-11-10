@@ -5773,17 +5773,7 @@ void JobScheduler::StartCraneCtldPrologThread(JobInCtld* job) {
     // TODO: cbatch job must be requeue
     job->DaemonStep()->SetCtldPrologPending(true);
     const job_id_t job_id = job->JobId();
-    RunPrologEpilogArgs run_prolog_args{
-        .scripts = g_config.JobLifecycleHook.CranectldPrologs,
-        .envs = job->env,
-        .timeout_sec = g_config.JobLifecycleHook.PrologTimeout,
-        .run_uid = getuid(),
-        .run_gid = getgid(),
-        .output_size = g_config.JobLifecycleHook.MaxOutputSize};
-    if (g_config.JobLifecycleHook.PrologEpilogTimeout > 0) {
-      run_prolog_args.timeout_sec =
-          g_config.JobLifecycleHook.PrologEpilogTimeout;
-    }
+    auto run_prolog_args = job->GetControllerHookArgs(false);
     CRANE_TRACE("[Job #{}]: Running CraneCtldProlog as UID {} with timeout {}s",
                 job_id, run_prolog_args.run_uid, run_prolog_args.timeout_sec);
     m_ctld_hook_executor_->Submit(
@@ -6283,17 +6273,7 @@ void JobScheduler::CleanJobStatusChangeQueueCb_() {
 
           if (!g_config.JobLifecycleHook.CranectldEpilogs.empty()) {
             const job_id_t job_id = job->JobId();
-            RunPrologEpilogArgs run_epilog_ctld_args{
-                .scripts = g_config.JobLifecycleHook.CranectldEpilogs,
-                .envs = job->env,
-                .timeout_sec = g_config.JobLifecycleHook.EpilogTimeout,
-                .run_uid = getuid(),
-                .run_gid = getgid(),
-                .output_size = g_config.JobLifecycleHook.MaxOutputSize};
-            if (g_config.JobLifecycleHook.PrologEpilogTimeout > 0) {
-              run_epilog_ctld_args.timeout_sec =
-                  g_config.JobLifecycleHook.PrologEpilogTimeout;
-            }
+            auto run_epilog_ctld_args = job->GetControllerHookArgs(true);
             CRANE_TRACE("Running CraneCtldEpilog as UID {} with timeout {}s",
                         run_epilog_ctld_args.run_uid,
                         run_epilog_ctld_args.timeout_sec);

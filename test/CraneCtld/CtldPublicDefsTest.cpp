@@ -16,14 +16,196 @@
  * along with this program.  If not, see <https://www.gnu.org/licenses/>.
  */
 
+#include <grp.h>
 #include <gtest/gtest.h>
 
+#include <cstdlib>
 #include <filesystem>
 #include <list>
+#include <optional>
+#include <sstream>
 #include <vector>
 
 #include "CtldPublicDefs.h"
 #include "Database/EmbeddedDbClient.h"
+#include "crane/PrologEpilogExecutor.h"
+
+namespace {
+
+class ControllerHookTest : public ::testing::Test {
+ protected:
+  void SetUp() override {
+    original_hooks_ = g_config.JobLifecycleHook;
+    original_slurm_ = g_config.EnableSlurmCompatibleEnv;
+    original_cluster_ = g_config.CraneClusterName;
+    g_config.EnableSlurmCompatibleEnv = false;
+    g_config.CraneClusterName = "test-cluster";
+    g_config.JobLifecycleHook = {.CranectldPrologs = {"/site/prolog"},
+                                 .CranectldEpilogs = {"/site/epilog"},
+                                 .PrologTimeout = 5,
+                                 .EpilogTimeout = 7,
+                                 .PrologEpilogTimeout = 0,
+                                 .MaxOutputSize = 8192};
+
+    crane::grpc::JobToCtld request;
+    request.set_uid(getuid());
+    request.add_gids(getgid());
+    request.set_name("job name with spaces");
+    request.set_account("research");
+    request.set_partition_name("cpu");
+    request.set_qos("normal");
+    request.set_cwd("/jobs/work dir");
+    request.set_node_num_min(4);
+    request.set_node_num_max(8);
+    for (const auto* key :
+         {"BASH_ENV", "LD_PRELOAD", "PATH", "HOME", "USER", "PRIVATE_JOB_VALUE",
+          "CRANE_JOB_ID", "CRANE_JOB_UID", "CRANE_JOB_USER", "CRANE_JOB_GROUP",
+          "SLURM_JOB_ID", "SLURM_JOB_USER", "CRANE_UNRECOGNIZED"})
+      (*request.mutable_env())[key] = "submitted-value";
+    job_.SetFieldsByJobToCtld(request);
+    job_.SetJobId(42);
+    job_.SetCranedIds({"node-b", "node-a"});
+  }
+
+  void TearDown() override {
+    g_config.JobLifecycleHook = std::move(original_hooks_);
+    g_config.EnableSlurmCompatibleEnv = original_slurm_;
+    g_config.CraneClusterName = std::move(original_cluster_);
+  }
+
+  Ctld::JobInCtld job_;
+
+ private:
+  decltype(g_config.JobLifecycleHook) original_hooks_;
+  bool original_slurm_{};
+  std::string original_cluster_;
+};
+
+TEST_F(ControllerHookTest, BuildsTrustedMetadataAndOptionalSlurmAliases) {
+  const auto submitted = job_.env;
+  for (bool slurm : {false, true}) {
+    g_config.EnableSlurmCompatibleEnv = slurm;
+    for (bool epilog : {false, true}) {
+      const auto args = job_.GetControllerHookArgs(epilog);
+      const auto& env = args.envs;
+      EXPECT_EQ(args.run_uid, geteuid());
+      EXPECT_EQ(args.run_gid, getegid());
+      EXPECT_EQ(env.at("CRANE_JOB_ID"), "42");
+      EXPECT_EQ(env.at("CRANE_JOB_UID"), std::to_string(job_.uid));
+      EXPECT_EQ(env.at("CRANE_JOB_NAME"), "job name with spaces");
+      EXPECT_EQ(env.at("CRANE_JOB_NUM_NODES"), "2");
+      EXPECT_EQ(env.at("CRANE_JOB_NODELIST"), "node-b;node-a");
+      EXPECT_EQ(env.at("CRANE_JOB_WORK_DIR"), "/jobs/work dir");
+      for (const auto& [key, value] : submitted)
+        EXPECT_TRUE(!env.contains(key) || env.at(key) != value) << key;
+      if (slurm) {
+        EXPECT_EQ(env.at("SLURM_JOB_ID"), "42");
+        EXPECT_EQ(env.at("SLURM_JOB_NODELIST"), "node-b,node-a");
+      } else {
+        for (const auto& [key, value] : env)
+          EXPECT_FALSE(key.starts_with("SLURM_")) << key;
+      }
+    }
+  }
+  EXPECT_EQ(job_.env, submitted);
+}
+
+TEST_F(ControllerHookTest, UsesExecutionGroupRatherThanPasswdGroup) {
+  PasswordEntry pwd(getuid());
+  ASSERT_TRUE(pwd.Valid());
+  std::optional<std::pair<gid_t, std::string>> execution_group;
+  setgrent();
+  while (const auto* group = getgrent()) {
+    if (group->gr_gid != pwd.Gid() && group->gr_name && *group->gr_name) {
+      execution_group = {group->gr_gid, group->gr_name};
+      break;
+    }
+  }
+  endgrent();
+  if (!execution_group) GTEST_SKIP() << "No alternate group in NSS";
+
+  const auto* resolved = getgrgid(execution_group->first);
+  if (!resolved || !resolved->gr_name)
+    GTEST_SKIP() << "Alternate group could not be resolved by GID";
+  execution_group->second = resolved->gr_name;
+  job_.gid = execution_group->first;
+  g_config.EnableSlurmCompatibleEnv = true;
+  const auto env = job_.GetControllerHookArgs(false).envs;
+  EXPECT_EQ(env.at("CRANE_JOB_GID"), std::to_string(execution_group->first));
+  EXPECT_EQ(env.at("CRANE_JOB_GROUP"), execution_group->second);
+  EXPECT_EQ(env.at("SLURM_JOB_GROUP"), execution_group->second);
+}
+
+TEST_F(ControllerHookTest, EmitsArrayIdentityOnlyForMaterializedChildren) {
+  g_config.EnableSlurmCompatibleEnv = true;
+  job_.MutableJobToCtld()->mutable_array_spec()->set_end(9);
+  EXPECT_FALSE(
+      job_.GetControllerHookArgs(false).envs.contains("CRANE_ARRAY_JOB_ID"));
+  job_.SetArrayTaskIdentity(40, 0);
+  const auto env = job_.GetControllerHookArgs(false).envs;
+  EXPECT_EQ(env.at("CRANE_ARRAY_JOB_ID"), "40");
+  EXPECT_EQ(env.at("SLURM_ARRAY_JOB_ID"), "40");
+  EXPECT_EQ(env.at("CRANE_ARRAY_TASK_ID"), "0");
+  EXPECT_EQ(env.at("SLURM_ARRAY_TASK_ID"), "0");
+}
+
+TEST_F(ControllerHookTest, ExecutesHooksWithServiceIdentityAndIsolatedEnv) {
+  // Use installed executables rather than a script in a potentially noexec
+  // /tmp.
+  g_config.JobLifecycleHook.CranectldPrologs = {"/usr/bin/id", "/usr/bin/env"};
+  g_config.JobLifecycleHook.CranectldEpilogs = {"/usr/bin/id", "/usr/bin/env"};
+  job_.uid = geteuid() == 0 ? 1234 : 0;
+  job_.gid = getegid() == 0 ? 1234 : 0;
+
+  constexpr auto kSentinel = "CRANE_TEST_CONTROLLER_ENV_SENTINEL";
+  const char* previous = getenv(kSentinel);
+  const std::optional<std::string> previous_value =
+      previous ? std::optional<std::string>(previous) : std::nullopt;
+  struct RestoreEnvironment {
+    const char* key;
+    const std::optional<std::string>& value;
+    ~RestoreEnvironment() {
+      if (value)
+        setenv(key, value->c_str(), 1);
+      else
+        unsetenv(key);
+    }
+  } restore{kSentinel, previous_value};
+  ASSERT_EQ(setenv(kSentinel, "controller-private-value", 1), 0);
+
+  util::os::PrologEpilogExecutor executor;
+  for (bool epilog : {false, true}) {
+    std::promise<util::os::PrologEpilogResult> promise;
+    auto result = promise.get_future();
+    executor.Submit(job_.GetControllerHookArgs(epilog),
+                    [&promise](util::os::PrologEpilogResult value) {
+                      promise.set_value(std::move(value));
+                    });
+    const auto ready = result.wait_for(std::chrono::seconds(10));
+    if (ready != std::future_status::ready) executor.Shutdown();
+    ASSERT_EQ(ready, std::future_status::ready);
+    const auto actual = result.get();
+    ASSERT_TRUE(actual.ok) << actual.output;
+    std::istringstream identity(
+        actual.output.substr(0, actual.output.find('\n')));
+    std::string uid_field, gid_field;
+    identity >> uid_field >> gid_field;
+    EXPECT_EQ(uid_field.substr(0, uid_field.find('(')),
+              "uid=" + std::to_string(geteuid()));
+    EXPECT_EQ(gid_field.substr(0, gid_field.find('(')),
+              "gid=" + std::to_string(getegid()));
+    EXPECT_NE(actual.output.find("CRANE_JOB_ID=42\n"), std::string::npos);
+    EXPECT_NE(
+        actual.output.find("CRANE_JOB_UID=" + std::to_string(job_.uid) + "\n"),
+        std::string::npos);
+    EXPECT_EQ(actual.output.find("submitted-value"), std::string::npos);
+    EXPECT_EQ(actual.output.find(kSentinel), std::string::npos);
+    EXPECT_EQ(actual.output.find("controller-private-value"),
+              std::string::npos);
+  }
+}
+
+}  // namespace
 
 TEST(AllocationLifecycle, CommonStepCleanupDoesNotEndAllocation) {
   Ctld::JobInCtld job;
@@ -204,8 +386,7 @@ TEST(CtldPublicDefs, JobInfoDisplayOrderIsDeterministic) {
   EXPECT_EQ(jobs[2].job_id(), 2);
   EXPECT_EQ(jobs[3].job_id(), 1);
 
-  std::priority_queue<crane::grpc::JobInfo,
-                      std::vector<crane::grpc::JobInfo>,
+  std::priority_queue<crane::grpc::JobInfo, std::vector<crane::grpc::JobInfo>,
                       Ctld::JobInfoDisplayOrder>
       top_jobs;
   for (const auto& job : unsorted_jobs) {

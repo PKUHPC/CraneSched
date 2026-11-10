@@ -214,13 +214,14 @@ void PrologEpilogExecutor::StartNextScript_(uint64_t run_id) {
       }
     }
 
-    if (setgid(run.args.run_gid) != 0) {
-      const char msg[] = "[Subprocess] setgid failed\n";
+    // Shells may reset privileges when real and effective IDs differ.
+    if (setresgid(run.args.run_gid, run.args.run_gid, run.args.run_gid) != 0) {
+      const char msg[] = "[Subprocess] setresgid failed\n";
       write(STDERR_FILENO, msg, sizeof(msg) - 1);
       _exit(EXIT_FAILURE);
     }
-    if (setuid(run.args.run_uid) != 0) {
-      const char msg[] = "[Subprocess] setuid failed\n";
+    if (setresuid(run.args.run_uid, run.args.run_uid, run.args.run_uid) != 0) {
+      const char msg[] = "[Subprocess] setresuid failed\n";
       write(STDERR_FILENO, msg, sizeof(msg) - 1);
       _exit(EXIT_FAILURE);
     }

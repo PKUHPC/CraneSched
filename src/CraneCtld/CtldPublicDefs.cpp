@@ -18,6 +18,10 @@
 
 #include "CtldPublicDefs.h"
 
+#include <grp.h>
+
+#include <cerrno>
+
 #include "Array.h"
 #include "Database/EmbeddedDbClient.h"
 #include "JobScheduler.h"
@@ -2006,6 +2010,64 @@ std::optional<JobInCtld::ArrayTaskIdentity> JobInCtld::GetArrayTaskIdentity()
   }
   return ArrayTaskIdentity{runtime_attr.array_task().array_job_id(),
                            runtime_attr.array_task().task_id()};
+}
+
+RunPrologEpilogArgs JobInCtld::GetControllerHookArgs(bool is_epilog) const {
+  // Never copy the submitted environment into a service-account process.
+  // Even variables named CRANE_* or SLURM_* can be supplied by a job user.
+  std::unordered_map<std::string, std::string> hook_env;
+  auto add = [&](std::string_view suffix, std::string value) {
+    hook_env.emplace(fmt::format("CRANE_{}", suffix), value);
+    if (g_config.EnableSlurmCompatibleEnv)
+      hook_env.emplace(fmt::format("SLURM_{}", suffix), std::move(value));
+  };
+
+  add("CLUSTER_NAME", g_config.CraneClusterName);
+  add("JOB_ID", std::to_string(job_id));
+  add("JOB_UID", std::to_string(uid));
+  add("JOB_GID", std::to_string(gid));
+  if (!username.empty()) add("JOB_USER", username);
+
+  // The execution GID can differ from the user's passwd primary group.
+  const long group_buf_size = sysconf(_SC_GETGR_R_SIZE_MAX);
+  std::vector<char> group_buf(group_buf_size > 0 ? group_buf_size : 16384);
+  struct group group_entry{};
+  struct group* group_result = nullptr;
+  int rc;
+  while ((rc = getgrgid_r(gid, &group_entry, group_buf.data(), group_buf.size(),
+                          &group_result)) == ERANGE)
+    group_buf.resize(group_buf.size() * 2);
+  if (rc == 0 && group_result != nullptr)
+    add("JOB_GROUP", group_result->gr_name);
+
+  add("JOB_NAME", name);
+  add("JOB_ACCOUNT", account);
+  add("JOB_PARTITION", partition_id);
+  add("JOB_QOS", qos);
+  add("JOB_NUM_NODES", std::to_string(craned_ids.size()));
+  hook_env.emplace("CRANE_JOB_NODELIST", absl::StrJoin(craned_ids, ";"));
+  add("JOB_WORK_DIR", cwd);
+  hook_env.emplace("CRANE_WORKING_DIR", cwd);
+  if (g_config.EnableSlurmCompatibleEnv) {
+    hook_env.emplace("SLURM_JOBID", std::to_string(job_id));
+    hook_env.emplace("SLURM_JOB_NODELIST", absl::StrJoin(craned_ids, ","));
+  }
+  if (auto identity = GetArrayTaskIdentity()) {
+    add("ARRAY_JOB_ID", std::to_string(identity->array_job_id));
+    add("ARRAY_TASK_ID", std::to_string(identity->task_id));
+  }
+
+  const auto& hooks = g_config.JobLifecycleHook;
+  return RunPrologEpilogArgs{
+      .scripts = is_epilog ? hooks.CranectldEpilogs : hooks.CranectldPrologs,
+      .envs = std::move(hook_env),
+      .timeout_sec =
+          hooks.PrologEpilogTimeout > 0
+              ? hooks.PrologEpilogTimeout
+              : (is_epilog ? hooks.EpilogTimeout : hooks.PrologTimeout),
+      .run_uid = geteuid(),
+      .run_gid = getegid(),
+      .output_size = hooks.MaxOutputSize};
 }
 
 void JobInCtld::SetCachedPriority(double val) {

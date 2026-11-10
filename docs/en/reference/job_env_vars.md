@@ -246,7 +246,42 @@ The variables are selected by the device's configured `EnvInjector` and generate
 
 For native `crun` tasks with X11 enabled, CraneSched sets `DISPLAY` to the configured X11 endpoint and `XAUTHORITY` to the generated authorization file, replacing any propagated values. Without X11, these names may still be present through ordinary environment propagation.
 
+### TMPDIR
+
+For native tasks, CraneSched fills a missing `TMPDIR` with `/tmp` after TaskProlog completes. Existing values, including
+an empty string, are preserved. This fallback does not create the directory or validate its permissions.
+
+### ENVIRONMENT / HOSTNAME
+
+Batch PRIMARY steps (including the native script for `cbatch --pod`) generate `ENVIRONMENT=BATCH` and set `HOSTNAME` to
+the execution node's operating-system hostname, rather than its configured Craned alias or the submission hostname.
+Task prologs may still replace or remove either variable. Other steps do not generate them but may inherit submitted values.
+
 ## Hook Environment
+
+### Controller Prolog/Epilog
+
+`CranectldProlog` and `CranectldEpilog` run with the controller service's effective UID/GID and a separate environment
+built from internal job records. They inherit neither the submission environment nor the controller's process environment;
+`PATH`, `HOME`, and custom submission variables are not passed automatically. Administrators set any required search path
+in the script. Submitted `CRANE_*` and `SLURM_*` values cannot override the fields below.
+
+| Native variable | Source and meaning |
+| --- | --- |
+| `CRANE_CLUSTER_NAME`, `CRANE_JOB_ID` | Configured cluster name and controller-assigned job ID |
+| `CRANE_JOB_UID`, `CRANE_JOB_USER` | Job UID and username from the internal job record; omit the name if unavailable |
+| `CRANE_JOB_GID`, `CRANE_JOB_GROUP` | Effective execution GID and its resolved group name; retain the GID but omit the name if lookup fails |
+| `CRANE_JOB_NAME`, `CRANE_JOB_ACCOUNT`, `CRANE_JOB_PARTITION`, `CRANE_JOB_QOS` | Name, account, partition, and QoS from the internal job record |
+| `CRANE_JOB_NODELIST`, `CRANE_JOB_NUM_NODES` | Allocated node list and its size; node names are semicolon-separated |
+| `CRANE_JOB_WORK_DIR`, `CRANE_WORKING_DIR` | Job working directory; both variables have the same value |
+| `CRANE_ARRAY_JOB_ID`, `CRANE_ARRAY_TASK_ID` | Parent ID and index of a materialized array child; absent for ordinary jobs and array parents |
+
+With `EnableSlurmCompatibleEnv` enabled, each field except `CRANE_WORKING_DIR` also has a corresponding `SLURM_` alias,
+plus `SLURM_JOBID`. `SLURM_JOB_NODELIST` is comma-separated. Both hooks receive the same field set, without completion
+information such as exit codes. Job names and paths remain data; scripts must quote and validate them appropriately rather
+than interpret them as commands.
+
+### Compute-node and Task Hooks
 
 | Variable | Where CraneSched supplies it |
 | --- | --- |
@@ -287,7 +322,7 @@ These PMIx additions replace same-name values in the prepared native task enviro
 
 Set the top-level `EnableSlurmCompatibleEnv: true` in the cluster's `config.yaml` to generate the following additional variables; the default is `false`. See [Cluster Configuration](../deployment/configuration/config.md). These variables support scripts and launchers and do not imply support for every Slurm command option.
 
-The tables describe automatic generation with the switch enabled. Disabling it does not remove user-propagated `SLURM_*` variables, and native PMIx still supplies the four-variable subset described above.
+These tables describe compute-node task environments with the switch enabled. Disabling it does not remove user-propagated `SLURM_*` variables, and native PMIx still supplies the four-variable subset described above. Controller hooks use the separate field set documented under [Controller Prolog/Epilog](#controller-prologepilog).
 
 ### Job Information
 
@@ -296,6 +331,7 @@ The tables describe automatic generation with the switch enabled. Disabling it d
 | `SLURM_JOB_ID`, `SLURM_JOBID` | Job ID |
 | `SLURM_JOB_NAME`, `SLURM_JOB_ACCOUNT`, `SLURM_JOB_PARTITION`, `SLURM_JOB_QOS` | Job name, account, partition, and QoS |
 | `SLURM_JOB_UID`, `SLURM_JOB_GID` | Job user's UID and effective GID |
+| `SLURM_JOB_USER` | Username resolved from the execution UID during step environment initialization; generated when account lookup succeeds |
 | `SLURM_CLUSTER_NAME`, `SLURMD_NODENAME` | Cluster name and current Craned node name |
 | `SLURM_JOB_NODELIST`, `SLURM_NODELIST` | Full job allocation's node names, comma-separated, without compression such as `node[01-03]` |
 | `SLURM_JOB_NUM_NODES`, `SLURM_JOB_NODES` | Number of nodes in the job allocation |
@@ -321,6 +357,7 @@ The tables describe automatic generation with the switch enabled. Disabling it d
 | `SLURM_PROCID`, `SLURM_LOCALID` | Zero-based global and node-local task IDs in task processes and task epilogs |
 | `SLURM_STEP_PROCID`, `SLURM_STEP_LOCALID` | Corresponding task IDs in `crun` step processes and task epilogs; PMIx tasks use their ranks |
 | `SLURM_GTIDS` | Comma-separated global task IDs hosted on this node |
+| `SLURM_TASK_PID` | Native task child PID, set before TaskProlog; not generated for container tasks or rebuilt TaskEpilog environments |
 | `SLURM_CPUS_ON_NODE`, `SLURM_CPUS_PER_TASK` | Current execution unit's CPU allocation on this node, and requested CPUs per task |
 | `SLURM_MEM_PER_NODE` | Current execution unit's memory on this node, as an integer in units of 1024² bytes without an `M` suffix |
 | `SLURM_GPUS_ON_NODE` | Positive job GPU count on this node, replaced by a positive step GPU count. A zero-GPU step does not clear an inherited value, so this variable alone is not proof of a step GPU allocation. |
