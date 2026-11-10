@@ -32,19 +32,31 @@ std::optional<Fields> Codec::ParseLine(std::string_view line) {
   while (!line.empty()) {
     while (!line.empty() && line.front() == ' ') line.remove_prefix(1);
     if (line.empty()) break;
-    auto end = line.find(' ');
-    auto token = line.substr(0, end);
-    auto equal = token.find('=');
-    if (equal == std::string_view::npos || equal == 0 || equal >= kMaxKey ||
-        token.size() - equal - 1 >= kMaxValue)
+    auto equal = line.find('=');
+    auto key = line.substr(0, equal);
+    if (equal == std::string_view::npos || key.empty() ||
+        key.size() >= kMaxKey ||
+        key.find_first_of(" \t\r") != std::string_view::npos)
       return std::nullopt;
-    if (!fields
-             .emplace(std::string(token.substr(0, equal)),
-                      std::string(token.substr(equal + 1)))
-             .second)
+    line.remove_prefix(equal + 1);
+    std::string value;
+    size_t end = 0;
+    // PMI KVS puts carry value last. Open MPI s1 uses literal spaces for
+    // base64 padding; retain the remainder instead of splitting that payload.
+    // MPICH wire clients also accept backslash-escaped spaces in replies.
+    while (end < line.size() && (key == "value" || line[end] != ' ')) {
+      char ch = line[end++];
+      if (ch == '\\') {
+        if (end == line.size()) return std::nullopt;
+        ch = line[end++];
+      }
+      if (ch == '\t' || ch == '\r' || value.size() + 1 >= kMaxValue)
+        return std::nullopt;
+      value.push_back(ch);
+    }
+    if (!fields.emplace(std::string(key), std::move(value)).second)
       return std::nullopt;
-    if (end == std::string_view::npos) break;
-    line.remove_prefix(end + 1);
+    line.remove_prefix(end);
   }
   if (!fields.contains("cmd")) return std::nullopt;
   return fields;
@@ -63,13 +75,16 @@ std::optional<std::string> Codec::EncodeLine(std::string_view command,
     if (key.empty() || key.size() >= kMaxKey || value.size() >= kMaxValue ||
         key.find_first_of(" =\t\r\n") != std::string::npos ||
         key.find('\0') != std::string::npos ||
-        value.find_first_of(" \t\r\n") != std::string::npos ||
+        value.find_first_of("\t\r\n") != std::string::npos ||
         value.find('\0') != std::string::npos)
       return std::nullopt;
     line.push_back(' ');
     line += key;
     line.push_back('=');
-    line += value;
+    for (char ch : value) {
+      if (ch == ' ' || ch == '\\') line.push_back('\\');
+      line.push_back(ch);
+    }
   }
   line.push_back('\n');
   if (line.size() > kMaxLine) return std::nullopt;
