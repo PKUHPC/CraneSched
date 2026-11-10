@@ -131,8 +131,13 @@ struct Config {
   CraneCtldConf CtldConf;
 
   struct Node {
+    static constexpr std::size_t kUnranked =
+        std::numeric_limits<std::size_t>::max();
+
     std::string node_hostname;
     std::string node_addr;
+    // Derived from NodeOrder before startup; read-only during operation.
+    std::size_t node_order_rank{kUnranked};
     uint32_t cpu;
     uint64_t memory_bytes;
     DedicatedResourceInNode dedicated_resource;
@@ -274,6 +279,14 @@ struct Config {
   std::string Hostname;
   std::unordered_map<std::string, std::shared_ptr<Node>> Nodes;
   std::vector<std::string> NodeOrder;
+
+  // Rebuild before scheduler startup/recovery, including after node overrides.
+  void BuildNodeOrderRanks() {
+    for (const auto& [_, node] : Nodes) node->node_order_rank = Node::kUnranked;
+    for (std::size_t rank = 0; rank < NodeOrder.size(); ++rank)
+      Nodes.at(NodeOrder[rank])->node_order_rank = rank;
+  }
+
   std::vector<std::string> GresOrder;
   // Maps NodeName and NodeHostname to the canonical CranedId used by the
   // scheduler.
@@ -368,6 +381,29 @@ inline void CanonicalizeCranedIdList(std::list<CranedId>* craned_ids) {
       ++it;
     }
   }
+}
+
+// Every multi-node operation must acquire CranedMeta mutexes in this order.
+// The source lists may come from unordered partition metadata or from a
+// caller-supplied hostlist, so their iteration order is not a lock-order
+// contract. NodeOrder is populated from the Nodes configuration declaration;
+// IDs outside that declaration sort after configured IDs lexicographically.
+inline void OrderCranedIdListByNodeOrder(std::list<CranedId>* craned_ids) {
+  if (craned_ids->size() < 2) return;
+
+  const auto& nodes = g_config.Nodes;
+  const auto rank = [&nodes](const CranedId& craned_id) {
+    auto it = nodes.find(craned_id);
+    return it == nodes.end() ? Config::Node::kUnranked
+                             : it->second->node_order_rank;
+  };
+
+  craned_ids->sort([&rank](const CranedId& left, const CranedId& right) {
+    const auto left_rank = rank(left);
+    const auto right_rank = rank(right);
+    if (left_rank != right_rank) return left_rank < right_rank;
+    return left < right;
+  });
 }
 
 struct InteractiveMeta {

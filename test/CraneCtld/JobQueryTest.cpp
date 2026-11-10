@@ -4,6 +4,7 @@
 
 #include <gtest/gtest.h>
 
+#include <list>
 #include <set>
 #include <string>
 
@@ -691,4 +692,55 @@ TEST_F(NodeQueryTest, AllAndSingleReservationQueriesExposeActualAllocation) {
   EXPECT_EQ(info.denied_users(0), "excluded");
   EXPECT_EQ(nodes_.QueryResvInfo("absent").reservation_info_list_size(), 0);
 }
+
+class CranedIdOrderTest : public ::testing::Test {
+ protected:
+  void SetUp() override {
+    original_config_ = std::move(g_config);
+    g_config = Ctld::Config{};
+    for (const auto& id : {"n1", "n2", "n3", "n4"})
+      g_config.Nodes.emplace(id, std::make_shared<Ctld::Config::Node>());
+  }
+
+  void TearDown() override { g_config = std::move(original_config_); }
+
+  Ctld::Config original_config_;
+};
+
+TEST_F(CranedIdOrderTest, UsesConfiguredOrderForSubsetsAndUnknownIds) {
+  g_config.NodeOrder = {"n2", "n1", "n3", "n4"};
+  g_config.BuildNodeOrderRanks();
+
+  std::list<CranedId> ids{"z-unknown", "n4", "n1", "a-unknown", "n2"};
+  Ctld::OrderCranedIdListByNodeOrder(&ids);
+
+  EXPECT_EQ(ids,
+            (std::list<CranedId>{"n2", "n1", "n4", "a-unknown", "z-unknown"}));
+}
+
+TEST_F(CranedIdOrderTest, RebuildingRanksUsesOnlyTheNewOrder) {
+  g_config.NodeOrder = {"n3", "n1", "n2"};
+  g_config.BuildNodeOrderRanks();
+  std::list<CranedId> ids{"n2", "n1", "n3"};
+  Ctld::OrderCranedIdListByNodeOrder(&ids);
+  EXPECT_EQ(ids, (std::list<CranedId>{"n3", "n1", "n2"}));
+
+  // Configuration entries may replace a node without changing its position.
+  g_config.Nodes.at("n2") = std::make_shared<Ctld::Config::Node>();
+  g_config.NodeOrder = {"n2", "n3", "n1"};
+  g_config.BuildNodeOrderRanks();
+  Ctld::OrderCranedIdListByNodeOrder(&ids);
+  EXPECT_EQ(ids, (std::list<CranedId>{"n2", "n3", "n1"}));
+
+  g_config.NodeOrder = {"n2"};
+  g_config.BuildNodeOrderRanks();
+  Ctld::OrderCranedIdListByNodeOrder(&ids);
+  EXPECT_EQ(ids, (std::list<CranedId>{"n2", "n1", "n3"}));
+
+  g_config.NodeOrder.clear();
+  g_config.BuildNodeOrderRanks();
+  Ctld::OrderCranedIdListByNodeOrder(&ids);
+  EXPECT_EQ(ids, (std::list<CranedId>{"n1", "n2", "n3"}));
+}
+
 }  // namespace
