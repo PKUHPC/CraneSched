@@ -4,8 +4,8 @@
 自动调用用户自定义的 Prolog（前置）和 Epilog（后置）脚本，实现作业环境初始化、资源检查、清理等功能。
 脚本机制保障安全、高效、可配置，并能适配批处理和交互式作业的不同需求。
 
-Crane 支持多种 `prolog` 和 `epilog` 程序。请注意，出于安全原因，
-这些程序没有设置搜索路径。你需要在程序中指定完整路径，或者设置 PATH 环境变量。
+Crane 支持多种 `prolog` 和 `epilog` 程序。建议在脚本中使用绝对命令路径，或显式设置 `PATH`；
+可用环境取决于钩子类型。
 下表说明了在作业分配时可用的 `prolog` 和 `epilog` 及其运行的时间和位置。
 
 | 参数                           | 位置                | 调用者       | 用户                   | 执行时机    |
@@ -40,6 +40,8 @@ Crane 支持多种 `prolog` 和 `epilog` 程序。请注意，出于安全原因
 长时间运行的脚本会导致作业启动或结束缓慢，影响调度。
 脚本中调用 Crane 命令可能导致性能问题，应避免使用。
 
+`CranectldProlog` / `CranectldEpilog` 使用独立的作业元数据环境，见[控制节点 Prolog/Epilog](../../reference/job_env_vars.md#控制节点-prologepilog)。
+
 `TaskProlog` 以与用户任务相同的环境执行。该程序的标准输出会被读取并按如下方式处理：
 
 - `export name=value` ：为用户任务设置环境变量
@@ -63,7 +65,7 @@ echo "print This message has been printed with TaskProlog"
 ```
 上述功能仅限于 `task prolog` 脚本。
 
-计算节点上的 epilog 会设置 `CRANE_SCRIPT_CONTEXT=epilog`；task epilog 会设置 `CRANE_SCRIPT_CONTEXT=task_epilog`、任务 ID，并在账户查询成功时补充 `USER`、`LOGNAME`。Task epilog 环境由 supervisor 重新构建，而不是从已结束任务复制，因此不包含任务或 task prolog 后续做出的环境修改。Task prolog 不会自动生成上下文标记。完整变量及作用域见[作业环境变量](../../reference/job_env_vars.md)。
+计算节点与任务钩子的附加变量、上下文及作用域见[计算节点与任务钩子](../../reference/job_env_vars.md#计算节点与任务钩子)。
 
 ## 故障处理
 

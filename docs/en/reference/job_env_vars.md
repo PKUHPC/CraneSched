@@ -246,7 +246,28 @@ The variables are selected by the device's configured `EnvInjector` and generate
 
 For native `crun` tasks with X11 enabled, CraneSched sets `DISPLAY` to the configured X11 endpoint and `XAUTHORITY` to the generated authorization file, replacing any propagated values. Without X11, these names may still be present through ordinary environment propagation.
 
+### TMPDIR
+
+Temporary directory for native tasks; defaults to `/tmp` when unset.
+
+### ENVIRONMENT / HOSTNAME
+
+Batch jobs set `ENVIRONMENT=BATCH` and `HOSTNAME` to the execution node's hostname.
+
 ## Hook Environment
+
+### Controller Prolog/Epilog
+
+`CranectldProlog` and `CranectldEpilog` run with the controller service's effective UID/GID. Their environment contains
+job metadata only; submission and service environments are not inherited. Set any required `PATH` in the script.
+
+Available fields are `CRANE_CLUSTER_NAME`, `CRANE_JOB_{ID,UID,USER,GID,NAME,ACCOUNT,PARTITION,QOS,NODELIST,NUM_NODES,WORK_DIR}`
+and `CRANE_WORKING_DIR` (a work-directory alias). Materialized array children also receive `CRANE_ARRAY_JOB_ID` and `CRANE_ARRAY_TASK_ID`.
+
+`EnableSlurmCompatibleEnv` adds matching `SLURM_` aliases except for `CRANE_WORKING_DIR`, plus `SLURM_JOBID`.
+Node lists use semicolons for Crane and commas for Slurm. Treat field values as data, not commands.
+
+### Compute-node and Task Hooks
 
 | Variable | Where CraneSched supplies it |
 | --- | --- |
@@ -287,7 +308,7 @@ These PMIx additions replace same-name values in the prepared native task enviro
 
 Set the top-level `EnableSlurmCompatibleEnv: true` in the cluster's `config.yaml` to generate the following additional variables; the default is `false`. See [Cluster Configuration](../deployment/configuration/config.md). These variables support scripts and launchers and do not imply support for every Slurm command option.
 
-The tables describe automatic generation with the switch enabled. Disabling it does not remove user-propagated `SLURM_*` variables, and native PMIx still supplies the four-variable subset described above.
+These tables describe compute-node task environments with the switch enabled. Disabling it does not remove user-propagated `SLURM_*` variables, and native PMIx still supplies the four-variable subset described above. Controller hooks use the separate field set documented under [Controller Prolog/Epilog](#controller-prologepilog).
 
 ### Job Information
 
@@ -296,6 +317,7 @@ The tables describe automatic generation with the switch enabled. Disabling it d
 | `SLURM_JOB_ID`, `SLURM_JOBID` | Job ID |
 | `SLURM_JOB_NAME`, `SLURM_JOB_ACCOUNT`, `SLURM_JOB_PARTITION`, `SLURM_JOB_QOS` | Job name, account, partition, and QoS |
 | `SLURM_JOB_UID`, `SLURM_JOB_GID` | Job user's UID and effective GID |
+| `SLURM_JOB_USER` | Username resolved from the execution UID during step environment initialization; generated when account lookup succeeds |
 | `SLURM_CLUSTER_NAME`, `SLURMD_NODENAME` | Cluster name and current Craned node name |
 | `SLURM_JOB_NODELIST`, `SLURM_NODELIST` | Full job allocation's node names, comma-separated, without compression such as `node[01-03]` |
 | `SLURM_JOB_NUM_NODES`, `SLURM_JOB_NODES` | Number of nodes in the job allocation |
@@ -321,6 +343,7 @@ The tables describe automatic generation with the switch enabled. Disabling it d
 | `SLURM_PROCID`, `SLURM_LOCALID` | Zero-based global and node-local task IDs in task processes and task epilogs |
 | `SLURM_STEP_PROCID`, `SLURM_STEP_LOCALID` | Corresponding task IDs in `crun` step processes and task epilogs; PMIx tasks use their ranks |
 | `SLURM_GTIDS` | Comma-separated global task IDs hosted on this node |
+| `SLURM_TASK_PID` | Native task child PID, set before TaskProlog; not generated for container tasks or rebuilt TaskEpilog environments |
 | `SLURM_CPUS_ON_NODE`, `SLURM_CPUS_PER_TASK` | Current execution unit's CPU allocation on this node, and requested CPUs per task |
 | `SLURM_MEM_PER_NODE` | Current execution unit's memory on this node, as an integer in units of 1024² bytes without an `M` suffix |
 | `SLURM_GPUS_ON_NODE` | Positive job GPU count on this node, replaced by a positive step GPU count. A zero-GPU step does not clear an inherited value, so this variable alone is not proof of a step GPU allocation. |

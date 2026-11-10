@@ -5,7 +5,7 @@ Prolog (pre-execution) and Epilog (post-execution) scripts at different stages o
 and step execution, enabling functionalities such as job environment initialization, 
 resource verification, and cleanup.
 
-Crane supports multiple `prolog` and `epilog` programs. Note that for security reasons, these programs do **not** have a search path set. You must either specify fully qualified paths in the programs or set the `PATH` environment variable. The table below explains the prolog and epilog programs available during job allocation, including when and where they run.
+Crane supports multiple `prolog` and `epilog` programs. Use absolute command paths or explicitly set `PATH` in scripts; the available environment depends on the hook type. The table below explains the prolog and epilog programs available during job allocation, including when and where they run.
 
 | Parameter               | Location              | Invoked by | User                        | Execution Timing                                                              |
 |-------------------------|-----------------------|------------|------------------------------|-------------------------------------------------------------------------------|
@@ -32,6 +32,8 @@ If multiple `prolog` or `epilog` scripts are specified (e.g., `/etc/crane/prolog
 
 Prolog and Epilog scripts should be short and must **not** call Crane commands such as `cqueue`, `ccontrol`, `cacctmgr`. Long-running scripts slow down scheduling. Calling Crane commands may also cause performance issues.
 
+`CranectldProlog` / `CranectldEpilog` use an isolated job-metadata environment; see [Controller Prolog/Epilog](../../reference/job_env_vars.md#controller-prologepilog).
+
 `TaskProlog` runs with the same environment as the user’s task. Its standard output is interpreted as:
 
 - `export name=value` : set environment variable
@@ -47,7 +49,7 @@ echo "unset MANPATH"
 echo "print This message has been printed with TaskProlog"
 ```
 
-For compute-node epilogs, CraneSched sets `CRANE_SCRIPT_CONTEXT=epilog`. Task epilogs receive `CRANE_SCRIPT_CONTEXT=task_epilog`, task IDs, and `USER`/`LOGNAME` when account lookup succeeds. Their environment is rebuilt by the supervisor rather than copied from the completed task, so changes made by the task or task prolog are not carried back. Task prologs have no automatically generated context marker. See [Job Environment Variables](../../reference/job_env_vars.md) for the full variable list and scope.
+For additional compute-node and task hook variables and their scopes, see [Compute-node and Task Hooks](../../reference/job_env_vars.md#compute-node-and-task-hooks).
 
 # Failure Handling
 

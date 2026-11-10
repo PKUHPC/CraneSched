@@ -246,7 +246,28 @@ CraneSched 为执行单元设置任务数量和任务标识。`CRANE_STEP_ID`、
 
 启用 X11 的原生 `crun` 任务会将 `DISPLAY` 设置为配置的 X11 端点，将 `XAUTHORITY` 设置为生成的认证文件路径，覆盖传播的同名值。未启用 X11 时，这些变量仍可能通过普通环境传播存在。
 
+### TMPDIR
+
+原生任务的临时目录，未设置时默认为 `/tmp`。
+
+### ENVIRONMENT / HOSTNAME
+
+批处理作业设置 `ENVIRONMENT=BATCH`，`HOSTNAME` 为执行节点的主机名。
+
 ## 钩子环境
+
+### 控制节点 Prolog/Epilog
+
+`CranectldProlog` / `CranectldEpilog` 使用控制服务的有效 UID/GID，仅接收作业元数据，不继承提交端或服务进程环境；
+脚本所需的 `PATH` 应自行设置。
+
+提供 `CRANE_CLUSTER_NAME`、`CRANE_JOB_{ID,UID,USER,GID,NAME,ACCOUNT,PARTITION,QOS,NODELIST,NUM_NODES,WORK_DIR}`
+及工作目录别名 `CRANE_WORKING_DIR`。已物化数组子任务另有 `CRANE_ARRAY_JOB_ID`、`CRANE_ARRAY_TASK_ID`。
+
+`EnableSlurmCompatibleEnv` 为上述字段提供 `SLURM_` 别名（`CRANE_WORKING_DIR` 除外），另有 `SLURM_JOBID`。
+节点列表分别使用分号和逗号分隔。字段值应作为数据处理，不能当作命令执行。
+
+### 计算节点与任务钩子
 
 | 变量 | CraneSched 设置的位置 |
 | --- | --- |
@@ -287,7 +308,7 @@ Task prolog 使用准备好的任务环境，并可通过输出 `export name=val
 
 在集群 `config.yaml` 顶层设置 `EnableSlurmCompatibleEnv: true` 后，CraneSched 会额外生成下列变量；默认值为 `false`。参见[集群配置](../deployment/configuration/config.md)。这些变量用于脚本和启动器兼容，不表示所有 Slurm 命令选项都已实现。
 
-下表描述开关启用后的自动生成行为。关闭开关不会清除用户传播的 `SLURM_*` 变量，原生 PMIx 也仍会生成前述四个变量。
+下表描述计算节点任务在开关启用后的自动生成行为。关闭开关不会清除用户传播的 `SLURM_*` 变量，原生 PMIx 也仍会生成前述四个变量。控制节点钩子使用[控制节点 Prolog/Epilog](#控制节点-prologepilog)中单独列出的字段集合。
 
 ### 作业信息
 
@@ -296,6 +317,7 @@ Task prolog 使用准备好的任务环境，并可通过输出 `export name=val
 | `SLURM_JOB_ID`、`SLURM_JOBID` | 作业 ID |
 | `SLURM_JOB_NAME`、`SLURM_JOB_ACCOUNT`、`SLURM_JOB_PARTITION`、`SLURM_JOB_QOS` | 作业名称、账户、分区及 QoS |
 | `SLURM_JOB_UID`、`SLURM_JOB_GID` | 作业用户 UID 和有效 GID |
+| `SLURM_JOB_USER` | 初始化作业步环境时，按执行 UID 查询到的用户名；账户查询成功时生成 |
 | `SLURM_CLUSTER_NAME`、`SLURMD_NODENAME` | 集群名和当前 Craned 节点名 |
 | `SLURM_JOB_NODELIST`、`SLURM_NODELIST` | 完整作业分配的节点名，逗号分隔，不使用 `node[01-03]` 压缩格式 |
 | `SLURM_JOB_NUM_NODES`、`SLURM_JOB_NODES` | 作业分配的节点数量 |
@@ -321,6 +343,7 @@ Task prolog 使用准备好的任务环境，并可通过输出 `export name=val
 | `SLURM_PROCID`、`SLURM_LOCALID` | 任务进程及 task epilog 中的全局任务编号、节点内任务编号，从 0 开始 |
 | `SLURM_STEP_PROCID`、`SLURM_STEP_LOCALID` | `crun` 作业步任务进程及 task epilog 中对应的任务编号；PMIx 任务按 rank 设置 |
 | `SLURM_GTIDS` | 当前节点承载的全局任务编号，逗号分隔 |
+| `SLURM_TASK_PID` | 原生任务子进程 PID，在 TaskProlog 前设置；容器任务和重建的 TaskEpilog 环境不生成此字段 |
 | `SLURM_CPUS_ON_NODE`、`SLURM_CPUS_PER_TASK` | 当前执行单元在本节点的 CPU 分配量，以及每任务请求的 CPU 数 |
 | `SLURM_MEM_PER_NODE` | 当前执行单元在本节点的内存，按 1024² 字节换算的整数，不带 `M` 后缀 |
 | `SLURM_GPUS_ON_NODE` | 本节点上非零的作业 GPU 数；作业步 GPU 数大于零时会替换该值。零 GPU 的作业步不会清除继承值，因此不能仅凭此变量判断该步已分配 GPU。 |
