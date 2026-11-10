@@ -248,14 +248,11 @@ CraneSched 为执行单元设置任务数量和任务标识。`CRANE_STEP_ID`、
 
 ### TMPDIR
 
-原生任务在 TaskProlog 完成后，仅当 `TMPDIR` 缺失时补为 `/tmp`；已有值（包括空字符串）保持不变。
-此默认值逻辑不负责创建目录或校验目录权限。
+原生任务的临时目录，未设置时默认为 `/tmp`。
 
 ### ENVIRONMENT / HOSTNAME
 
-批处理 PRIMARY（含 `cbatch --pod` 的原生脚本）生成 `ENVIRONMENT=BATCH`，并将 `HOSTNAME` 设置为执行节点的
-操作系统 hostname，而非配置中的 Craned 节点别名或提交主机名。Task prolog 仍可覆盖或删除这两个变量；
-其他步骤不主动生成它们，但可能继承提交环境中的值。
+批处理作业设置 `ENVIRONMENT=BATCH`，`HOSTNAME` 为执行节点的主机名。
 
 ## 钩子环境
 

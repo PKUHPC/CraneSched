@@ -248,14 +248,11 @@ For native `crun` tasks with X11 enabled, CraneSched sets `DISPLAY` to the confi
 
 ### TMPDIR
 
-For native tasks, CraneSched fills a missing `TMPDIR` with `/tmp` after TaskProlog completes. Existing values, including
-an empty string, are preserved. This fallback does not create the directory or validate its permissions.
+Temporary directory for native tasks; defaults to `/tmp` when unset.
 
 ### ENVIRONMENT / HOSTNAME
 
-Batch PRIMARY steps (including the native script for `cbatch --pod`) generate `ENVIRONMENT=BATCH` and set `HOSTNAME` to
-the execution node's operating-system hostname, rather than its configured Craned alias or the submission hostname.
-Task prologs may still replace or remove either variable. Other steps do not generate them but may inherit submitted values.
+Batch jobs set `ENVIRONMENT=BATCH` and `HOSTNAME` to the execution node's hostname.
 
 ## Hook Environment
 
