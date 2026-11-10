@@ -52,6 +52,7 @@ target_link_libraries(embedded_db_client_test
         crane_proto_lib
 
         Utility_PublicHeader
+        Utility_MpiControl
         Utility_PasswordEntry
         Utility_PrologEpilogExecutor
         crane_tracer
@@ -112,6 +113,7 @@ target_link_libraries(ctld_public_defs_test
         crane_proto_lib
 
         Utility_PublicHeader
+        Utility_MpiControl
         Utility_PasswordEntry
         Utility_PrologEpilogExecutor
         crane_tracer

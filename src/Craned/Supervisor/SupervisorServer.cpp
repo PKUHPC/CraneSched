@@ -108,23 +108,11 @@ grpc::Status SupervisorServiceImpl::TerminateStep(
   return Status::OK;
 }
 
-grpc::Status SupervisorServiceImpl::ReceivePmixPort(
-    grpc::ServerContext* context,
-    const crane::grpc::supervisor::ReceivePmixPortRequest* request,
-    crane::grpc::supervisor::ReceivePmixPortReply* response) {
-  CRANE_TRACE("Received ReceivePmixPort gRPC with {} pmix ports.",
-              request->pmix_ports().size());
-  response->set_ok(g_task_mgr->ReceivePmixPort(*request));
-  return Status::OK;
-}
-
-grpc::Status SupervisorServiceImpl::ReceivePmi2Port(
-    grpc::ServerContext* context,
-    const crane::grpc::supervisor::ReceivePmi2PortRequest* request,
-    crane::grpc::supervisor::ReceivePmi2PortReply* response) {
-  CRANE_TRACE("Received ReceivePmi2Port gRPC with {} pmi2 ports.",
-              request->pmi2_ports().size());
-  response->set_ok(g_task_mgr->ReceivePmi2Port(*request));
+grpc::Status SupervisorServiceImpl::ReceiveMpiEndpoints(
+    grpc::ServerContext*,
+    const crane::grpc::mpi::ReceiveMpiEndpointsRequest* request,
+    crane::grpc::mpi::ReceiveMpiEndpointsReply* response) {
+  response->set_ok(g_task_mgr->ReceiveMpiEndpoints(*request));
   return Status::OK;
 }
 

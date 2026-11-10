@@ -2540,41 +2540,25 @@ void JobManager::StepStatusChangeAsync(
                                  std::move(timestamp));
 }
 
-bool JobManager::ReceivePmixPort(
-    const std::vector<std::pair<CranedId, std::string>>& ports, job_id_t job_id,
-    step_id_t step_id) {
-  return ReceiveMpiPorts_(ports, job_id, step_id, kMpiTypePmix);
-}
-
-bool JobManager::ReceivePmi2Port(
-    const std::vector<std::pair<CranedId, std::string>>& ports, job_id_t job_id,
-    step_id_t step_id) {
-  return ReceiveMpiPorts_(ports, job_id, step_id, kMpiTypePmi2);
-}
-
-bool JobManager::ReceiveMpiPorts_(
-    const std::vector<std::pair<CranedId, std::string>>& ports, job_id_t job_id,
-    step_id_t step_id, std::string_view protocol) {
-  auto job = m_job_map_.GetValueExclusivePtr(job_id);
-  if (!job) return false;
-  absl::MutexLock lk(job->step_map_mtx.get());
-  auto step = job->step_map.find(step_id);
-  if (step == job->step_map.end() ||
-      step->second->step_to_d.interactive_meta().mpi() != protocol ||
-      !step->second->supervisor_stub) {
-    CRANE_ERROR("[Step #{}.{}] No matching {} supervisor for peer endpoints",
-                job_id, step_id, protocol);
-    return false;
+bool JobManager::ReceiveMpiEndpoints(
+    const crane::grpc::mpi::ReceiveMpiEndpointsRequest& request) {
+  std::shared_ptr<SupervisorStub> supervisor;
+  {
+    auto job = m_job_map_.GetValueExclusivePtr(request.job_id());
+    if (!job) return false;
+    absl::MutexLock lock(job->step_map_mtx.get());
+    auto step = job->step_map.find(request.step_id());
+    if (step == job->step_map.end() || !step->second->supervisor_stub)
+      return false;
+    const auto& protocol = step->second->step_to_d.interactive_meta().mpi();
+    if (!((request.protocol() == crane::grpc::mpi::PROTOCOL_PMI &&
+           protocol == kMpiTypePmi2) ||
+          (request.protocol() == crane::grpc::mpi::PROTOCOL_PMIX &&
+           protocol == kMpiTypePmix)))
+      return false;
+    supervisor = step->second->supervisor_stub;
   }
-  auto& stub = step->second->supervisor_stub;
-  auto result = protocol == kMpiTypePmi2 ? stub->ReceivePmi2Port(ports)
-                                         : stub->ReceivePmixPort(ports);
-  if (result != CraneErrCode::SUCCESS) {
-    CRANE_ERROR("[Step #{}.{}] Failed to deliver {} endpoints: {}", job_id,
-                step_id, protocol, CraneErrStr(result));
-    return false;
-  }
-  return true;
+  return supervisor->ReceiveMpiEndpoints(request) == CraneErrCode::SUCCESS;
 }
 
 }  // namespace Craned

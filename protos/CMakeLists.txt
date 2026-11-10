@@ -4,7 +4,7 @@ file(MAKE_DIRECTORY ${GENERATED_FILE_PATH})
 
 include(${CMAKE_SOURCE_DIR}/CMakeModule/ProtobufGenerate.cmake)
 
-set(proto_src PublicDefs.proto Crane.proto Supervisor.proto Pmix.proto Pmi2.proto Plugin.proto)
+set(proto_src PublicDefs.proto Crane.proto Supervisor.proto mpi/Mpi.proto mpi/Pmi.proto mpi/Pmix.proto Plugin.proto)
 PROTOBUF_GENERATE_GRPC_CPP(ProtoCxxSources ProtoCxxHeaders ${GENERATED_FILE_PATH}/protos
         ${protobuf_SOURCE_DIR}/src ${proto_src})
 
@@ -17,7 +17,7 @@ add_library(crane_proto_lib STATIC
 target_link_libraries(crane_proto_lib
         ${_GRPC_GRPCPP}
         ${_PROTOBUF_LIBPROTOBUF})
-target_include_directories(crane_proto_lib PUBLIC ${GENERATED_FILE_PATH})
+target_include_directories(crane_proto_lib PUBLIC ${GENERATED_FILE_PATH} ${GENERATED_FILE_PATH}/protos)
 set_property(DIRECTORY PROPERTY ADDITIONAL_MAKE_CLEAN_FILES
         "${CMAKE_CURRENT_SOURCE_DIR}/generated/*")
 

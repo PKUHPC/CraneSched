@@ -33,8 +33,7 @@
 #include "CforedClient.h"
 #include "CgroupManager.h"
 #include "CranedClient.h"
-#include "Pmix.h"
-#include "PmixCommon.h"
+#include "Environment.h"
 #include "SupervisorPublicDefs.h"
 #include "SupervisorServer.h"
 #include "crane/CriClient.h"
@@ -2975,23 +2974,24 @@ void TaskManager::SupervisorFinishInit(StepStatus status) {
   g_craned_client->StepStatusChangeAsync(status, 0, std::nullopt);
 }
 
-bool TaskManager::ReceivePmixPort(
-    const crane::grpc::supervisor::ReceivePmixPortRequest& request) {
-  if (!m_step_.mpi_runtime || !m_step_.IsPmix()) return false;
-  std::vector<std::pair<CranedId, std::string>> peers;
-  for (const auto& peer : request.pmix_ports())
-    peers.emplace_back(peer.craned_id(), peer.port());
-  return m_step_.mpi_runtime->ReceivePeers(peers);
-}
-
-bool TaskManager::ReceivePmi2Port(
-    const crane::grpc::supervisor::ReceivePmi2PortRequest& request) {
-  if (!m_step_.mpi_runtime ||
-      m_step_.GetStep().interactive_meta().mpi() != kMpiTypePmi2)
+bool TaskManager::ReceiveMpiEndpoints(
+    const crane::grpc::mpi::ReceiveMpiEndpointsRequest& request) {
+  const auto& step = m_step_.GetStep();
+  if (!m_step_.mpi_runtime || request.job_id() != step.job_id() ||
+      request.step_id() != step.step_id())
+    return false;
+  const auto& protocol = step.interactive_meta().mpi();
+  if (!((request.protocol() == crane::grpc::mpi::PROTOCOL_PMI &&
+         protocol == kMpiTypePmi2) ||
+        (request.protocol() == crane::grpc::mpi::PROTOCOL_PMIX &&
+         protocol == kMpiTypePmix)))
     return false;
   std::vector<std::pair<CranedId, std::string>> peers;
-  for (const auto& peer : request.pmi2_ports())
-    peers.emplace_back(peer.craned_id(), peer.port());
+  peers.reserve(request.endpoints_size());
+  for (const auto& endpoint : request.endpoints()) {
+    if (endpoint.craned_id() != g_config.CranedIdOfThisNode)
+      peers.emplace_back(endpoint.craned_id(), endpoint.address());
+  }
   return m_step_.mpi_runtime->ReceivePeers(peers);
 }
 

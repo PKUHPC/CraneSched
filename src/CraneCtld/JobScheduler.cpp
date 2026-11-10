@@ -2406,9 +2406,13 @@ void JobScheduler::StepScheduleThread_() {
           // Register before supervisors start. Endpoint announcements only
           // modify existing entries, so a late RPC cannot resurrect a step
           // after its terminal cleanup erases the rendezvous state.
-          if (step->IsPmi2())
-            m_pmi2_ports_meta_.try_emplace(
-                std::pair{step->job_id, step->StepId()});
+          if (step->IsPmi2() || step->IsPmix())
+            m_mpi_endpoints_.try_emplace(
+                std::pair{step->job_id, step->StepId()}, step->job_id,
+                step->StepId(),
+                step->IsPmi2() ? crane::grpc::mpi::PROTOCOL_PMI
+                               : crane::grpc::mpi::PROTOCOL_PMIX,
+                step->CranedIds());
           for (const auto& craned_id : step->CranedIds()) {
             craned_alloc_steps[craned_id].emplace_back(
                 step->GetStepToD(craned_id));
@@ -6436,9 +6440,13 @@ void JobScheduler::CleanJobStatusChangeQueueCb_() {
       // common-step scheduler. Both paths must register before AllocSteps so
       // endpoint announcements can only update a live rendezvous.
       for (const auto* step : ptrs)
-        if (step->IsPmi2())
-          m_pmi2_ports_meta_.try_emplace(
-              std::pair{step->job_id, step->StepId()});
+        if (step->IsPmi2() || step->IsPmix())
+          m_mpi_endpoints_.try_emplace(std::pair{step->job_id, step->StepId()},
+                                       step->job_id, step->StepId(),
+                                       step->IsPmi2()
+                                           ? crane::grpc::mpi::PROTOCOL_PMI
+                                           : crane::grpc::mpi::PROTOCOL_PMIX,
+                                       step->CranedIds());
     }
   }
 

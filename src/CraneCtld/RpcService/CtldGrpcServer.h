@@ -313,15 +313,10 @@ class CtldForInternalServiceImpl final
                                crane::grpc::StreamCforedRequest>* stream)
       override;
 
-  grpc::Status BroadcastPmixPort(
+  grpc::Status BroadcastMpiEndpoint(
       grpc::ServerContext* context,
-      const crane::grpc::BroadcastPmixPortRequest* request,
-      crane::grpc::BroadcastPmixPortReply* response) override;
-
-  grpc::Status BroadcastPmi2Port(
-      grpc::ServerContext* context,
-      const crane::grpc::BroadcastPmi2PortRequest* request,
-      crane::grpc::BroadcastPmi2PortReply* response) override;
+      const crane::grpc::mpi::BroadcastMpiEndpointRequest* request,
+      crane::grpc::mpi::BroadcastMpiEndpointReply* response) override;
 
  private:
   CtldServer* m_ctld_server_;

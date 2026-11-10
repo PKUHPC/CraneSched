@@ -13,7 +13,10 @@ function(PROTOBUF_GENERATE_GRPC_CPP SRCS HDRS OUTDIR SYSTEM_PROTO_DIR)
     endif ()
     foreach (FIL ${ARGN})
         get_filename_component(ABS_FIL ${FIL} ABSOLUTE)
-        get_filename_component(FIL_WE ${FIL} NAME_WE)
+        file(RELATIVE_PATH REL_FIL "${CMAKE_CURRENT_SOURCE_DIR}" "${ABS_FIL}")
+        string(REGEX REPLACE "\\.[^.]+$" "" FIL_WE "${REL_FIL}")
+        get_filename_component(GENERATED_DIR "${OUTDIR}/${FIL_WE}" DIRECTORY)
+        file(MAKE_DIRECTORY "${GENERATED_DIR}")
 
         list(APPEND ${SRCS}
                 "${OUTDIR}/${FIL_WE}.pb.cc"

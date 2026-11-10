@@ -955,32 +955,15 @@ void CtldClient::StepStatusChangeAsync(
       static_cast<int64_t>(m_step_status_change_list_.size());
 }
 
-void CtldClient::BroadcastPmixPort(
-    const crane::grpc::BroadcastPmixPortRequest& request,
-    crane::grpc::BroadcastPmixPortReply* response) {
+void CtldClient::BroadcastMpiEndpoint(
+    const crane::grpc::mpi::BroadcastMpiEndpointRequest& request,
+    crane::grpc::mpi::BroadcastMpiEndpointReply* response) {
   grpc::ClientContext context;
   context.set_deadline(std::chrono::system_clock::now() +
                        std::chrono::seconds(kCranedRpcTimeoutSeconds));
-
-  grpc::Status status = m_stub_->BroadcastPmixPort(&context, request, response);
-  if (!status.ok()) {
-    CRANE_ERROR("BroadcastPmixPort failed: {}, {}",
-                static_cast<int>(status.error_code()), status.error_message());
-  }
-}
-
-void CtldClient::BroadcastPmi2Port(
-    const crane::grpc::BroadcastPmi2PortRequest& request,
-    crane::grpc::BroadcastPmi2PortReply* response) {
-  grpc::ClientContext context;
-  context.set_deadline(std::chrono::system_clock::now() +
-                       std::chrono::seconds(kCranedRpcTimeoutSeconds));
-
-  grpc::Status status = m_stub_->BroadcastPmi2Port(&context, request, response);
-  if (!status.ok()) {
-    CRANE_ERROR("BroadcastPmi2Port failed: {}, {}",
-                static_cast<int>(status.error_code()), status.error_message());
-  }
+  auto status = m_stub_->BroadcastMpiEndpoint(&context, request, response);
+  if (!status.ok())
+    CRANE_ERROR("MPI endpoint relay failed: {}", status.error_message());
 }
 
 void CtldClient::StepStatusChangeAsync(job_id_t job_id, step_id_t step_id,

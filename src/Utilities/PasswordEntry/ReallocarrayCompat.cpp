@@ -22,7 +22,7 @@
 #include <limits>
 
 extern "C" void* reallocarray(void* pointer, std::size_t count,
-                               std::size_t size) {
+                              std::size_t size) {
   if (size != 0 && count > std::numeric_limits<std::size_t>::max() / size) {
     errno = ENOMEM;
     return nullptr;

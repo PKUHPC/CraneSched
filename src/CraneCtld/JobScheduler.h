@@ -26,6 +26,7 @@
 
 #include "Account/AccountDefs.h"
 #include "Array.h"
+#include "EndpointRendezvous.h"
 #include "Node/CranedMetaContainer.h"
 #include "protos/Crane.pb.h"
 
@@ -1180,13 +1181,12 @@ class JobScheduler {
   template <typename K>
   using HashSet = absl::flat_hash_set<K>;
 
-  using MpiPortsMetaMapKey = std::pair<job_id_t, step_id_t>;
-  using MpiPortsMetaMapValue = std::unordered_map<CranedId, std::string>;
-  using MpiPortsMetaMap = phmap::parallel_flat_hash_map<
-      MpiPortsMetaMapKey, MpiPortsMetaMapValue,
-      phmap::priv::hash_default_hash<MpiPortsMetaMapKey>,
-      phmap::priv::hash_default_eq<MpiPortsMetaMapKey>,
-      std::allocator<std::pair<const MpiPortsMetaMapKey, MpiPortsMetaMapValue>>,
+  using MpiEndpointsKey = std::pair<job_id_t, step_id_t>;
+  using MpiEndpointsMap = phmap::parallel_flat_hash_map<
+      MpiEndpointsKey, mpi::EndpointRendezvous,
+      phmap::priv::hash_default_hash<MpiEndpointsKey>,
+      phmap::priv::hash_default_eq<MpiEndpointsKey>,
+      std::allocator<std::pair<const MpiEndpointsKey, mpi::EndpointRendezvous>>,
       4, std::shared_mutex>;
 
  public:
@@ -1426,21 +1426,7 @@ class JobScheduler {
                         .event_time = timestamp});
   }
 
-  MpiPortsMetaMap& GetPmixPortsMetaMap() { return m_pmix_ports_meta_; }
-  MpiPortsMetaMap& GetPmi2PortsMetaMap() { return m_pmi2_ports_meta_; }
-
-  std::optional<std::vector<CranedId>> Pmi2StepNodes(job_id_t job_id,
-                                                     step_id_t step_id) {
-    LockGuard running_guard(&m_running_job_map_mtx_);
-    auto it = m_running_job_map_.find(job_id);
-    if (it == m_running_job_map_.end()) return std::nullopt;
-    auto* step = it->second->GetStep(step_id);
-    if (!step || !step->IsPmi2() || step->CranedIds().empty() ||
-        (step->Status() != crane::grpc::Configuring &&
-         step->Status() != crane::grpc::Running))
-      return std::nullopt;
-    return step->CranedIds();
-  }
+  MpiEndpointsMap& GetMpiEndpointsMap() { return m_mpi_endpoints_; }
 
  private:
   void RequeueRecoveredJobIntoPendingQueueLock_(std::unique_ptr<JobInCtld> job);
@@ -1751,8 +1737,7 @@ class JobScheduler {
   // enqueue into m_job_deadline_timer_del_queue_ and send the async handle.
   void DelDeadlineTimer_(job_id_t job_id);
 
-  MpiPortsMetaMap m_pmix_ports_meta_;
-  MpiPortsMetaMap m_pmi2_ports_meta_;
+  MpiEndpointsMap m_mpi_endpoints_;
 };
 
 }  // namespace Ctld

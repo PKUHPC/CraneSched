@@ -24,7 +24,7 @@
 // Precompiled header comes first.
 
 #include "CforedClient.h"
-#include "Mpi.h"
+#include "Runtime.h"
 #include "Supervisor.grpc.pb.h"
 #include "crane/BindFs.h"
 #include "crane/CriClient.h"
@@ -583,11 +583,8 @@ class TaskManager {
 
   void SupervisorFinishInit(StepStatus status);
 
-  bool ReceivePmi2Port(
-      const crane::grpc::supervisor::ReceivePmi2PortRequest& request);
-
-  bool ReceivePmixPort(
-      const crane::grpc::supervisor::ReceivePmixPortRequest& request);
+  bool ReceiveMpiEndpoints(
+      const crane::grpc::mpi::ReceiveMpiEndpointsRequest& request);
 
   void Wait();
   // Shutdown supervisor asynchronously with given status, exit code and reason.

@@ -700,85 +700,21 @@ grpc::Status CranedServiceImpl::StepStatusChange(
   return Status::OK;
 }
 
-grpc::Status CranedServiceImpl::BroadcastPmixPort(
-    grpc::ServerContext *context,
-    const crane::grpc::BroadcastPmixPortRequest *request,
-    crane::grpc::BroadcastPmixPortReply *response) {
-  if (!g_server->ReadyFor(RequestSource::SUPERVISOR)) {
-    CRANE_DEBUG("CranedServer is not ready.");
-    response->set_ok(false);
-    return Status(grpc::StatusCode::UNAVAILABLE, "CranedServer is not ready");
-  }
-
-  g_ctld_client->BroadcastPmixPort(*request, response);
-
+grpc::Status CranedServiceImpl::BroadcastMpiEndpoint(
+    grpc::ServerContext *,
+    const crane::grpc::mpi::BroadcastMpiEndpointRequest *request,
+    crane::grpc::mpi::BroadcastMpiEndpointReply *response) {
+  if (!g_server->ReadyFor(RequestSource::SUPERVISOR))
+    return {grpc::StatusCode::UNAVAILABLE, "Craned server is not ready"};
+  g_ctld_client->BroadcastMpiEndpoint(*request, response);
   return Status::OK;
 }
 
-grpc::Status CranedServiceImpl::BroadcastPmi2Port(
-    grpc::ServerContext *context,
-    const crane::grpc::BroadcastPmi2PortRequest *request,
-    crane::grpc::BroadcastPmi2PortReply *response) {
-  if (!g_server->ReadyFor(RequestSource::SUPERVISOR)) {
-    CRANE_DEBUG("CranedServer is not ready.");
-    response->set_ok(false);
-    return Status(grpc::StatusCode::UNAVAILABLE, "CranedServer is not ready");
-  }
-
-  g_ctld_client->BroadcastPmi2Port(*request, response);
-
-  return Status::OK;
-}
-
-grpc::Status CranedServiceImpl::ReceivePmixPort(
-    grpc::ServerContext *context,
-    const crane::grpc::ReceivePmixPortRequest *request,
-    crane::grpc::ReceivePmixPortReply *response) {
-  std::vector<std::pair<CranedId, std::string>> pmix_ports;
-  for (const auto &pmix_port : request->pmix_ports()) {
-    if (pmix_port.craned_id() == g_config.CranedIdOfThisNode) {
-      CRANE_TRACE(
-          "[Step{}.{}] ReceivePmixPort: Ignore pmix port {} for self craned id "
-          "{}",
-          request->job_id(), request->step_id(), pmix_port.port(),
-          pmix_port.craned_id());
-      continue;
-    }
-    pmix_ports.emplace_back(pmix_port.craned_id(), pmix_port.port());
-  }
-
-  CRANE_TRACE("[Step{}.{}] Delivering {} pmix ports to supervisor",
-              request->job_id(), request->step_id(), pmix_ports.size());
-  bool ok = g_job_mgr->ReceivePmixPort(pmix_ports, request->job_id(),
-                                       request->step_id());
-  response->set_ok(ok);
-
-  return Status::OK;
-}
-
-grpc::Status CranedServiceImpl::ReceivePmi2Port(
-    grpc::ServerContext *context,
-    const crane::grpc::ReceivePmi2PortRequest *request,
-    crane::grpc::ReceivePmi2PortReply *response) {
-  std::vector<std::pair<CranedId, std::string>> pmi2_ports;
-  for (const auto &pmi2_port : request->pmi2_ports()) {
-    if (pmi2_port.craned_id() == g_config.CranedIdOfThisNode) {
-      CRANE_TRACE(
-          "[Step{}.{}] ReceivePmi2Port: Ignore pmi2 port {} for self craned id "
-          "{}",
-          request->job_id(), request->step_id(), pmi2_port.port(),
-          pmi2_port.craned_id());
-      continue;
-    }
-    pmi2_ports.emplace_back(pmi2_port.craned_id(), pmi2_port.port());
-  }
-
-  CRANE_TRACE("[Step{}.{}] Delivering {} pmi2 ports to supervisor",
-              request->job_id(), request->step_id(), pmi2_ports.size());
-  bool ok = g_job_mgr->ReceivePmi2Port(pmi2_ports, request->job_id(),
-                                       request->step_id());
-  response->set_ok(ok);
-
+grpc::Status CranedServiceImpl::ReceiveMpiEndpoints(
+    grpc::ServerContext *,
+    const crane::grpc::mpi::ReceiveMpiEndpointsRequest *request,
+    crane::grpc::mpi::ReceiveMpiEndpointsReply *response) {
+  response->set_ok(g_job_mgr->ReceiveMpiEndpoints(*request));
   return Status::OK;
 }
 

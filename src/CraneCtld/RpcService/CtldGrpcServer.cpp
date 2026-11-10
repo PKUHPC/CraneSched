@@ -613,159 +613,35 @@ grpc::Status CtldForInternalServiceImpl::CforedStream(
   }
 }
 
-grpc::Status CtldForInternalServiceImpl::BroadcastPmixPort(
-    grpc::ServerContext* context,
-    const crane::grpc::BroadcastPmixPortRequest* request,
-    crane::grpc::BroadcastPmixPortReply* response) {
+grpc::Status CtldForInternalServiceImpl::BroadcastMpiEndpoint(
+    grpc::ServerContext*,
+    const crane::grpc::mpi::BroadcastMpiEndpointRequest* request,
+    crane::grpc::mpi::BroadcastMpiEndpointReply* response) {
   if (!g_runtime_status.srv_ready.load(std::memory_order_acquire))
-    return grpc::Status{grpc::StatusCode::UNAVAILABLE,
-                        "CraneCtld Server is not ready"};
-
-  auto& pmix_ports_map = g_job_scheduler->GetPmixPortsMetaMap();
-
-  using PmixPortsMetaMapKey = std::pair<job_id_t, step_id_t>;
-  using PmixPortsMetaMapValue = std::unordered_map<CranedId, std::string>;
-
-  PmixPortsMetaMapKey map_key(request->job_id(), request->step_id());
-
-  // Snapshot of the completed port map, populated inside the locked callback.
-  // Empty means not all ports have arrived yet and no broadcast is needed.
-  std::optional<PmixPortsMetaMapValue> ports_to_broadcast;
-
-  pmix_ports_map.lazy_emplace_l(
-      map_key,
-      [&](std::pair<const PmixPortsMetaMapKey, PmixPortsMetaMapValue>& pair) {
-        pair.second.emplace(request->craned_id(), request->port());
-
-        if (pair.second.size() == request->craned_ids().size()) {
-          CRANE_TRACE(
-              "[Step#{}.{}] All pmix ports have been collected, start "
-              "broadcasting.",
-              request->job_id(), request->step_id());
-          ports_to_broadcast = pair.second;
-        }
-      },
-      [&](auto&& ctor) {
-        // First time insert
-
-        PmixPortsMetaMapValue value;
-        value.emplace(request->craned_id(), request->port());
-
-        ctor(map_key, std::move(value));
-      });
-
-  // The map lock has been released at this point.  Perform the fanout now.
-  if (ports_to_broadcast.has_value()) {
-    auto ports_shared =
-        std::make_shared<PmixPortsMetaMapValue>(std::move(*ports_to_broadcast));
-
-    job_id_t job_id = request->job_id();
-    step_id_t step_id = request->step_id();
-
-    for (const auto& craned_id : request->craned_ids()) {
-      g_thread_pool->detach_task([craned_id, ports_shared, job_id, step_id]() {
-        auto craned_stub = g_craned_keeper->GetCranedStub(craned_id);
-        if (!craned_stub) {
-          CRANE_ERROR(
-              "[Step#{}.{}] Craned {} stub not found when broadcasting "
-              "pmix port.",
-              job_id, step_id, craned_id);
-          return;
-        }
-        auto result =
-            craned_stub->ReceivePmixPort(job_id, step_id, *ports_shared);
-        if (result != CraneErrCode::SUCCESS) {
-          CRANE_ERROR(
-              "[Step#{}.{}] Failed to broadcast pmix port to craned {}.",
-              job_id, step_id, craned_id);
-        }
+    return {grpc::StatusCode::UNAVAILABLE, "CraneCtld server is not ready"};
+  std::expected<std::optional<crane::grpc::mpi::ReceiveMpiEndpointsRequest>,
+                std::string>
+      result = std::unexpected("expired MPI rendezvous");
+  auto& endpoints = g_job_scheduler->GetMpiEndpointsMap();
+  endpoints.modify_if(
+      {request->job_id(), request->step_id()},
+      [&](auto& entry) { result = entry.second.Accept(*request); });
+  if (!result) return {grpc::StatusCode::FAILED_PRECONDITION, result.error()};
+  if (*result) {
+    // Build one immutable snapshot; fanout holds no scheduler/map lock.
+    auto snapshot =
+        std::make_shared<const crane::grpc::mpi::ReceiveMpiEndpointsRequest>(
+            std::move(**result));
+    for (const auto& endpoint : snapshot->endpoints()) {
+      g_thread_pool->detach_task([snapshot, node = endpoint.craned_id()] {
+        auto stub = g_craned_keeper->GetCranedStub(node);
+        if (!stub ||
+            stub->ReceiveMpiEndpoints(*snapshot) != CraneErrCode::SUCCESS)
+          CRANE_ERROR("[Step #{}.{}] Failed to deliver MPI endpoints to {}",
+                      snapshot->job_id(), snapshot->step_id(), node);
       });
     }
   }
-
-  response->set_ok(true);
-  return grpc::Status::OK;
-}
-
-grpc::Status CtldForInternalServiceImpl::BroadcastPmi2Port(
-    grpc::ServerContext* context,
-    const crane::grpc::BroadcastPmi2PortRequest* request,
-    crane::grpc::BroadcastPmi2PortReply* response) {
-  if (!g_runtime_status.srv_ready.load(std::memory_order_acquire))
-    return grpc::Status{grpc::StatusCode::UNAVAILABLE,
-                        "CraneCtld Server is not ready"};
-
-  auto nodes =
-      g_job_scheduler->Pmi2StepNodes(request->job_id(), request->step_id());
-  std::vector<CranedId> requested(request->craned_ids().begin(),
-                                  request->craned_ids().end());
-  if (!nodes || *nodes != requested ||
-      std::ranges::find(*nodes, request->craned_id()) == nodes->end())
-    return {grpc::StatusCode::INVALID_ARGUMENT,
-            "PMI-2 endpoint does not match a live step allocation"};
-
-  uint32_t port;
-  const auto& port_text = request->port();
-  auto [end, error] = std::from_chars(
-      port_text.data(), port_text.data() + port_text.size(), port);
-  if (error != std::errc{} || end != port_text.data() + port_text.size() ||
-      port == 0 || port > 65535)
-    return {grpc::StatusCode::INVALID_ARGUMENT, "invalid PMI-2 TCP port"};
-
-  auto& pmi2_ports_map = g_job_scheduler->GetPmi2PortsMetaMap();
-
-  using Pmi2PortsMetaMapKey = std::pair<job_id_t, step_id_t>;
-  using Pmi2PortsMetaMapValue = std::unordered_map<CranedId, std::string>;
-
-  Pmi2PortsMetaMapKey map_key(request->job_id(), request->step_id());
-
-  // Snapshot of the completed port map, populated inside the locked callback.
-  // Empty means not all ports have arrived yet and no broadcast is needed.
-  std::optional<Pmi2PortsMetaMapValue> ports_to_broadcast;
-
-  bool conflict = false;
-  bool live = pmi2_ports_map.modify_if(map_key, [&](auto& pair) {
-    auto [it, inserted] =
-        pair.second.emplace(request->craned_id(), request->port());
-    if (!inserted && it->second != request->port()) {
-      conflict = true;
-      return;
-    }
-    if (pair.second.size() == nodes->size()) ports_to_broadcast = pair.second;
-  });
-  if (!live || conflict)
-    return {grpc::StatusCode::FAILED_PRECONDITION,
-            "expired or conflicting PMI-2 rendezvous"};
-
-  // The map lock has been released at this point.  Perform the fanout now.
-  if (ports_to_broadcast.has_value()) {
-    auto ports_shared =
-        std::make_shared<Pmi2PortsMetaMapValue>(std::move(*ports_to_broadcast));
-
-    job_id_t job_id = request->job_id();
-    step_id_t step_id = request->step_id();
-
-    for (const auto& craned_id : request->craned_ids()) {
-      g_thread_pool->detach_task([craned_id, ports_shared, job_id, step_id]() {
-        auto craned_stub = g_craned_keeper->GetCranedStub(craned_id);
-        if (!craned_stub) {
-          CRANE_ERROR(
-              "[Step#{}.{}] Craned {} stub not found when broadcasting "
-              "pmi2 port.",
-              job_id, step_id, craned_id);
-          return;
-        }
-        auto result =
-            craned_stub->ReceivePmi2Port(job_id, step_id, *ports_shared);
-        if (result != CraneErrCode::SUCCESS) {
-          CRANE_ERROR(
-              "[Step#{}.{}] Failed to broadcast pmi2 port to craned {}.",
-              job_id, step_id, craned_id);
-        }
-      });
-    }
-  }
-
   response->set_ok(true);
   return grpc::Status::OK;
 }
