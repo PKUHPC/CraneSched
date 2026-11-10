@@ -16,7 +16,6 @@
  * along with this program.  If not, see <https://www.gnu.org/licenses/>.
  */
 
-#include <grp.h>
 #include <gtest/gtest.h>
 
 #include <cstdlib>
@@ -59,8 +58,8 @@ class ControllerHookTest : public ::testing::Test {
     request.set_node_num_max(8);
     for (const auto* key :
          {"BASH_ENV", "LD_PRELOAD", "PATH", "HOME", "USER", "PRIVATE_JOB_VALUE",
-          "CRANE_JOB_ID", "CRANE_JOB_UID", "CRANE_JOB_USER", "CRANE_JOB_GROUP",
-          "SLURM_JOB_ID", "SLURM_JOB_USER", "CRANE_UNRECOGNIZED"})
+          "CRANE_JOB_ID", "CRANE_JOB_UID", "CRANE_JOB_USER", "SLURM_JOB_ID",
+          "SLURM_JOB_USER", "CRANE_UNRECOGNIZED"})
       (*request.mutable_env())[key] = "submitted-value";
     job_.SetFieldsByJobToCtld(request);
     job_.SetJobId(42);
@@ -92,6 +91,7 @@ TEST_F(ControllerHookTest, BuildsTrustedMetadataAndOptionalSlurmAliases) {
       EXPECT_EQ(args.run_gid, getegid());
       EXPECT_EQ(env.at("CRANE_JOB_ID"), "42");
       EXPECT_EQ(env.at("CRANE_JOB_UID"), std::to_string(job_.uid));
+      EXPECT_EQ(env.at("CRANE_JOB_GID"), std::to_string(job_.gid));
       EXPECT_EQ(env.at("CRANE_JOB_NAME"), "job name with spaces");
       EXPECT_EQ(env.at("CRANE_JOB_NUM_NODES"), "2");
       EXPECT_EQ(env.at("CRANE_JOB_NODELIST"), "node-b;node-a");
@@ -100,6 +100,7 @@ TEST_F(ControllerHookTest, BuildsTrustedMetadataAndOptionalSlurmAliases) {
         EXPECT_TRUE(!env.contains(key) || env.at(key) != value) << key;
       if (slurm) {
         EXPECT_EQ(env.at("SLURM_JOB_ID"), "42");
+        EXPECT_EQ(env.at("SLURM_JOB_GID"), std::to_string(job_.gid));
         EXPECT_EQ(env.at("SLURM_JOB_NODELIST"), "node-b,node-a");
       } else {
         for (const auto& [key, value] : env)
@@ -108,32 +109,6 @@ TEST_F(ControllerHookTest, BuildsTrustedMetadataAndOptionalSlurmAliases) {
     }
   }
   EXPECT_EQ(job_.env, submitted);
-}
-
-TEST_F(ControllerHookTest, UsesExecutionGroupRatherThanPasswdGroup) {
-  PasswordEntry pwd(getuid());
-  ASSERT_TRUE(pwd.Valid());
-  std::optional<std::pair<gid_t, std::string>> execution_group;
-  setgrent();
-  while (const auto* group = getgrent()) {
-    if (group->gr_gid != pwd.Gid() && group->gr_name && *group->gr_name) {
-      execution_group = {group->gr_gid, group->gr_name};
-      break;
-    }
-  }
-  endgrent();
-  if (!execution_group) GTEST_SKIP() << "No alternate group in NSS";
-
-  const auto* resolved = getgrgid(execution_group->first);
-  if (!resolved || !resolved->gr_name)
-    GTEST_SKIP() << "Alternate group could not be resolved by GID";
-  execution_group->second = resolved->gr_name;
-  job_.gid = execution_group->first;
-  g_config.EnableSlurmCompatibleEnv = true;
-  const auto env = job_.GetControllerHookArgs(false).envs;
-  EXPECT_EQ(env.at("CRANE_JOB_GID"), std::to_string(execution_group->first));
-  EXPECT_EQ(env.at("CRANE_JOB_GROUP"), execution_group->second);
-  EXPECT_EQ(env.at("SLURM_JOB_GROUP"), execution_group->second);
 }
 
 TEST_F(ControllerHookTest, EmitsArrayIdentityOnlyForMaterializedChildren) {

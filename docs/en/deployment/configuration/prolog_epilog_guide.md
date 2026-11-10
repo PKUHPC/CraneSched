@@ -32,10 +32,7 @@ If multiple `prolog` or `epilog` scripts are specified (e.g., `/etc/crane/prolog
 
 Prolog and Epilog scripts should be short and must **not** call Crane commands such as `cqueue`, `ccontrol`, `cacctmgr`. Long-running scripts slow down scheduling. Calling Crane commands may also cause performance issues.
 
-`CranectldProlog` / `CranectldEpilog` run as the controller service account and receive only the core job fields built by
-Crane. They do not inherit the submission or controller environment. Existing scripts that rely on custom submission variables
-must use the documented job fields or administrator configuration instead. See [Controller Hook Environment](../../reference/job_env_vars.md#controller-prologepilog)
-for the field list and Slurm-compatible aliases.
+`CranectldProlog` / `CranectldEpilog` use an isolated job-metadata environment; see [Controller Prolog/Epilog](../../reference/job_env_vars.md#controller-prologepilog).
 
 `TaskProlog` runs with the same environment as the user’s task. Its standard output is interpreted as:
 

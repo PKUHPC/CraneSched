@@ -261,24 +261,14 @@ CraneSched 为执行单元设置任务数量和任务标识。`CRANE_STEP_ID`、
 
 ### 控制节点 Prolog/Epilog
 
-`CranectldProlog` 和 `CranectldEpilog` 以控制服务的有效 UID/GID 运行，使用从内部作业记录单独构造的环境。
-它们不继承提交环境或控制服务的进程环境；`PATH`、`HOME` 和用户自定义变量不会自动传入。
-脚本需要的搜索路径由管理员在脚本中设置。提交环境中的同名 `CRANE_*`、`SLURM_*` 也不能覆盖这些字段。
+`CranectldProlog` / `CranectldEpilog` 使用控制服务的有效 UID/GID，仅接收作业元数据，不继承提交端或服务进程环境；
+脚本所需的 `PATH` 应自行设置。
 
-| 原生变量 | 来源与语义 |
-| --- | --- |
-| `CRANE_CLUSTER_NAME`、`CRANE_JOB_ID` | 配置的集群名、控制器分配的作业 ID |
-| `CRANE_JOB_UID`、`CRANE_JOB_USER` | 作业 UID、内部作业记录中的用户名；无用户名时省略名字字段 |
-| `CRANE_JOB_GID`、`CRANE_JOB_GROUP` | 作业的有效执行 GID、该 GID 对应的组名；组查询失败时保留 GID，省略组名 |
-| `CRANE_JOB_NAME`、`CRANE_JOB_ACCOUNT`、`CRANE_JOB_PARTITION`、`CRANE_JOB_QOS` | 内部作业记录中的名称、账户、分区、QoS |
-| `CRANE_JOB_NODELIST`、`CRANE_JOB_NUM_NODES` | 已分配节点列表及其数量；列表以分号分隔 |
-| `CRANE_JOB_WORK_DIR`、`CRANE_WORKING_DIR` | 作业工作目录，两个变量值相同 |
-| `CRANE_ARRAY_JOB_ID`、`CRANE_ARRAY_TASK_ID` | 已物化数组子任务的父 ID 和索引；普通作业与数组父作业不设置 |
+提供 `CRANE_CLUSTER_NAME`、`CRANE_JOB_{ID,UID,USER,GID,NAME,ACCOUNT,PARTITION,QOS,NODELIST,NUM_NODES,WORK_DIR}`
+及工作目录别名 `CRANE_WORKING_DIR`。已物化数组子任务另有 `CRANE_ARRAY_JOB_ID`、`CRANE_ARRAY_TASK_ID`。
 
-开启 `EnableSlurmCompatibleEnv` 后，除 `CRANE_WORKING_DIR` 外，上表字段同时提供 `SLURM_` 同后缀变量，
-另提供 `SLURM_JOBID`。`SLURM_JOB_NODELIST` 使用逗号分隔。Prolog/Epilog 的字段集合相同，
-不包含退出码等结束信息。
-变量中的作业名称、路径等仍是数据，管理员脚本应正常引用与校验，不能将其当作命令执行。
+`EnableSlurmCompatibleEnv` 为上述字段提供 `SLURM_` 别名（`CRANE_WORKING_DIR` 除外），另有 `SLURM_JOBID`。
+节点列表分别使用分号和逗号分隔。字段值应作为数据处理，不能当作命令执行。
 
 ### 计算节点与任务钩子
 

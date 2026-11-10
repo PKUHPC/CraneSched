@@ -40,9 +40,7 @@ Crane 支持多种 `prolog` 和 `epilog` 程序。建议在脚本中使用绝对
 长时间运行的脚本会导致作业启动或结束缓慢，影响调度。
 脚本中调用 Crane 命令可能导致性能问题，应避免使用。
 
-`CranectldProlog` / `CranectldEpilog` 使用控制服务账户执行，只接收由 Crane 构造的核心作业字段，
-不会继承提交环境或控制服务环境。已有脚本如果依赖提交端的自定义变量，需要改为使用明确的作业字段或管理员配置。
-字段清单和 Slurm 兼容别名见[控制节点钩子环境](../../reference/job_env_vars.md#控制节点-prologepilog)。
+`CranectldProlog` / `CranectldEpilog` 使用独立的作业元数据环境，见[控制节点 Prolog/Epilog](../../reference/job_env_vars.md#控制节点-prologepilog)。
 
 `TaskProlog` 以与用户任务相同的环境执行。该程序的标准输出会被读取并按如下方式处理：
 

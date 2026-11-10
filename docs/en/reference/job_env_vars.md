@@ -261,25 +261,14 @@ Task prologs may still replace or remove either variable. Other steps do not gen
 
 ### Controller Prolog/Epilog
 
-`CranectldProlog` and `CranectldEpilog` run with the controller service's effective UID/GID and a separate environment
-built from internal job records. They inherit neither the submission environment nor the controller's process environment;
-`PATH`, `HOME`, and custom submission variables are not passed automatically. Administrators set any required search path
-in the script. Submitted `CRANE_*` and `SLURM_*` values cannot override the fields below.
+`CranectldProlog` and `CranectldEpilog` run with the controller service's effective UID/GID. Their environment contains
+job metadata only; submission and service environments are not inherited. Set any required `PATH` in the script.
 
-| Native variable | Source and meaning |
-| --- | --- |
-| `CRANE_CLUSTER_NAME`, `CRANE_JOB_ID` | Configured cluster name and controller-assigned job ID |
-| `CRANE_JOB_UID`, `CRANE_JOB_USER` | Job UID and username from the internal job record; omit the name if unavailable |
-| `CRANE_JOB_GID`, `CRANE_JOB_GROUP` | Effective execution GID and its resolved group name; retain the GID but omit the name if lookup fails |
-| `CRANE_JOB_NAME`, `CRANE_JOB_ACCOUNT`, `CRANE_JOB_PARTITION`, `CRANE_JOB_QOS` | Name, account, partition, and QoS from the internal job record |
-| `CRANE_JOB_NODELIST`, `CRANE_JOB_NUM_NODES` | Allocated node list and its size; node names are semicolon-separated |
-| `CRANE_JOB_WORK_DIR`, `CRANE_WORKING_DIR` | Job working directory; both variables have the same value |
-| `CRANE_ARRAY_JOB_ID`, `CRANE_ARRAY_TASK_ID` | Parent ID and index of a materialized array child; absent for ordinary jobs and array parents |
+Available fields are `CRANE_CLUSTER_NAME`, `CRANE_JOB_{ID,UID,USER,GID,NAME,ACCOUNT,PARTITION,QOS,NODELIST,NUM_NODES,WORK_DIR}`
+and `CRANE_WORKING_DIR` (a work-directory alias). Materialized array children also receive `CRANE_ARRAY_JOB_ID` and `CRANE_ARRAY_TASK_ID`.
 
-With `EnableSlurmCompatibleEnv` enabled, each field except `CRANE_WORKING_DIR` also has a corresponding `SLURM_` alias,
-plus `SLURM_JOBID`. `SLURM_JOB_NODELIST` is comma-separated. Both hooks receive the same field set, without completion
-information such as exit codes. Job names and paths remain data; scripts must quote and validate them appropriately rather
-than interpret them as commands.
+`EnableSlurmCompatibleEnv` adds matching `SLURM_` aliases except for `CRANE_WORKING_DIR`, plus `SLURM_JOBID`.
+Node lists use semicolons for Crane and commas for Slurm. Treat field values as data, not commands.
 
 ### Compute-node and Task Hooks
 

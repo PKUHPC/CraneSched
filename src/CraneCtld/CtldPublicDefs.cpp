@@ -18,10 +18,6 @@
 
 #include "CtldPublicDefs.h"
 
-#include <grp.h>
-
-#include <cerrno>
-
 #include "Array.h"
 #include "Database/EmbeddedDbClient.h"
 #include "JobScheduler.h"
@@ -2027,18 +2023,6 @@ RunPrologEpilogArgs JobInCtld::GetControllerHookArgs(bool is_epilog) const {
   add("JOB_UID", std::to_string(uid));
   add("JOB_GID", std::to_string(gid));
   if (!username.empty()) add("JOB_USER", username);
-
-  // The execution GID can differ from the user's passwd primary group.
-  const long group_buf_size = sysconf(_SC_GETGR_R_SIZE_MAX);
-  std::vector<char> group_buf(group_buf_size > 0 ? group_buf_size : 16384);
-  struct group group_entry{};
-  struct group* group_result = nullptr;
-  int rc;
-  while ((rc = getgrgid_r(gid, &group_entry, group_buf.data(), group_buf.size(),
-                          &group_result)) == ERANGE)
-    group_buf.resize(group_buf.size() * 2);
-  if (rc == 0 && group_result != nullptr)
-    add("JOB_GROUP", group_result->gr_name);
 
   add("JOB_NAME", name);
   add("JOB_ACCOUNT", account);
