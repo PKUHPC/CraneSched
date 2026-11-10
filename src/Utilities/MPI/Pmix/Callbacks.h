@@ -47,20 +47,6 @@ class PmixServerCallbacks {
                                        void* server_object,
                                        pmix_op_cbfunc_t cbfunc, void* cbdata);
 
-  static pmix_status_t Abort(const pmix_proc_t* pmix_proc, void* server_object,
-                             int status, const char msg[],
-                             pmix_proc_t pmix_procs[], size_t nprocs,
-                             pmix_op_cbfunc_t cbfunc, void* cbdata);
-
-  static pmix_status_t FenceNb(const pmix_proc_t procs[], size_t nprocs,
-                               const pmix_info_t info[], size_t ninfo,
-                               char* data, size_t ndata,
-                               pmix_modex_cbfunc_t cbfunc, void* cbdata);
-
-  static pmix_status_t DModex(const pmix_proc_t* proc, const pmix_info_t info[],
-                              size_t ninfo, pmix_modex_cbfunc_t cbfunc,
-                              void* cbdata);
-
   static pmix_status_t JobControl(const pmix_proc_t* proct,
                                   const pmix_proc_t targets[], size_t ntargets,
                                   const pmix_info_t directives[], size_t ndirs,

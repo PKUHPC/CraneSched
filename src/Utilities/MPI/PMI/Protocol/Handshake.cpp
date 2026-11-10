@@ -21,7 +21,7 @@
 namespace pmi {
 void Server::Impl::Decode_(Client& c) {
   while (!c.input.empty() && !m_failed_ && !c.closing) {
-    if (!c.negotiated) {
+    if (!c.protocol.has_value()) {
       auto end = c.input.find('\n');
       if (end == std::string::npos) {
         if (c.input.size() > 1024) Fail_("oversized PMI initialization");
@@ -54,7 +54,6 @@ void Server::Impl::Decode_(Client& c) {
       if (supported) {
         m_protocol_ = requested_protocol;
         c.protocol = requested_protocol;
-        c.negotiated = true;
         c.initialized = requested_protocol == Protocol::kPmi11;
       }
       if (!consistent) Fail_("inconsistent PMI protocol versions in step");

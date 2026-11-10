@@ -39,7 +39,6 @@ struct Server::Impl : crane::grpc::mpi::pmi::Pmi::Service {
     int fd{-1};
     uint32_t rank{};
     std::optional<Protocol> protocol;
-    bool negotiated{false};
     bool initialized{false};
     bool finalized{false};
     bool closing{false};
@@ -54,7 +53,6 @@ struct Server::Impl : crane::grpc::mpi::pmi::Pmi::Service {
   mpi::Config m_config_;
   crane::grpc::StepToD m_step_;
   std::string m_jobid_;
-  std::string m_mapping_;
   uint32_t m_node_{};
   size_t m_local_size_{};
   std::vector<uint32_t> m_local_ranks_;
@@ -78,13 +76,11 @@ struct Server::Impl : crane::grpc::mpi::pmi::Pmi::Service {
   std::map<CranedId, Fields> m_contributions_;
   uint64_t m_epoch_{0};
   std::optional<uint64_t> m_completed_epoch_;
-  Fields m_completed_kvs_;
   std::optional<std::chrono::steady_clock::time_point> m_fence_deadline_;
   std::unique_ptr<grpc::ClientContext> m_outgoing_context_;
   int m_wake_fd_{-1};
   bool m_stopping_{false};
   bool m_failed_{false};
-  bool m_failure_reported_{false};
   std::function<void()> m_on_failure_;
   std::chrono::seconds m_timeout_;
 

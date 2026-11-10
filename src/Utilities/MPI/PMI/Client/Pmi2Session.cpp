@@ -82,7 +82,7 @@ int Session::Initialize(int* spawned, int* size, int* rank, int* appnum) {
     *spawned = 0;
     *size = m_size_ = 1;
     *rank = m_rank_ = 0;
-    *appnum = m_appnum_ = -1;
+    *appnum = -1;
     if (const char* jobid = std::getenv("PMI_JOBID")) m_jobid_ = jobid;
     return PMI2_SUCCESS;
   }
@@ -146,12 +146,11 @@ int Session::Initialize(int* spawned, int* size, int* rank, int* appnum) {
 
   m_rank_ = *response_rank;
   m_size_ = *response_size;
-  m_appnum_ = *response_appnum;
   m_state_ = State::kConnected;
   *spawned = fields->contains("spawner-jobid") ? 1 : 0;
   *size = m_size_;
   *rank = m_rank_;
-  *appnum = m_appnum_;
+  *appnum = *response_appnum;
   return PMI2_SUCCESS;
 }
 
@@ -364,39 +363,29 @@ int Session::CopyArray(std::string_view source, int* array, int array_length,
 
 int Session::NodeAttrGetIntArray(const char* name, int* array, int array_length,
                                  int* output_length, int* found) {
-  if (name == nullptr || array == nullptr || output_length == nullptr ||
-      found == nullptr)
-    return PMI2_ERR_INVALID_ARG;
-  std::lock_guard lock(m_mutex_);
-  if (m_state_ != State::kConnected) return PMI2_ERR_INIT;
-  Fields response;
-  int result =
-      CommandLocked("info-getnodeattr", {{"key", name}, {"wait", "FALSE"}},
-                    "info-getnodeattr-response", &response);
-  if (result != PMI2_SUCCESS) return result;
-  auto found_value = response.find("found");
-  if (found_value == response.end()) return PMI2_ERR_OTHER;
-  *found = IsTrue(found_value->second) ? 1 : 0;
-  if (!*found) {
-    *output_length = 0;
-    return PMI2_SUCCESS;
-  }
-  auto value = response.find("value");
-  return value == response.end()
-             ? PMI2_ERR_OTHER
-             : CopyArray(value->second, array, array_length, output_length);
+  return AttributeGetIntArray("info-getnodeattr", name, array, array_length,
+                              output_length, found);
 }
 
 int Session::JobAttrGetIntArray(const char* name, int* array, int array_length,
                                 int* output_length, int* found) {
+  return AttributeGetIntArray("info-getjobattr", name, array, array_length,
+                              output_length, found);
+}
+
+int Session::AttributeGetIntArray(std::string_view command, const char* name,
+                                  int* array, int array_length,
+                                  int* output_length, int* found) {
   if (name == nullptr || array == nullptr || output_length == nullptr ||
       found == nullptr)
     return PMI2_ERR_INVALID_ARG;
   std::lock_guard lock(m_mutex_);
   if (m_state_ != State::kConnected) return PMI2_ERR_INIT;
+  Fields request{{"key", name}};
+  if (command == "info-getnodeattr") request["wait"] = "FALSE";
   Fields response;
-  int result = CommandLocked("info-getjobattr", {{"key", name}},
-                             "info-getjobattr-response", &response);
+  int result = CommandLocked(command, request,
+                             std::string(command) + "-response", &response);
   if (result != PMI2_SUCCESS) return result;
   auto found_value = response.find("found");
   if (found_value == response.end()) return PMI2_ERR_OTHER;
