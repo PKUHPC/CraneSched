@@ -30,7 +30,11 @@ extern "C" {
 #include <shadow/subid.h>
 }
 
+#include <cerrno>
+#include <cstddef>
 #include <cstdio>
+#include <cstdlib>
+#include <limits>
 
 #if !defined(SUBID_ABI_MAJOR) || SUBID_ABI_MAJOR < 4
 
@@ -45,4 +49,16 @@ FILE* shadow_logfd = nullptr;
 
 }  // extern "C"
 
+#endif
+
+#if !CRANE_HAVE_REALLOCARRAY
+// Static libsubid may require this symbol even when libc does not provide it.
+extern "C" void* reallocarray(void* pointer, std::size_t count,
+                              std::size_t size) {
+  if (size != 0 && count > std::numeric_limits<std::size_t>::max() / size) {
+    errno = ENOMEM;
+    return nullptr;
+  }
+  return std::realloc(pointer, count * size);
+}
 #endif
