@@ -1,13 +1,11 @@
 include(CheckLibraryExists)
 
 check_library_exists(c reallocarray "" CRANE_HAVE_REALLOCARRAY)
-set(UTILITY_PASSWORD_ENTRY_COMPAT_SOURCES SubidCompat.cpp)
-if (NOT CRANE_HAVE_REALLOCARRAY)
-    list(APPEND UTILITY_PASSWORD_ENTRY_COMPAT_SOURCES ReallocarrayCompat.cpp)
-endif ()
 
 add_library(Utility_PasswordEntry_SubidCompat OBJECT
-        ${UTILITY_PASSWORD_ENTRY_COMPAT_SOURCES})
+        SubidCompat.cpp)
+target_compile_definitions(Utility_PasswordEntry_SubidCompat PRIVATE
+        CRANE_HAVE_REALLOCARRAY=$<BOOL:${CRANE_HAVE_REALLOCARRAY}>)
 target_link_libraries(Utility_PasswordEntry_SubidCompat PRIVATE Subid::subid)
 
 add_library(Utility_PasswordEntry INTERFACE
