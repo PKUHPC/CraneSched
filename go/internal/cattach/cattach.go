@@ -30,13 +30,16 @@ import (
 	"os/signal"
 	"strconv"
 	"strings"
+	"sync"
 	"syscall"
 
 	"github.com/pkg/term/termios"
 	log "github.com/sirupsen/logrus"
 	"golang.org/x/sys/unix"
 	"google.golang.org/grpc"
+	"google.golang.org/grpc/codes"
 	"google.golang.org/grpc/credentials/insecure"
+	"google.golang.org/grpc/status"
 )
 
 type StateOfCattach int
@@ -91,34 +94,52 @@ func stepHasTaskId(step *protos.CattachStepInfo, taskId uint32) bool {
 }
 
 type CforedReplyReceiver struct {
+	ctx          context.Context
 	stream       protos.CraneForeD_CattachStreamClient
 	replyChannel chan ReplyReceiveItem
+	wg           sync.WaitGroup
 }
 
 func (r *CforedReplyReceiver) GetReplyChannel() chan ReplyReceiveItem {
 	return r.replyChannel
 }
 
-func (r *CforedReplyReceiver) StartReplyReceiveRoutine(stream protos.CraneForeD_CattachStreamClient) {
+func (r *CforedReplyReceiver) StartReplyReceiveRoutine(ctx context.Context, stream protos.CraneForeD_CattachStreamClient) {
+	r.ctx = ctx
 	r.stream = stream
 	r.replyChannel = make(chan ReplyReceiveItem, 8)
+	r.wg.Add(1)
 	go r.ReplyReceiveRoutine()
 }
 
+func (r *CforedReplyReceiver) Wait() {
+	r.wg.Wait()
+}
+
 func (r *CforedReplyReceiver) ReplyReceiveRoutine() {
+	defer r.wg.Done()
 	for {
+		select {
+		case <-r.ctx.Done():
+			return
+		default:
+		}
 		cforedReply, err := r.stream.Recv()
-		r.replyChannel <- ReplyReceiveItem{
-			reply: cforedReply,
-			err:   err,
+		// Only a locally cancelled stream may treat Canceled as normal shutdown.
+		// A server-side cancellation must still be reported as a connection error.
+		if err != nil && err != io.EOF && !(r.ctx.Err() != nil && status.Code(err) == codes.Canceled) {
+			log.Errorf("Failed to receive CforedReply: %s. "+
+				"Connection to Cfored is broken. "+
+				"ReplyReceiveRoutine is exiting...", err)
+		}
+		select {
+		case r.replyChannel <- ReplyReceiveItem{reply: cforedReply, err: err}:
+		case <-r.ctx.Done():
+			// The state machine may already have stopped consuming replies.
+			return
 		}
 		if err != nil {
-			if err != io.EOF {
-				log.Errorf("Failed to receive CforedReply: %s. "+
-					"Connection to Cfored is broken. "+
-					"ReplyReceiveRoutine is exiting...", err)
-			}
-			break
+			return
 		}
 	}
 }
@@ -133,9 +154,10 @@ type StateMachineOfCattach struct {
 	err   util.ExitCode // Hold the final error of the state machine if any
 
 	// Hold grpc resources and will be freed in Close.
-	conn   *grpc.ClientConn
-	client protos.CraneForeDClient
-	stream grpc.BidiStreamingClient[protos.StreamCattachRequest, protos.StreamCattachReply]
+	conn         *grpc.ClientConn
+	client       protos.CraneForeDClient
+	stream       grpc.BidiStreamingClient[protos.StreamCattachRequest, protos.StreamCattachReply]
+	streamCancel context.CancelFunc
 
 	sigs         chan os.Signal
 	savedPtyAttr unix.Termios
@@ -161,12 +183,20 @@ func (m *StateMachineOfCattach) Init() {
 }
 
 func (m *StateMachineOfCattach) Close() {
+	signal.Stop(m.sigs)
+	// Mark local shutdown before closing the connection and unblocking Recv.
+	if m.streamCancel != nil {
+		m.streamCancel()
+	}
 	if m.conn == nil {
 		return
 	}
 	err := m.conn.Close()
 	if err != nil {
 		log.Errorf("Failed to close grpc conn: %s", err)
+	}
+	if m.cforedReplyReceiver != nil {
+		m.cforedReplyReceiver.Wait()
 	}
 
 	if FlagPty {
@@ -201,7 +231,9 @@ func (m *StateMachineOfCattach) StateConnectCfored() {
 	m.client = protos.NewCraneForeDClient(m.conn)
 
 	log.Trace("Connecting to Cfored....")
-	m.stream, err = m.client.CattachStream(gVars.globalCtx)
+	streamCtx, streamCancel := context.WithCancel(gVars.globalCtx)
+	m.streamCancel = streamCancel
+	m.stream, err = m.client.CattachStream(streamCtx)
 	if err != nil {
 		log.Errorf("Failed to create CattachStream: %s.", err)
 		m.err = util.ErrorNetwork
@@ -210,7 +242,7 @@ func (m *StateMachineOfCattach) StateConnectCfored() {
 	}
 
 	m.cforedReplyReceiver = new(CforedReplyReceiver)
-	m.cforedReplyReceiver.StartReplyReceiveRoutine(m.stream)
+	m.cforedReplyReceiver.StartReplyReceiveRoutine(streamCtx, m.stream)
 
 	request := &protos.StreamCattachRequest{
 		Type: protos.StreamCattachRequest_STEP_CONNECT_REQUEST,
@@ -775,6 +807,7 @@ func (m *StateMachineOfCattach) PrintStepLayout() {
 func MainCattach(args []string) error {
 
 	gVars.globalCtx, gVars.globalCtxCancel = context.WithCancel(context.Background())
+	defer gVars.globalCtxCancel()
 
 	// TODO: implement --error-filter: currently this flag is a no-op because the stderr stream does not carry per-task metadata (task_id), which is needed to filter by task. Implementing this would require adding task_id to the TaskErrOutputReq proto message and propagating it through cfored/supervisor. For now we return an error if the user tries to use --error-filter to avoid confusion about why it doesn't work.
 	if FlagErrorFilter >= 0 {
