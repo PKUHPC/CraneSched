@@ -3856,21 +3856,14 @@ bool MongodbClient::UpdateUser(const Ctld::User& user) {
   document doc = UserToDocument_(user), set_document, filter;
   doc.append(kvp("mod_time", ToUnixSeconds(absl::Now())));
   set_document.append(kvp("$set", doc));
-
   filter.append(kvp("name", user.name));
 
-  try {
-    bsoncxx::stdx::optional<mongocxx::result::update> update_result =
-        (*GetClient_())[m_db_name_][m_user_collection_name_].update_one(
-            *GetSession_(), filter.view(), set_document.view());
-
-    if (!update_result || update_result->modified_count() == 0) {
-      return false;
-    }
-  } catch (const std::exception& e) {
-    CRANE_LOGGER_ERROR(m_logger_, e.what());
-  }
-  return true;
+  // Let driver exceptions reach with_transaction so transient failures can
+  // retry the entire transaction. A matching, unchanged document is success.
+  const auto result =
+      (*GetClient_())[m_db_name_][m_user_collection_name_].update_one(
+          *GetSession_(), filter.view(), set_document.view());
+  return result && result->matched_count() == 1;
 }
 
 bool MongodbClient::UpdateWckey(const Wckey& wckey) {
@@ -3900,21 +3893,14 @@ bool MongodbClient::UpdateAccount(const Ctld::Account& account) {
   document doc = AccountToDocument_(account), set_document, filter;
   doc.append(kvp("mod_time", ToUnixSeconds(absl::Now())));
   set_document.append(kvp("$set", doc));
-
   filter.append(kvp("name", account.name));
 
-  try {
-    bsoncxx::stdx::optional<mongocxx::result::update> update_result =
-        (*GetClient_())[m_db_name_][m_account_collection_name_].update_one(
-            *GetSession_(), filter.view(), set_document.view());
-
-    if (!update_result || update_result->modified_count() == 0) {
-      return false;
-    }
-  } catch (const std::exception& e) {
-    CRANE_LOGGER_ERROR(m_logger_, e.what());
-  }
-  return true;
+  // Let driver exceptions reach with_transaction so transient failures can
+  // retry the entire transaction. A matching, unchanged document is success.
+  const auto result =
+      (*GetClient_())[m_db_name_][m_account_collection_name_].update_one(
+          *GetSession_(), filter.view(), set_document.view());
+  return result && result->matched_count() == 1;
 }
 
 bool MongodbClient::UpdateQos(const Ctld::Qos& qos) {

@@ -383,23 +383,6 @@ class AccountManager {
   bool IsDefaultQosOfAnyPartitionNoLock_(const User* user,
                                          const std::string& qos);
 
-  int DeleteAccountAllowedQosFromDBNoLock_(const std::string& name,
-                                           const std::string& qos);
-  bool DeleteAccountAllowedQosFromMapNoLock_(const std::string& name,
-                                             const std::string& qos);
-
-  bool DeleteUserAllowedQosOfAllPartitionFromDBNoLock_(
-      const std::string& name, const std::string& account,
-      const std::string& qos);
-  bool DeleteUserAllowedQosOfAllPartitionFromMapNoLock_(
-      const std::string& name, const std::string& account,
-      const std::string& qos);
-
-  bool DeleteAccountAllowedPartitionFromDBNoLock_(const std::string& name,
-                                                  const std::string& partition);
-  bool DeleteAccountAllowedPartitionFromMapNoLock_(
-      const std::string& name, const std::string& partition);
-
   void AddTxnLogToDB_(const std::string& actor_name, const std::string& target,
                       TxnAction action, const std::string& info);
 

@@ -18,6 +18,8 @@
 
 #include "AccountManager.h"
 
+#include <stdexcept>
+
 #include "Accounting/AccountMetaContainer.h"
 #include "Security/VaultClient.h"
 #include "protos/PublicDefs.pb.h"
@@ -1068,44 +1070,136 @@ std::vector<CraneExpectedRich<void>> AccountManager::ModifyAccount(
   if (!check_result.empty()) {
     return check_result;
   }
-  mongocxx::client_session::with_transaction_cb callback =
-      [&](mongocxx::client_session* session) {
-        for (auto& [name, modify_field, val] : modify_record) {
-          if (modify_field == ModifyField::Partition) {
-            DeleteAccountAllowedPartitionFromDBNoLock_(account_name, name);
-          } else if (modify_field == ModifyField::Qos) {
-            if (!val) {
-              int num =
-                  DeleteAccountAllowedQosFromDBNoLock_(account_name, name);
-              val = std::optional<int>(-num);
-            }
-            IncQosReferenceCountInDb_(name, val.value());
+  // Accumulate every cascade on one copy per identity. The same user can
+  // occur in several accounts and in several QoS deletion records.
+  std::unordered_map<std::string, std::unique_ptr<Account>> changed_accounts;
+  std::unordered_map<std::string, std::unique_ptr<User>> changed_users;
+  std::unordered_map<std::string, int> qos_reference_deltas;
+
+  auto account_copy = [&](const std::string& name) -> Account& {
+    auto it = changed_accounts.find(name);
+    if (it != changed_accounts.end()) return *it->second;
+    const auto* original = GetExistedAccountInfoNoLock_(name);
+    if (!original)
+      throw std::runtime_error(
+          fmt::format("Cascade account '{}' not found", name));
+    return *changed_accounts.emplace(name, std::make_unique<Account>(*original))
+                .first->second;
+  };
+  auto user_copy = [&](const std::string& name) -> User& {
+    auto it = changed_users.find(name);
+    if (it != changed_users.end()) return *it->second;
+    const auto* original = GetExistedUserInfoNoLock_(name);
+    if (!original)
+      throw std::runtime_error(
+          fmt::format("Cascade user '{}' not found", name));
+    return *changed_users.emplace(name, std::make_unique<User>(*original))
+                .first->second;
+  };
+
+  try {
+    auto cascade = [&](auto&& self, const std::string& name, ModifyField field,
+                       const std::string& value) -> void {
+      auto& copy = account_copy(name);
+      auto& allowed = field == ModifyField::Qos ? copy.allowed_qos_list
+                                                : copy.allowed_partition;
+      if (!ranges::contains(allowed, value)) return;
+      for (const auto& child : copy.child_accounts)
+        self(self, child, field, value);
+      for (const auto& username : copy.users) {
+        auto& user = user_copy(username);
+        auto attrs = user.account_to_attrs_map.find(name);
+        if (attrs == user.account_to_attrs_map.end())
+          throw std::runtime_error(fmt::format(
+              "Cascade user '{}' is not in account '{}'", username, name));
+        if (field == ModifyField::Partition) {
+          attrs->second.allowed_partition_qos_map.erase(value);
+          attrs->second.partition_to_limit_map.erase(value);
+        } else {
+          for (auto& [partition, qos] :
+               attrs->second.allowed_partition_qos_map) {
+            qos.second.remove(value);
+            if (qos.first == value)
+              qos.first = qos.second.empty() ? "" : qos.second.front();
           }
         }
-        g_db_client->UpdateAccount(res_account);
-        AddTxnLogToDB_(actor_name, account_name, TxnAction::ModifyAccount, log);
-      };
+      }
+      allowed.remove(value);
+      if (field == ModifyField::Partition) {
+        copy.partition_to_limit_map.erase(value);
+      } else if (copy.default_qos == value) {
+        copy.default_qos = allowed.empty() ? "" : allowed.front();
+      }
+    };
 
-  // Update to database
-  if (!g_db_client->CommitTransaction(callback)) {
+    // Keep deletion/addition order: adding permission back to the target does
+    // not restore permissions already removed from its descendants or users.
+    for (const auto& [name, field, val] : modify_record) {
+      if (field == ModifyField::Partition || !val) {
+        cascade(cascade, account_name, field, name);
+      } else {
+        auto& allowed = account_copy(account_name).allowed_qos_list;
+        if (!ranges::contains(allowed, name)) allowed.emplace_back(name);
+      }
+    }
+    // Include explicit default, description and partition-limit operations.
+    account_copy(account_name) = std::move(res_account);
+
+    // References count account associations, not users or partitions.
+    for (const auto& [name, copy] : changed_accounts) {
+      const auto& original = *m_account_map_.at(name);
+      std::unordered_set<std::string> before(original.allowed_qos_list.begin(),
+                                             original.allowed_qos_list.end());
+      std::unordered_set<std::string> after(copy->allowed_qos_list.begin(),
+                                            copy->allowed_qos_list.end());
+      for (const auto& qos : before)
+        if (!after.contains(qos)) --qos_reference_deltas[qos];
+      for (const auto& qos : after)
+        if (!before.contains(qos)) ++qos_reference_deltas[qos];
+    }
+    Txn txn;
+    txn.creation_time = ToUnixSeconds(absl::Now());
+    txn.actor = actor_name;
+    txn.target = account_name;
+    txn.action = TxnAction::ModifyAccount;
+    txn.info = log;
+
+    // with_transaction can replay this callback. It must only read the
+    // accumulated result; no plans or live maps are modified before commit.
+    bool committed =
+        g_db_client->CommitTransaction([&](mongocxx::client_session* session) {
+          for (const auto& [name, copy] : changed_accounts)
+            if (!g_db_client->UpdateAccount(*copy))
+              throw std::runtime_error(
+                  fmt::format("Failed to update account '{}'", name));
+          for (const auto& [name, copy] : changed_users)
+            if (!g_db_client->UpdateUser(*copy))
+              throw std::runtime_error(
+                  fmt::format("Failed to update user '{}'", name));
+          for (const auto& [name, delta] : qos_reference_deltas)
+            if (delta != 0 && !IncQosReferenceCountInDb_(name, delta))
+              throw std::runtime_error(
+                  fmt::format("Failed to update QoS '{}' references", name));
+          if (!g_db_client->InsertTxn(txn))
+            throw std::runtime_error(
+                "Failed to insert account modification log");
+        });
+    if (!committed)
+      throw std::runtime_error("Account modification transaction failed");
+  } catch (const std::exception& e) {
+    CRANE_ERROR("Failed to modify account '{}': {}", account_name, e.what());
     rich_error_list.emplace_back(
         std::unexpected{FormatRichErr(CraneErrCode::ERR_UPDATE_DATABASE, "")});
     return rich_error_list;
   }
 
-  for (auto& [name, modify_field, val] : modify_record) {
-    if (modify_field == ModifyField::Partition) {
-      DeleteAccountAllowedPartitionFromMapNoLock_(account_name, name);
-    } else if (modify_field == ModifyField::Qos) {
-      int num = val.value();
-      if (num < 0) {
-        DeleteAccountAllowedQosFromMapNoLock_(account_name, name);
-      }
-      m_qos_map_[name]->reference_count += num;
-    }
-  }
-  m_account_map_[account_name] =
-      std::make_unique<Account>(std::move(res_account));
+  // Copies were allocated before the transaction. Publish the exact persisted
+  // objects under the existing write locks, without a second cascade.
+  for (auto& [name, copy] : changed_accounts)
+    m_account_map_.at(name).swap(copy);
+  for (auto& [name, copy] : changed_users) m_user_map_.at(name).swap(copy);
+  for (const auto& [name, delta] : qos_reference_deltas)
+    m_qos_map_.at(name)->reference_count += delta;
   return rich_error_list;
 }
 
@@ -3560,7 +3654,7 @@ void AccountManager::SetAccountAllowedQos_(
     }
   }
 
-  if (account->default_qos.empty()) {
+  if (account->default_qos.empty() && !account->allowed_qos_list.empty()) {
     account->default_qos = account->allowed_qos_list.front();
   }
 
@@ -3689,226 +3783,6 @@ bool AccountManager::IsDefaultQosOfAnyPartitionNoLock_(const User* user,
   }
 
   return false;
-}
-
-/**
- * @note need read lock(m_rw_user_mutex_ && m_rw_account_mutex_)
- */
-int AccountManager::DeleteAccountAllowedQosFromDBNoLock_(
-    const std::string& name, const std::string& qos) {
-  const Account* account = GetExistedAccountInfoNoLock_(name);
-  if (!account) {
-    CRANE_ERROR(
-        "Operating on a non-existent account '{}', please check this item "
-        "in database and restart cranectld",
-        name);
-    return false;
-  }
-
-  if (!ranges::contains(account->allowed_qos_list, qos)) return false;
-
-  int change_num = 1;
-  for (const auto& child : account->child_accounts) {
-    change_num += DeleteAccountAllowedQosFromDBNoLock_(child, qos);
-  }
-
-  for (const auto& user : account->users) {
-    DeleteUserAllowedQosOfAllPartitionFromDBNoLock_(user, name, qos);
-  }
-  g_db_client->UpdateEntityOne(MongodbClient::EntityType::ACCOUNT, "$pull",
-                               name, "allowed_qos_list", qos);
-
-  if (account->default_qos == qos) {
-    std::list<std::string> temp{account->allowed_qos_list};
-    temp.remove(qos);
-    std::string new_default = temp.empty() ? "" : temp.front();
-    g_db_client->UpdateEntityOne(MongodbClient::EntityType::ACCOUNT, "$set",
-                                 name, "default_qos", new_default);
-  }
-  return change_num;
-}
-
-/**
- * @note need write lock(m_rw_account_mutex_) and write *
- * lock(m_rw_user_mutex_)
- */
-bool AccountManager::DeleteAccountAllowedQosFromMapNoLock_(
-    const std::string& name, const std::string& qos) {
-  const Account* account = GetExistedAccountInfoNoLock_(name);
-  if (!account) {
-    CRANE_ERROR(
-        "Operating on a non-existent account '{}', please check this item "
-        "in database and restart cranectld",
-        name);
-    return false;
-  }
-
-  if (!ranges::contains(account->allowed_qos_list, qos)) return false;
-
-  for (const auto& child : account->child_accounts) {
-    DeleteAccountAllowedQosFromMapNoLock_(child, qos);
-  }
-
-  for (const auto& user : account->users) {
-    DeleteUserAllowedQosOfAllPartitionFromMapNoLock_(user, name, qos);
-  }
-  m_account_map_[name]->allowed_qos_list.remove(qos);
-  if (account->default_qos == qos) {
-    m_account_map_[name]->default_qos = account->allowed_qos_list.empty()
-                                            ? ""
-                                            : account->allowed_qos_list.front();
-  }
-  return true;
-}
-
-/**
- * @note need read lock(m_rw_user_mutex_)
- */
-bool AccountManager::DeleteUserAllowedQosOfAllPartitionFromDBNoLock_(
-    const std::string& name, const std::string& account,
-    const std::string& qos) {
-  const User* p = GetExistedUserInfoNoLock_(name);
-  if (!p) {
-    CRANE_ERROR(
-        "Operating on a non-existent user '{}', please check this item in "
-        "database and restart cranectld",
-        name);
-    return false;
-  }
-  if (!p->account_to_attrs_map.contains(account)) {
-    CRANE_ERROR("User '{}' doesn't belong to account '{}'", name, account);
-    return false;
-  }
-  User user(*p);
-
-  for (auto& [par, pair] :
-       user.account_to_attrs_map[account].allowed_partition_qos_map) {
-    if (ranges::contains(pair.second, qos)) pair.second.remove(qos);
-
-    if (pair.first == qos) {
-      pair.first = pair.second.empty() ? "" : pair.second.front();
-    }
-  }
-  g_db_client->UpdateUser(user);
-  return true;
-}
-
-/**
- * @note need write lock(m_rw_user_mutex_)
- * @param name
- * @param account
- * @param qos
- * @return
- */
-bool AccountManager::DeleteUserAllowedQosOfAllPartitionFromMapNoLock_(
-    const std::string& name, const std::string& account,
-    const std::string& qos) {
-  const User* p = GetExistedUserInfoNoLock_(name);
-  if (!p) {
-    CRANE_ERROR(
-        "Operating on a non-existent user '{}', please check this item in "
-        "database and restart cranectld",
-        name);
-    return false;
-  }
-  if (!p->account_to_attrs_map.contains(account)) {
-    CRANE_ERROR("User '{}' doesn't belong to account '{}'", name, account);
-    return false;
-  }
-  User user(*p);
-
-  for (auto& [par, qos_pair] :
-       user.account_to_attrs_map[account].allowed_partition_qos_map) {
-    qos_pair.second.remove(qos);
-    if (qos_pair.first == qos) {
-      qos_pair.first = qos_pair.second.empty() ? "" : qos_pair.second.front();
-    }
-  }
-  m_user_map_[user.name]
-      ->account_to_attrs_map[account]
-      .allowed_partition_qos_map =
-      user.account_to_attrs_map[account].allowed_partition_qos_map;
-  return true;
-}
-
-/**
- * @note need read lock(m_rw_account_mutex_)
- * @param name
- * @param partition
- * @return
- */
-bool AccountManager::DeleteAccountAllowedPartitionFromDBNoLock_(
-    const std::string& name, const std::string& partition) {
-  const Account* account = GetExistedAccountInfoNoLock_(name);
-  if (!account) {
-    CRANE_ERROR(
-        "Operating on a non-existent account '{}', please check this item "
-        "in database and restart cranectld",
-        name);
-    return false;
-  }
-
-  if (!ranges::contains(account->allowed_partition, partition)) return false;
-
-  for (const auto& child : account->child_accounts) {
-    DeleteAccountAllowedPartitionFromDBNoLock_(child, partition);
-  }
-
-  for (const auto& user : account->users) {
-    g_db_client->UpdateEntityOne(Ctld::MongodbClient::EntityType::USER,
-                                 "$unset", user,
-                                 "account_to_attrs_map." + name +
-                                     ".allowed_partition_qos_map." + partition,
-                                 std::string(""));
-    g_db_client->UpdateEntityOne(
-        Ctld::MongodbClient::EntityType::USER, "$unset", user,
-        "account_to_attrs_map." + name + ".partition_to_limit_map." + partition,
-        std::string(""));
-  }
-
-  g_db_client->UpdateEntityOne(MongodbClient::EntityType::ACCOUNT, "$pull",
-                               account->name, "allowed_partition", partition);
-  g_db_client->UpdateEntityOne(
-      MongodbClient::EntityType::ACCOUNT, "$unset", account->name,
-      "partition_to_limit_map." + partition, std::string(""));
-  return true;
-}
-
-/**
- * @note need write lock(m_rw_account_mutex_) and write
- * lock(m_rw_user_mutex_)
- * @param name
- * @param partition
- * @return
- */
-bool AccountManager::DeleteAccountAllowedPartitionFromMapNoLock_(
-    const std::string& name, const std::string& partition) {
-  const Account* account = GetExistedAccountInfoNoLock_(name);
-  if (!account) {
-    CRANE_ERROR(
-        "Operating on a non-existent account '{}', please check this item "
-        "in database and restart cranectld",
-        name);
-    return false;
-  }
-
-  if (!ranges::contains(account->allowed_partition, partition)) return false;
-
-  for (const auto& child : account->child_accounts) {
-    DeleteAccountAllowedPartitionFromMapNoLock_(child, partition);
-  }
-
-  for (const auto& user : account->users) {
-    m_user_map_[user]
-        ->account_to_attrs_map[name]
-        .allowed_partition_qos_map.erase(partition);
-    m_user_map_[user]->account_to_attrs_map[name].partition_to_limit_map.erase(
-        partition);
-  }
-  m_account_map_[account->name]->allowed_partition.remove(partition);
-  m_account_map_[account->name]->partition_to_limit_map.erase(partition);
-
-  return true;
 }
 
 void AccountManager::AddTxnLogToDB_(const std::string& actor_name,
