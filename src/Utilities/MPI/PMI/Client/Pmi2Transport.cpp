@@ -13,10 +13,28 @@
 #include <cerrno>
 #include <charconv>
 #include <cstring>
+#include <limits>
 
 #include "Pmi2Codec.h"
 
 namespace crane::pmi2 {
+namespace {
+bool WaitForFd(int fd, short events,
+               std::chrono::steady_clock::time_point deadline) {
+  for (;;) {
+    const auto remaining = std::chrono::ceil<std::chrono::milliseconds>(
+        deadline - std::chrono::steady_clock::now());
+    if (remaining <= std::chrono::milliseconds::zero()) return false;
+    const auto timeout = static_cast<int>(
+        std::min<int64_t>(remaining.count(), std::numeric_limits<int>::max()));
+    pollfd descriptor{fd, events, 0};
+    const int result = poll(&descriptor, 1, timeout);
+    if (result < 0 && errno == EINTR) continue;
+    return result > 0 && !(descriptor.revents & (POLLERR | POLLNVAL)) &&
+           (descriptor.revents & events);
+  }
+}
+}  // namespace
 
 Transport::Transport(int fd, std::chrono::seconds timeout)
     : m_fd_(fd),
@@ -27,12 +45,10 @@ Transport::~Transport() { Close(); }
 
 bool Transport::WriteAll(const void* data, size_t size) {
   const auto* bytes = static_cast<const char*>(data);
+  const auto deadline = std::chrono::steady_clock::now() + m_timeout_;
   while (size > 0) {
-    pollfd descriptor{m_fd_, POLLOUT, 0};
-    int wait = poll(&descriptor, 1, static_cast<int>(m_timeout_.count()));
-    if (wait <= 0 || (descriptor.revents & (POLLERR | POLLHUP | POLLNVAL)))
-      return false;
-    ssize_t written = send(m_fd_, bytes, size, MSG_NOSIGNAL);
+    if (!WaitForFd(m_fd_, POLLOUT, deadline)) return false;
+    ssize_t written = send(m_fd_, bytes, size, MSG_NOSIGNAL | MSG_DONTWAIT);
     if (written > 0) {
       bytes += written;
       size -= static_cast<size_t>(written);
@@ -46,11 +62,10 @@ bool Transport::WriteAll(const void* data, size_t size) {
 
 bool Transport::ReadAll(void* data, size_t size) {
   auto* bytes = static_cast<char*>(data);
+  const auto deadline = std::chrono::steady_clock::now() + m_timeout_;
   while (size > 0) {
-    pollfd descriptor{m_fd_, POLLIN, 0};
-    int wait = poll(&descriptor, 1, static_cast<int>(m_timeout_.count()));
-    if (wait <= 0 || (descriptor.revents & (POLLERR | POLLNVAL))) return false;
-    ssize_t received = recv(m_fd_, bytes, size, 0);
+    if (!WaitForFd(m_fd_, POLLIN, deadline)) return false;
+    ssize_t received = recv(m_fd_, bytes, size, MSG_DONTWAIT);
     if (received > 0) {
       bytes += received;
       size -= static_cast<size_t>(received);

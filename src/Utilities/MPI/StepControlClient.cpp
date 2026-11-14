@@ -63,6 +63,7 @@ bool StepControlClient::ReportEndpoint(std::string_view address) {
 void StepControlClient::TerminateSteps() {
   if (!m_stub_) return;
   crane::grpc::TerminateStepsRequest request;
+  request.set_terminate_source(crane::grpc::TERMINATE_SOURCE_MPI_FAILURE);
   (*request.mutable_job_step_ids_map())[m_job_id_].add_steps(m_step_id_);
   crane::grpc::TerminateStepsReply reply;
   grpc::ClientContext context;

@@ -10,7 +10,7 @@ Vendor selectors and SDK library paths remain part of the user's environment.
 | --- | --- |
 | `Runtime.*`, `Environment.*` | Runtime selection, task channel ownership and replacement of inherited protocol identity |
 | `StepControlClient.*`, `EndpointRendezvous.*` | Protocol-independent endpoint exchange and step termination |
-| `PMI/Runtime.*`, `PMI/Server/` | Local channels, step topology, KVS visibility and distributed fences |
+| `PMI/Runtime.*`, `PMI/Server/` | Local channels, step topology, KVS visibility, distributed fences and Ring scans |
 | `PMI/Protocol/` | Handshake, PMI-1 and PMI-2 dispatch, framing and reply encoding |
 | `PMI/Client/` | Public `libpmi2` client implementation and its installed header |
 | `Pmix/Server.*`, `Pmix/Namespace.cpp`, `Pmix/Operations.cpp` | PMIx lifecycle, namespace metadata and host operations |
@@ -30,9 +30,14 @@ are rejected. PMIx endpoints are opaque bytes because a UCX address need not be
 UTF-8. Fanout shares one immutable snapshot and performs RPCs outside scheduler
 and step-map locks.
 
-PMI uses one local I/O loop and a separate fence thread per step, not one thread
-per rank. PMI-1 and PMI-2 handlers share the KVS, fence and finalization state.
+PMI uses one local I/O loop and a separate collective thread per step, not one thread
+per rank. PMI-1 and PMI-2 handlers share the KVS, fence and finalization state. Ring and
+Fence have independent rounds and share the collective worker. Ring exchanges
+subtree summaries, rather than gathering all rank values at every node.
 Polling buffers and encoded process mappings are reused across requests.
+Initialization deadlines start on first client contact. A PMI runtime failure
+uses a dedicated termination source and becomes Failed, including failures
+during Starting; user cancellation remains Cancelled.
 
 Modex requests are indexed by sequence. Response, transport failure, timeout and
 shutdown all remove a pending request before completing it; callbacks run outside
@@ -44,7 +49,7 @@ callback. Collective shutdown similarly detaches state before invoking callbacks
 ## Protocol sources and upgrades
 
 `protos/mpi/Mpi.proto` owns common process identities and endpoint exchange;
-`Pmi.proto` owns PMI peer fences and aborts; `Pmix.proto` owns PMIx peer traffic.
+`Pmi.proto` owns PMI peer fences, Ring scans and aborts; `Pmix.proto` owns PMIx peer traffic.
 These are scheduler control messages. Application PMI-1/PMI-2 wire protocols and
 the PMIx client ABI are separate contracts. C++ and Go generation preserve the
 source hierarchy under their generated output roots.

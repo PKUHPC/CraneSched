@@ -1437,6 +1437,22 @@ CommonStepInCtld::StepStatusChange(crane::grpc::JobStatus new_status,
    */
   auto step_id = this->StepId();
 
+  // A task-level MPI failure is a step failure. Record it once and let the
+  // scheduler dispatch the same failure cause to every execution node after
+  // the state-machine lock is released.
+  if (exit_code == ExitCode::EC_MPI_ERR &&
+      (new_status == crane::grpc::JobStatus::Completing ||
+       new_status == crane::grpc::JobStatus::Failed) &&
+      this->SetPendingFinalResultIfUnset(crane::grpc::JobStatus::Failed,
+                                         exit_code)) {
+    CRANE_WARN("[Step #{}.{}] MPI failure from {}; terminating the whole step.",
+               job_id, step_id, craned_id);
+    for (const auto& node : this->ExecutionNodes()) {
+      if (node != craned_id && !m_completing_nodes_.contains(node))
+        context->craned_mpi_failure_steps[node][job->JobId()].insert(step_id);
+    }
+  }
+
   bool step_finished{false};
   bool step_all_completing{false};
   bool allow_release_on_terminal{false};

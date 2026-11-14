@@ -621,6 +621,10 @@ struct StepStatusChangeContext {
   std::unordered_map<CranedId,
                      std::unordered_map<job_id_t, std::set<step_id_t>>>
       craned_cancel_steps{};
+  // MPI failures terminate the whole step with an explicit failure cause.
+  std::unordered_map<CranedId,
+                     std::unordered_map<job_id_t, std::set<step_id_t>>>
+      craned_mpi_failure_steps{};
   // Steps will update in embeddedDb
   std::unordered_set<StepInCtld*> rn_step_raw_ptrs;
   std::unordered_set<StepInCtld*> step_raw_ptrs;

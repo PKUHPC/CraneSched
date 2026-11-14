@@ -3618,6 +3618,10 @@ void TaskManager::EvCleanFinalizingTaskQueueCb_() {
       ResolveFinishedTask_(task_id, crane::grpc::JobStatus::ExceedTimeLimit,
                            ExitCode::EC_EXCEED_TIME_LIMIT, fi->reason);
       continue;
+    case TaskFinalizeCause::MPI_FAILURE:
+      ResolveFinishedTask_(task_id, crane::grpc::JobStatus::Failed,
+                           ExitCode::EC_MPI_ERR, "MPI runtime failure");
+      continue;
     case TaskFinalizeCause::CANCELLED_BY_USER: {
       uint32_t exit_code = fi->raw_exit.has_value()
                                ? raw_exit_code(*fi->raw_exit)
@@ -3809,9 +3813,12 @@ void TaskManager::EvCleanTerminateStepQueueCb_() {
       m_step_.GotNewStatus(StepStatus::Completing);
 
       auto& final_status = m_step_.final_termination_status;
-      final_status.max_exit_code = 0U;
-      final_status.final_status_on_termination = StepStatus::Cancelled;
-      final_status.final_reason_on_termination.clear();
+      const bool mpi_failure = elem.cause == TaskFinalizeCause::MPI_FAILURE;
+      final_status.max_exit_code = mpi_failure ? ExitCode::EC_MPI_ERR : 0U;
+      final_status.final_status_on_termination =
+          mpi_failure ? StepStatus::Failed : StepStatus::Cancelled;
+      final_status.final_reason_on_termination =
+          mpi_failure ? "MPI runtime failure" : "";
 
       if (elem.cause != TaskFinalizeCause::NORMAL) {
         g_craned_client->StepStatusChangeAsync(
@@ -3820,7 +3827,9 @@ void TaskManager::EvCleanTerminateStepQueueCb_() {
             final_status.final_status_on_termination);
       }
 
-      g_task_mgr->ShutdownSupervisorAsync(StepStatus::Cancelled, 0U, "");
+      g_task_mgr->ShutdownSupervisorAsync(
+          final_status.final_status_on_termination, final_status.max_exit_code,
+          final_status.final_reason_on_termination);
       continue;
     }
 
@@ -3833,6 +3842,11 @@ void TaskManager::EvCleanTerminateStepQueueCb_() {
 
     for (task_id_t task_id : m_step_.GetTaskIds()) {
       auto* task = m_step_.GetTaskInstance(task_id);
+      // Closing channels while cancelling or timing out a task can report an
+      // MPI failure. Preserve the cause that initiated that shutdown.
+      if (elem.cause == TaskFinalizeCause::MPI_FAILURE &&
+          task->GetFinalInfo()->cause != TaskFinalizeCause::NORMAL)
+        continue;
       task->GetFinalInfo()->cause = elem.cause;
 
       if (task->GetExecId().has_value()) {

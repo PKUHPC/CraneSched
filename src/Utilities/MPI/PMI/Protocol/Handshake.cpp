@@ -55,6 +55,7 @@ void Server::Impl::Decode_(Client& c) {
         m_protocol_ = requested_protocol;
         c.protocol = requested_protocol;
         c.initialized = requested_protocol == Protocol::kPmi11;
+        c.deadline = std::chrono::steady_clock::now() + m_timeout_;
       }
       if (!consistent) Fail_("inconsistent PMI protocol versions in step");
       uint32_t response_version = version.value_or(2);

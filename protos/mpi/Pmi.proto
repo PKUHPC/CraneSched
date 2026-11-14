@@ -49,7 +49,28 @@ message AbortReply {
   bool ok = 1;
 }
 
+// A subtree contributes only its size and its two boundary values. The reply
+// supplies its starting ring rank and the values outside that subtree.
+message RingRequest {
+  uint32 job_id = 1;
+  uint32 step_id = 2;
+  uint64 epoch = 3;
+  string craned_id = 4;
+  uint32 pmi_version = 5;
+  uint32 count = 6;
+  string left = 7;
+  string right = 8;
+}
+
+message RingReply {
+  bool ok = 1;
+  uint32 rank = 2;
+  string left = 3;
+  string right = 4;
+}
+
 service Pmi {
   rpc Fence(FenceRequest) returns (FenceReply);
   rpc Abort(AbortRequest) returns (AbortReply);
+  rpc Ring(RingRequest) returns (RingReply);
 }

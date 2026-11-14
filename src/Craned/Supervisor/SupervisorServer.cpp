@@ -92,6 +92,9 @@ grpc::Status SupervisorServiceImpl::TerminateStep(
     crane::grpc::supervisor::TerminateStepReply* response) {
   TaskFinalizeCause cause;
   switch (request->terminate_source()) {
+  case crane::grpc::TERMINATE_SOURCE_MPI_FAILURE:
+    cause = TaskFinalizeCause::MPI_FAILURE;
+    break;
   case crane::grpc::TERMINATE_SOURCE_NORMAL_COMPLETION:
     cause = TaskFinalizeCause::NORMAL;
     break;

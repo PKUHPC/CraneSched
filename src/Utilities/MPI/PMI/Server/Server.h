@@ -44,6 +44,7 @@ class Server {
   std::string Port() const;
 
  private:
+  friend class ServerTestPeer;
   struct Impl;
   std::unique_ptr<Impl> impl_;
 };

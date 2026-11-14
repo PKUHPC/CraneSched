@@ -8,7 +8,7 @@ PMIx 仍通过 `--mpi=pmix` 选择。这里的 `pmi2` 是 CraneSched 的进程�
 `CRANE_ENABLE_PMI2` 默认 ON，与 `CRANE_ENABLE_PMIX` 独立。关闭时提交 `--mpi=pmi2` 的 step 会在准入阶段报错，包括使用该 runtime 的 PMI-1.1 客户端。
 控制端、计算端和 `crun` 应部署支持该协议的同一产品版本；新增内部 RPC 不代表旧版本支持 PMI-2。
 
-`craned` 软件包包含 CraneSched 自有的 PMI-2 客户端。构建会生成只导出标准 PMI-2 接口的 `libpmi2.so`，安装在
+`craned` 软件包包含 CraneSched 自有的 PMI-2 客户端。构建会生成导出标准 PMI-2 接口及 `PMIX_Ring` 扩展的 `libpmi2.so`，安装在
 `${CMAKE_INSTALL_PREFIX}/${CMAKE_INSTALL_LIBDIR}/crane/pmi2/`。
 例如 `/usr` 前缀和 `lib64` 目录对应 `/usr/lib64/crane/pmi2/libpmi2.so`。
 头文件在 `${prefix}/include/crane/pmi2/pmi2.h`。该库只供 PMI-2 客户端使用；通过 PMI-1.1 启动的 MPI 实现使用自身的 PMI 客户端连接 `PMI_FD`。该库使用独立的私有目录，无需替换系统 PMI 库，也不依赖 Slurm 守护进程。
@@ -53,3 +53,7 @@ Fence 在有任务的节点间使用树形 TCP/gRPC 交换，沿用集群的地�
 PMI-1.1 动态 Spawn/Connect、跨作业 KVS 和名称服务不在支持范围内，未实现的请求返回明确错误。
 协议初始化、未完成请求和 fence 的默认超时为 60 秒。断连、超时及 Abort 触发当前 step 的失败传播和回收。
 PMI-2 控制通道使用 TCP，不规定 MPI 数据通道；TCP 功能通过不等于 RDMA 或跨物理节点验收。
+
+`PMIX_Ring` 使用与 Slurm 兼容的字段和树形扫描交换邻居值；返回的 Ring rank 可以与 PMI rank 不同。所有 rank 必须以相同顺序调用 Ring 和 Fence。
+
+协议初始化计时从客户端首次通信开始，不包含 prolog 或进入 PMI 初始化前的应用启动时间；不完整请求及集体操作仍受默认 60 秒超时约束。PMI 故障传播后的 step 状态为 `Failed`，用户显式取消仍为 `Cancelled`。连接模式的 `PMI2_Init` 只能成功调用一次，重复调用或 Finalize 后调用返回初始化错误；singleton 模式重复初始化会重新填写全部输出参数。

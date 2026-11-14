@@ -1483,7 +1483,9 @@ class JobScheduler {
       std::unordered_map<job_id_t, std::set<step_id_t>> steps);
   void DispatchTerminateSteps_(
       CranedId craned_id,
-      std::unordered_map<job_id_t, std::set<step_id_t>> steps);
+      std::unordered_map<job_id_t, std::set<step_id_t>> steps,
+      crane::grpc::TerminateSource terminate_source =
+          crane::grpc::TERMINATE_SOURCE_USER_CANCEL);
   void HandleExecuteStepsFailure_(
       const CranedId& failed_craned_id,
       const std::unordered_map<job_id_t, std::set<step_id_t>>& steps);

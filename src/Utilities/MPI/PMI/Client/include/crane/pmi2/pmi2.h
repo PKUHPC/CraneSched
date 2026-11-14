@@ -60,9 +60,13 @@ typedef struct PMI2_Connect_comm {
   int isMaster;
 } PMI2_Connect_comm_t;
 
+// Connected sessions initialize once; repeating Init or calling it after
+// Finalize returns PMI2_ERR_INIT. Singleton Init fills every output each time.
 int PMI2_Init(int* spawned, int* size, int* rank, int* appnum);
 int PMI2_Finalize(void);
 int PMI2_Initialized(void);
+// flag selects the abort scope, not the process exit code. Successful abort
+// terminates this process with a nonzero status, including singleton mode.
 int PMI2_Abort(int flag, const char msg[]);
 int PMI2_Job_Spawn(int count, const char* cmds[], int argcs[],
                    const char** argvs[], const int maxprocs[],
@@ -78,6 +82,8 @@ int PMI2_Job_Connect(const char jobid[], PMI2_Connect_comm_t* conn);
 int PMI2_Job_Disconnect(const char jobid[]);
 
 #define HAVE_PMIX_RING 1
+// Slurm PMI extension: returns ring order and neighbor values. Ring ranks
+// need not equal PMI ranks. All ranks must call in the same collective order.
 int PMIX_Ring(const char value[], int* rank, int* ranks, char left[],
               char right[], int maxvalue);
 

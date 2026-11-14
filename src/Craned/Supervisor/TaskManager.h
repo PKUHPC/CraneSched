@@ -49,7 +49,8 @@ enum class TaskFinalizeCause : uint8_t {
   DAEMON_POD_SHUTDOWN_REQUESTED,
   INTERACTIVE_NO_PROCESS,
   TIMEOUT,
-  DEADLINE
+  DEADLINE,
+  MPI_FAILURE
 };
 
 class ITaskInstance;

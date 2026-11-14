@@ -27,10 +27,13 @@
 
 #include <atomic>
 #include <chrono>
+#include <future>
 #include <thread>
 
 #include "Protocol/Pmi1Codec.h"
 #include "Server/Server.h"
+#include "Server/State.h"
+#include "StepControlClient.h"
 #include "protos/Crane.grpc.pb.h"
 #include "protos/mpi/Pmi.grpc.pb.h"
 
@@ -75,7 +78,7 @@ class Clients {
     if (rc == 0)
       rc = posix_spawn(&pid, client, &actions, nullptr, argv, envp.data());
     posix_spawn_file_actions_destroy(&actions);
-    close(launch.fd);
+    launch.Close();
     if (rc != 0) return false;
     pids_.push_back(pid);
     return true;
@@ -264,6 +267,7 @@ TEST(Pmi2Runtime, AnnouncesEndpointThroughCranedUnixSocket) {
     std::filesystem::path directory;
     std::unique_ptr<grpc::Server> server;
     std::atomic<bool> announced{false};
+    std::atomic<unsigned> failures{};
     ~Craned() override {
       if (server) server->Shutdown();
       std::error_code error;
@@ -280,6 +284,18 @@ TEST(Pmi2Runtime, AnnouncesEndpointThroughCranedUnixSocket) {
                    !request->endpoint().address().empty();
       announced = valid;
       reply->set_ok(valid);
+      return grpc::Status::OK;
+    }
+    grpc::Status TerminateSteps(
+        grpc::ServerContext*, const crane::grpc::TerminateStepsRequest* request,
+        crane::grpc::TerminateStepsReply* reply) override {
+      if (request->terminate_source() ==
+              crane::grpc::TERMINATE_SOURCE_MPI_FAILURE &&
+          request->job_step_ids_map().contains(42) &&
+          request->job_step_ids_map().at(42).steps_size() == 1 &&
+          request->job_step_ids_map().at(42).steps(0) == 3)
+        ++failures;
+      reply->set_ok(true);
       return grpc::Status::OK;
     }
   } craned;
@@ -301,6 +317,10 @@ TEST(Pmi2Runtime, AnnouncesEndpointThroughCranedUnixSocket) {
   ASSERT_TRUE(runtime);
   ASSERT_TRUE(runtime->Init(config, step));
   EXPECT_TRUE(craned.announced);
+  auto launch = runtime->PrepareTask(0);
+  ASSERT_TRUE(launch);
+  runtime->TaskExited(0);
+  EXPECT_TRUE(WaitFor(craned.failures, 1));
 }
 
 TEST(Pmi2Server, ThreeNodeTreeExchangesNonuniformRankData) {
@@ -530,4 +550,235 @@ TEST(Pmi2Server, LargeUniformAllocationHasCompactProcessMapping) {
   ASSERT_TRUE(
       clients.Start(std::move(*launch), "(vector,(0,1000,1))", "mapping"));
   clients.ExpectExit();
+}
+
+TEST(Pmi2Server, InitializationStartsAtFirstContact) {
+  std::atomic<unsigned> failures{};
+  pmi::Server server;
+  ASSERT_TRUE(server.Init(Config(), Step(), [&] { ++failures; }, 1s));
+  auto launch = server.PrepareTask(0);
+  ASSERT_TRUE(launch);
+  std::this_thread::sleep_for(1200ms);
+  EXPECT_EQ(failures.load(), 0);
+  Clients clients;
+  ASSERT_TRUE(
+      clients.Start(std::move(*launch), "(vector,(0,1,1))", "init-contract"));
+  clients.ExpectExit();
+  EXPECT_EQ(failures.load(), 0);
+}
+
+TEST(Pmi2Server, PartialInitialHandshakeHasBoundedLifetime) {
+  std::atomic<unsigned> failures{};
+  pmi::Server server;
+  ASSERT_TRUE(server.Init(Config(), Step(), [&] { ++failures; }, 1s));
+  auto launch = server.PrepareTask(0);
+  ASSERT_TRUE(launch);
+  Send(launch->fd, "cmd=init");
+  EXPECT_TRUE(WaitFor(failures, 1));
+}
+
+TEST(Pmi2Server, AbortZeroTerminatesAndAllowsExitCallbackReentry) {
+  std::atomic<unsigned> failures{};
+  pmi::Server server;
+  ASSERT_TRUE(server.Init(Config(), Step(), [&] { ++failures; }, 3s));
+  auto launch = server.PrepareTask(0);
+  ASSERT_TRUE(launch);
+  Clients clients;
+  ASSERT_TRUE(clients.Start(std::move(*launch), "unused", "abort-zero"));
+  clients.ExpectExit(EXIT_FAILURE);
+  EXPECT_TRUE(WaitFor(failures, 1));
+}
+
+namespace pmi {
+class ServerTestPeer {
+ public:
+  static void RecheckChildVersion() {
+    // Exercise the RPC/collective seam directly to order the race without
+    // sleeps or a production-only synchronization hook.
+    pmi::Server::Impl state;
+    state.m_step_ = Step();
+    state.m_children_.insert("node1");
+    state.m_timeout_ = 3s;
+    crane::grpc::mpi::pmi::FenceRequest request;
+    request.set_job_id(42);
+    request.set_step_id(3);
+    request.set_craned_id("node1");
+    request.set_pmi_version(2);
+    auto child = std::async(std::launch::async, [&] {
+      grpc::ServerContext context;
+      crane::grpc::mpi::pmi::FenceReply reply;
+      return state.Fence(&context, &request, &reply);
+    });
+    const auto deadline = std::chrono::steady_clock::now() + 2s;
+    bool recorded = false;
+    while (std::chrono::steady_clock::now() < deadline) {
+      std::unique_lock lock(state.m_mutex_);
+      if (state.m_contributions_.contains("node1")) {
+        recorded = true;
+        state.m_protocol_ = pmi::Server::Impl::Protocol::kPmi11;
+        state.CompleteFence_(lock);
+        break;
+      }
+      lock.unlock();
+      std::this_thread::yield();
+    }
+    EXPECT_TRUE(recorded);
+    EXPECT_EQ(child.get().error_code(), grpc::StatusCode::CANCELLED);
+    EXPECT_TRUE(state.m_failed_);
+  }
+};
+}  // namespace pmi
+
+TEST(Pmi2Server, RechecksChildVersionAfterLocalNegotiation) {
+  pmi::ServerTestPeer::RecheckChildVersion();
+}
+
+TEST(Pmi2Server, RingUsesASeparateRoundAndHandlesNonuniformTrees) {
+  for (const std::vector<uint32_t> rank_nodes : {std::vector<uint32_t>{0},
+                                                 {0, 0, 0},
+                                                 {0, 1, 2, 3, 0, 4, 4},
+                                                 {1, 3, 3}}) {
+    SCOPED_TRACE(::testing::PrintToString(rank_nodes));
+    auto step = Step();
+    step.clear_task_node_list();
+    const auto nodes =
+        *std::max_element(rank_nodes.begin(), rank_nodes.end()) + 1;
+    for (uint32_t node = 1; node < nodes; ++node)
+      step.add_nodelist("node" + std::to_string(node));
+    for (auto node : rank_nodes) step.add_task_node_list(node);
+    auto config = Config();
+    for (const auto& id : step.nodelist()) {
+      config.CranedIdToNodeHostname[id] = "localhost";
+      config.CranedIdToNodeAddr[id] = "127.0.0.1";
+    }
+    std::vector<std::unique_ptr<pmi::Server>> servers;
+    for (const auto& id : step.nodelist()) {
+      config.CranedIdOfThisNode = id;
+      auto server = std::make_unique<pmi::Server>();
+      ASSERT_TRUE(server->Init(config, step, {}, 3s));
+      servers.push_back(std::move(server));
+    }
+    for (size_t i = 0; i < servers.size(); ++i) {
+      std::vector<std::pair<CranedId, std::string>> peers;
+      for (size_t j = 0; j < servers.size(); ++j)
+        if (i != j) peers.emplace_back(step.nodelist(j), servers[j]->Port());
+      ASSERT_TRUE(servers[i]->ReceivePeers(peers));
+    }
+    Clients clients;
+    for (uint32_t rank = 0; rank < rank_nodes.size(); ++rank) {
+      auto launch = servers[rank_nodes[rank]]->PrepareTask(rank);
+      ASSERT_TRUE(launch);
+      ASSERT_TRUE(clients.Start(std::move(*launch), "unused", "ring"));
+    }
+    clients.ExpectExit();
+  }
+}
+
+TEST(Pmi2Server, SlurmRingWireFormatAndCompletedRetries) {
+  auto step = Step();
+  step.add_nodelist("node1");
+  step.add_task_node_list(1);
+  auto config = Config();
+  config.CranedIdToNodeHostname["node1"] = "localhost";
+  config.CranedIdToNodeAddr["node1"] = "127.0.0.1";
+  pmi::Server root, child;
+  ASSERT_TRUE(root.Init(config, step, {}, 3s));
+  config.CranedIdOfThisNode = "node1";
+  ASSERT_TRUE(child.Init(config, step, {}, 3s));
+  ASSERT_TRUE(root.ReceivePeers({{"node1", child.Port()}}));
+  auto launch = root.PrepareTask(0);
+  ASSERT_TRUE(launch);
+  // Independent raw requests use Slurm's field names, not the client codec.
+  Send(launch->fd, "cmd=init pmi_version=2 pmi_subversion=0\n");
+  ASSERT_NE(Read(launch->fd).find("rc=0"), std::string::npos);
+  auto frame = [&](std::string body) {
+    auto header = std::to_string(body.size());
+    header.insert(0, 6 - header.size(), ' ');
+    Send(launch->fd, header + body);
+  };
+  frame("cmd=fullinit;pmirank=0;");
+  ASSERT_NE(Read(launch->fd).find("rc=0"), std::string::npos);
+  auto stub = crane::grpc::mpi::pmi::Pmi::NewStub(grpc::CreateChannel(
+      "127.0.0.1:" + root.Port(), grpc::InsecureChannelCredentials()));
+  crane::grpc::mpi::pmi::RingRequest request;
+  request.set_job_id(42);
+  request.set_step_id(3);
+  request.set_craned_id("node1");
+  request.set_pmi_version(2);
+  request.set_count(1);
+  auto call = [&](const auto& input, auto* reply) {
+    grpc::ClientContext context;
+    context.set_deadline(std::chrono::system_clock::now() + 3s);
+    return stub->Ring(&context, input, reply);
+  };
+  for (uint64_t epoch = 0; epoch < 3; ++epoch) {
+    auto value = std::to_string(epoch);
+    frame("cmd=ring;ring-count=1;ring-left=local" + value +
+          ";ring-right=local" + value + ";");
+    if (epoch > 0) {
+      crane::grpc::mpi::pmi::RingReply retry;
+      ASSERT_TRUE(call(request, &retry).ok());
+      EXPECT_EQ(retry.left(), "local" + std::to_string(epoch - 1));
+    }
+    request.set_epoch(epoch);
+    request.set_left("child" + value);
+    request.set_right("child" + value);
+    crane::grpc::mpi::pmi::RingReply reply;
+    ASSERT_TRUE(call(request, &reply).ok());
+    ASSERT_TRUE(reply.ok());
+    EXPECT_EQ(reply.rank(), 1);
+    EXPECT_EQ(reply.left(), "local" + value);
+    EXPECT_EQ(reply.right(), "local" + value);
+    auto response = Read(launch->fd);
+    EXPECT_NE(response.find("cmd=ring-response;"), std::string::npos);
+    EXPECT_NE(response.find("ring-count=0;"), std::string::npos);
+    EXPECT_NE(response.find("ring-left=child" + value + ";"),
+              std::string::npos);
+    EXPECT_NE(response.find("ring-right=child" + value + ";"),
+              std::string::npos);
+    auto conflict = request;
+    conflict.set_left("conflicting");
+    EXPECT_EQ(call(conflict, &reply).error_code(),
+              grpc::StatusCode::INVALID_ARGUMENT);
+    auto future = request;
+    future.set_epoch(epoch + 2);
+    EXPECT_EQ(call(future, &reply).error_code(),
+              grpc::StatusCode::FAILED_PRECONDITION);
+    auto wrong_version = request;
+    wrong_version.set_pmi_version(1);
+    EXPECT_EQ(call(wrong_version, &reply).error_code(),
+              grpc::StatusCode::FAILED_PRECONDITION);
+    auto oversized = request;
+    oversized.set_left(std::string(1024, 'x'));
+    EXPECT_EQ(call(oversized, &reply).error_code(),
+              grpc::StatusCode::INVALID_ARGUMENT);
+    auto wrong_count = request;
+    wrong_count.set_count(2);
+    EXPECT_EQ(call(wrong_count, &reply).error_code(),
+              grpc::StatusCode::INVALID_ARGUMENT);
+  }
+  frame("cmd=finalize;");
+  EXPECT_NE(Read(launch->fd).find("finalize-response"), std::string::npos);
+}
+
+TEST(Pmi2Server, UnfinishedRingTimesOutOrFailsWhenARankExits) {
+  for (bool disconnect : {false, true}) {
+    auto step = Step();
+    step.add_task_node_list(0);
+    std::atomic<unsigned> failures{};
+    pmi::Server server;
+    ASSERT_TRUE(server.Init(Config(), step, [&] { ++failures; }, 1s));
+    auto launch = server.PrepareTask(0);
+    ASSERT_TRUE(launch);
+    Send(launch->fd, "cmd=init pmi_version=2 pmi_subversion=0\n");
+    ASSERT_NE(Read(launch->fd).find("rc=0"), std::string::npos);
+    Send(launch->fd, "23    cmd=fullinit;pmirank=0;");
+    ASSERT_NE(Read(launch->fd).find("rc=0"), std::string::npos);
+    const std::string ring = "cmd=ring;ring-count=1;ring-left=x;ring-right=x;";
+    auto header = std::to_string(ring.size());
+    header.insert(0, 6 - header.size(), ' ');
+    Send(launch->fd, header + ring);
+    if (disconnect) launch->Close();
+    EXPECT_TRUE(WaitFor(failures, 1));
+  }
 }

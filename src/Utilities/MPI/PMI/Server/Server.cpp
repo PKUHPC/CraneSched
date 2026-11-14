@@ -46,11 +46,11 @@ bool Server::Init(const mpi::Config& config, const crane::grpc::StepToD& step,
   s.m_node_ = it - step.nodelist().begin();
   s.m_local_size_ = 0;
   s.m_local_ranks_.resize(step.task_node_list_size());
-  std::vector<bool> active(step.nodelist_size());
+  std::vector<uint32_t> node_task_counts(step.nodelist_size());
   uint32_t task_rank = 0;
   for (auto node : step.task_node_list()) {
     if (node >= step.nodelist_size()) return false;
-    active[node] = true;
+    ++node_task_counts[node];
     if (node == s.m_node_) {
       s.m_local_ranks_[task_rank] = s.m_local_size_;
       ++s.m_local_size_;
@@ -72,14 +72,24 @@ bool Server::Init(const mpi::Config& config, const crane::grpc::StepToD& step,
   s.m_wake_fd_ = eventfd(0, EFD_CLOEXEC | EFD_NONBLOCK);
   if (s.m_wake_fd_ < 0) return false;
   std::vector<CranedId> members;
+  std::vector<uint32_t> subtree_sizes;
   for (int index = 0; index < step.nodelist_size(); ++index)
-    if (active[index]) members.push_back(step.nodelist(index));
+    if (node_task_counts[index] > 0) {
+      members.push_back(step.nodelist(index));
+      subtree_sizes.push_back(node_task_counts[index]);
+    }
   auto member = std::ranges::find(members, config.CranedIdOfThisNode);
   if (member != members.end()) {
+    for (size_t child = members.size(); child-- > 1;)
+      subtree_sizes[(child - 1) / 2] += subtree_sizes[child];
     auto index = static_cast<size_t>(member - members.begin());
     if (index > 0) s.m_parent_ = members[(index - 1) / 2];
     for (auto child : {index * 2 + 1, index * 2 + 2})
-      if (child < members.size()) s.m_children_.insert(members[child]);
+      if (child < members.size()) {
+        s.m_children_.insert(members[child]);
+        s.m_child_order_.push_back(members[child]);
+        s.m_child_task_counts_.emplace(members[child], subtree_sizes[child]);
+      }
   }
   grpc::ServerBuilder builder;
   ServerBuilderSetKeepAliveArgs(&builder);
@@ -96,7 +106,7 @@ bool Server::Init(const mpi::Config& config, const crane::grpc::StepToD& step,
   s.m_port_ = std::to_string(port);
   s.m_io_thread_ = std::thread([&s] { s.IoLoop_(); });
   if (s.m_local_size_ > 0)
-    s.m_fence_thread_ = std::thread([&s] { s.FenceLoop_(); });
+    s.m_collective_thread_ = std::thread([&s] { s.CollectiveLoop_(); });
   return true;
 }
 
@@ -119,7 +129,6 @@ std::optional<mpi::LaunchInfo> Server::PrepareTask(uint32_t rank) {
   auto client = std::make_unique<Impl::Client>();
   client->fd = fds[0];
   client->rank = rank;
-  client->deadline = std::chrono::steady_clock::now() + s.m_timeout_;
   s.m_clients_.emplace(rank, std::move(client));
   mpi::LaunchInfo launch;
   launch.fd = fds[1];

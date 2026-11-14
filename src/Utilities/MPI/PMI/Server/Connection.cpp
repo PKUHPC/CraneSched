@@ -36,7 +36,7 @@ Server::Impl::~Impl() {
   // Do not hold the state lock while gRPC joins handlers waiting on that
   // lock.
   if (m_rpc_server_) m_rpc_server_->Shutdown(std::chrono::system_clock::now());
-  if (m_fence_thread_.joinable()) m_fence_thread_.join();
+  if (m_collective_thread_.joinable()) m_collective_thread_.join();
   if (m_io_thread_.joinable()) m_io_thread_.join();
   if (m_wake_fd_ >= 0) close(m_wake_fd_);
 }
@@ -115,7 +115,7 @@ void Server::Impl::IoLoop_() {
       if (c.fd >= 0 && c.closing && c.output.empty())
         close(std::exchange(c.fd, -1));
       if ((!c.initialized || !c.input.empty() || c.waiting) && !c.closing &&
-          std::chrono::steady_clock::now() >= c.deadline)
+          c.deadline && std::chrono::steady_clock::now() >= *c.deadline)
         Fail_("client request timed out");
       if (events & (POLLERR | POLLNVAL)) Fail_("client channel failed");
     }

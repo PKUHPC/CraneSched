@@ -35,6 +35,31 @@ inline constexpr auto kMaxKey = crane::pmi2::Codec::kMaxKey;
 inline constexpr auto kMaxValue = crane::pmi2::Codec::kMaxValue;
 struct Server::Impl : crane::grpc::mpi::pmi::Pmi::Service {
   enum class Protocol : uint32_t { kPmi11 = 1, kPmi20 = 2 };
+  enum class Collective { kFence, kRing };
+  struct FenceContribution {
+    Fields kvs;
+    uint32_t version;
+    bool operator==(const FenceContribution&) const = default;
+  };
+  struct RingValue {
+    uint32_t count{};
+    std::string left;
+    std::string right;
+    bool operator==(const RingValue&) const = default;
+  };
+  struct RingResult {
+    uint32_t rank{};
+    std::string left;
+    std::string right;
+  };
+  struct RingRound {
+    uint64_t epoch{};
+    std::optional<uint64_t> completed;
+    std::map<CranedId, RingValue> contributions;
+    std::map<CranedId, RingValue> completed_contributions;
+    std::map<CranedId, RingResult> results;
+    std::optional<std::chrono::steady_clock::time_point> deadline;
+  };
   struct Client {
     int fd{-1};
     uint32_t rank{};
@@ -45,7 +70,7 @@ struct Server::Impl : crane::grpc::mpi::pmi::Pmi::Service {
     std::string input;
     std::string output;
     std::optional<Fields> waiting;
-    std::chrono::steady_clock::time_point deadline;
+    std::optional<std::chrono::steady_clock::time_point> deadline;
     ~Client() {
       if (fd >= 0) close(fd);
     }
@@ -65,7 +90,7 @@ struct Server::Impl : crane::grpc::mpi::pmi::Pmi::Service {
   std::mutex m_mutex_;
   std::condition_variable m_cv_;
   std::thread m_io_thread_;
-  std::thread m_fence_thread_;
+  std::thread m_collective_thread_;
   std::unique_ptr<grpc::Server> m_rpc_server_;
   std::string m_port_;
   std::map<CranedId, std::shared_ptr<crane::grpc::mpi::pmi::Pmi::Stub>>
@@ -73,7 +98,10 @@ struct Server::Impl : crane::grpc::mpi::pmi::Pmi::Service {
   std::map<CranedId, std::string> m_peer_ports_;
   std::optional<CranedId> m_parent_;
   std::set<CranedId> m_children_;
-  std::map<CranedId, Fields> m_contributions_;
+  std::vector<CranedId> m_child_order_;
+  std::map<CranedId, uint32_t> m_child_task_counts_;
+  std::map<CranedId, FenceContribution> m_contributions_;
+  RingRound m_ring_;
   uint64_t m_epoch_{0};
   std::optional<uint64_t> m_completed_epoch_;
   std::optional<std::chrono::steady_clock::time_point> m_fence_deadline_;
@@ -90,7 +118,8 @@ struct Server::Impl : crane::grpc::mpi::pmi::Pmi::Service {
   uint32_t ProtocolVersion_() const;
   void Reply_(Client& c, const Fields& request, Fields fields, int rc = 0);
   void Attribute_(Client& c, const Fields& request, const Fields& attributes);
-  size_t LocalArrivals_() const;
+  size_t LocalArrivals_(Collective collective) const;
+  bool CollectiveReady_(Collective collective) const;
   void StartFenceDeadline_();
   grpc::Status Fence(grpc::ServerContext* context,
                      const crane::grpc::mpi::pmi::FenceRequest* request,
@@ -98,7 +127,13 @@ struct Server::Impl : crane::grpc::mpi::pmi::Pmi::Service {
   grpc::Status Abort(grpc::ServerContext*,
                      const crane::grpc::mpi::pmi::AbortRequest* request,
                      crane::grpc::mpi::pmi::AbortReply* reply) override;
-  void FenceLoop_();
+  grpc::Status Ring(grpc::ServerContext*,
+                    const crane::grpc::mpi::pmi::RingRequest*,
+                    crane::grpc::mpi::pmi::RingReply*) override;
+  void CollectiveLoop_();
+  void CompleteFence_(std::unique_lock<std::mutex>& lock);
+  void CompleteRing_(std::unique_lock<std::mutex>& lock);
+  void WaitForRing_(Client& client, const Fields& request);
   void Pmi2Initialize_(Client& client, const Fields& request);
   void Pmi2Abort_(Client& client, const Fields& request);
   void Pmi2JobId_(Client& client, const Fields& request);

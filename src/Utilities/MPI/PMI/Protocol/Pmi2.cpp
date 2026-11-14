@@ -40,6 +40,7 @@ void Server::Impl::Request_(Client& client, const Fields& request) {
       {"info-putnodeattr", &Impl::Pmi2Put_},
       {"kvs-get", &Impl::Pmi2Get_},
       {"kvs-fence", &Impl::WaitForFence_},
+      {"ring", &Impl::WaitForRing_},
       {"info-getjobattr", &Impl::Pmi2Attribute_},
       {"info-getnodeattr", &Impl::Pmi2Attribute_}};
   auto handler = handlers.find(command);

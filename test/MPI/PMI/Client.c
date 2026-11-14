@@ -30,6 +30,33 @@
     }                                         \
   } while (0)
 
+static void FinalizeAtExit(void) { (void)PMI2_Finalize(); }
+
+static int CheckRing(int rank, int size) {
+  char jobid[128], key[64], value[128], left[128], right[128], expected[128];
+  int ring_rank, ring_size, length;
+  CHECK(PMI2_Job_GetId(jobid, sizeof(jobid)));
+  for (int epoch = 0; epoch < 3; ++epoch) {
+    snprintf(value, sizeof(value), "%d:%d", rank, epoch);
+    CHECK(PMIX_Ring(value, &ring_rank, &ring_size, left, right, sizeof(left)));
+    if (ring_size != size || ring_rank < 0 || ring_rank >= size) return 20;
+    snprintf(key, sizeof(key), "ring_%d", ring_rank);
+    CHECK(PMI2_KVS_Put(key, value));
+    CHECK(PMI2_KVS_Fence());
+    // A missing ordinal detects duplicate ring ranks as well as missing ranks.
+    for (int peer = 0; peer < size; ++peer) {
+      snprintf(key, sizeof(key), "ring_%d", peer);
+      CHECK(PMI2_KVS_Get(jobid, PMI2_ID_NULL, key, expected, sizeof(expected),
+                         &length));
+      if ((peer == (ring_rank + size - 1) % size && strcmp(left, expected)) ||
+          (peer == (ring_rank + 1) % size && strcmp(right, expected)))
+        return 21;
+    }
+  }
+  CHECK(PMI2_Finalize());
+  return 0;
+}
+
 static int CheckIntegerAttributes(int size) {
   const struct {
     const char* value;
@@ -89,6 +116,16 @@ int main(int argc, char** argv) {
   if (size != atoi(getenv("PMI_SIZE")) || rank != atoi(getenv("PMI_RANK")) ||
       appnum != 0)
     return 2;
+  if (argc > 1 && !strcmp(argv[1], "ring")) return CheckRing(rank, size);
+  if (argc > 1 && !strcmp(argv[1], "init-contract")) {
+    if (PMI2_Init(&spawned, &size, &rank, &appnum) != PMI2_ERR_INIT) return 22;
+    CHECK(PMI2_Finalize());
+    return PMI2_Init(&spawned, &size, &rank, &appnum) == PMI2_ERR_INIT ? 0 : 23;
+  }
+  if (argc > 1 && !strcmp(argv[1], "abort-zero")) {
+    if (atexit(FinalizeAtExit) != 0) return 24;
+    return PMI2_Abort(0, "intentional native test abort");
+  }
   char jobid[128], key[64], value[1024];
   int found, length;
   CHECK(PMI2_Job_GetId(jobid, sizeof(jobid)));

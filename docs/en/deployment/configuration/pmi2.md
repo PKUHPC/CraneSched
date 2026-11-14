@@ -11,7 +11,7 @@ clients using that runtime. Deploy matching
 controller, compute and frontend versions; older versions do not gain PMI-2
 support merely because the internal RPC additions are wire compatible.
 
-The `craned` package includes CraneSched's native PMI-2 client. The build installs `libpmi2.so`, exporting the standard PMI-2 interface, under
+The `craned` package includes CraneSched's native PMI-2 client. The build installs `libpmi2.so`, exporting the standard PMI-2 interface and the `PMIX_Ring` extension, under
 `${CMAKE_INSTALL_PREFIX}/${CMAKE_INSTALL_LIBDIR}/crane/pmi2/`, and the public
 header under `${prefix}/include/crane/pmi2/`. This library is for PMI-2 clients;
 MPI implementations using PMI-1.1 use their own PMI client over `PMI_FD`. This
@@ -37,7 +37,10 @@ rank state, KVS and channels. Do not wrap the application in `mpirun`, Hydra or
 PRRTE; scheduler integration for those launchers is outside this feature.
 
 PMI-2 supports static-world initialization/finalization, job ID, KVS Put/Get/Fence,
-actual process mapping, node attributes and necessary job attributes. PMI-1.1
+actual process mapping, node attributes and necessary job attributes. The PMI-2
+`PMIX_Ring` extension exchanges neighbor values using Slurm-compatible fields
+and a tree scan; its ring rank may differ from the PMI rank. All ranks must
+invoke Ring and Fence in the same collective order. PMI-1.1
 supports initialization, rank/size and required queries, KVS Put/Get, barrier,
 Finalize and Abort. Ranks within a step must use the same PMI protocol; local
 initialization checks the node's clients, and the first barrier checks consistency
@@ -47,7 +50,12 @@ PMIx tuning variables do not select the PMI runtime or transport.
 
 PMI-1.1 dynamic Spawn/Connect, cross-job KVS and name services are unsupported;
 unimplemented operations receive explicit errors. Initialization, incomplete
-requests and fences have a 60-second default timeout. Disconnects, timeouts
-and Abort trigger failure propagation and cleanup for the owning step.
+requests and collectives have a 60-second default timeout, starting when the
+client first contacts the server rather than during prologs or application
+startup before PMI initialization. Disconnects, timeouts and Abort trigger
+failure propagation and cleanup for the owning step, reported as `Failed`;
+explicit user cancellation remains `Cancelled`. Connected `PMI2_Init` is a
+single-use operation: repeating it or invoking it after Finalize returns an
+initialization error. Singleton initialization refills all output arguments.
 The control transport does not determine MPI's data transport; TCP functional
 validation does not establish RDMA or physical multinode compatibility.

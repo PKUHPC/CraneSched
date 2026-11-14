@@ -74,7 +74,8 @@ int Session::Initialize(int* spawned, int* size, int* rank, int* appnum) {
       appnum == nullptr)
     return PMI2_ERR_INVALID_ARG;
   std::lock_guard lock(m_mutex_);
-  if (m_state_ != State::kUninitialized) return PMI2_SUCCESS;
+  if (m_state_ == State::kConnected || m_state_ == State::kFinalized)
+    return PMI2_ERR_INIT;
 
   const char* fd_text = std::getenv("PMI_FD");
   if (fd_text == nullptr) {
@@ -175,17 +176,24 @@ int Session::Initialized() const {
 }
 
 int Session::Abort(int flag, const char* message) {
-  std::lock_guard lock(m_mutex_);
-  if (m_state_ != State::kConnected || m_transport_ == nullptr)
-    return m_state_ == State::kSingleton ? PMI2_SUCCESS : PMI2_ERR_INIT;
-  Fields request{{"cmd", "abort"},
-                 {"isworld", flag ? "TRUE" : "FALSE"},
-                 {"msg", message == nullptr ? "" : message}};
-  auto body = Codec::EncodeFrame(request);
-  if (!body || !m_transport_->SendFrame(*body)) return PMI2_ERR_OTHER;
-  // PMI-2 defines Abort as a terminal operation. Let the process manager
-  // observe the request before terminating this rank.
-  std::exit(flag);
+  {
+    std::lock_guard lock(m_mutex_);
+    if (m_state_ != State::kConnected && m_state_ != State::kSingleton)
+      return PMI2_ERR_INIT;
+    if (m_transport_) {
+      Fields request{{"cmd", "abort"},
+                     {"isworld", flag ? "TRUE" : "FALSE"},
+                     {"msg", message == nullptr ? "" : message}};
+      if (auto body = Codec::EncodeFrame(request))
+        (void)m_transport_->SendFrame(*body);
+      m_transport_.reset();
+    }
+    m_state_ = State::kFinalized;
+  }
+  // exit runs application callbacks, which may re-enter PMI. The terminal
+  // session must be unlocked before those callbacks run. flag is a scope,
+  // not a process exit status.
+  std::exit(EXIT_FAILURE);
 }
 
 int Session::CopyValue(std::string_view source, char* destination, int capacity,
@@ -415,8 +423,10 @@ int Session::Ring(const char* value, int* rank, int* ranks, char* left,
     return PMI2_SUCCESS;
   }
   Fields response;
-  int result =
-      CommandLocked("ring", {{"value", value}}, "ring-response", &response);
+  int result = CommandLocked(
+      "ring",
+      {{"ring-count", "1"}, {"ring-left", value}, {"ring-right", value}},
+      "ring-response", &response);
   if (result != PMI2_SUCCESS) return result;
   auto read = [&](const char* key, std::string* destination) {
     auto it = response.find(key);
@@ -424,18 +434,15 @@ int Session::Ring(const char* value, int* rank, int* ranks, char* left,
     *destination = it->second;
     return true;
   };
-  auto rank_it = response.find("rank");
-  auto ranks_it = response.find("ranks");
+  auto rank_it = response.find("ring-count");
   std::string left_value, right_value;
   auto response_rank = rank_it == response.end() ? std::optional<int>{}
                                                  : ParseInt(rank_it->second);
-  auto response_ranks = ranks_it == response.end() ? std::optional<int>{}
-                                                   : ParseInt(ranks_it->second);
-  if (!response_rank || !response_ranks || !read("ring-left", &left_value) ||
-      !read("ring-right", &right_value))
+  if (!response_rank || *response_rank < 0 || *response_rank >= m_size_ ||
+      !read("ring-left", &left_value) || !read("ring-right", &right_value))
     return PMI2_ERR_OTHER;
   *rank = *response_rank;
-  *ranks = *response_ranks;
+  *ranks = m_size_;
   std::strncpy(left, left_value.c_str(), maxvalue - 1);
   std::strncpy(right, right_value.c_str(), maxvalue - 1);
   left[maxvalue - 1] = right[maxvalue - 1] = '\0';
