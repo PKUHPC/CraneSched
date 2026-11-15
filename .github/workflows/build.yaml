@@ -53,7 +53,9 @@ jobs:
           set -euo pipefail
           unset HTTP_PROXY HTTPS_PROXY ALL_PROXY http_proxy https_proxy all_proxy
           [[ "$BASE_IMAGE" =~ @sha256:[a-f0-9]{64}$ ]]
-          [[ "$(id -u)" == 1001 ]]
+          [[ "$(id -u)" == 1001 && "$(id -g)" == 1001 ]]
+          getent passwd 1001 >/dev/null
+          getent group 1001 >/dev/null
           source_sha="$(git rev-parse HEAD)"
           source_checkout="$PWD"
           state="/ci/workspaces/native-rhel10-amd64/${BASE_IMAGE##*@sha256:}/ci-debug"
@@ -67,7 +69,7 @@ jobs:
           fi
           git -C "$state/source" fetch --no-tags --update-shallow "$source_checkout" "$source_sha"
           git -C "$state/source" checkout --force --detach "$source_sha"
-          cd "$state/source"
+          cd -P "$state/source"
           [[ "$(git rev-parse HEAD)" == "$source_sha" ]]
           [[ -z "$(git status --porcelain --untracked-files=no)" ]]
           export SOURCE_SHA="$source_sha" ARTIFACT_DIR="$artifact_dir"
