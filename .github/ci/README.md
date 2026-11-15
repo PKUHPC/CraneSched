@@ -64,7 +64,8 @@ it does not rebuild product binaries. Publishing verifies the same output.
 For branch and pull request builds, the Go package target disables GoReleaser snapshot mode
 and supplies the product `VERSION` as `GORELEASER_CURRENT_TAG`; it skips only the
 tag validation that requires a release tag. Snapshot mode hardcodes package version
-`0.0.0`, which does not identify the selected product source. The manifest gate checks
+`0.0.0`, which does not identify the selected product source. GoReleaser receives the
+workflow's read-only GitHub token only in its packaging process. The manifest gate checks
 all five RPM versions against that source revision and `VERSION` before downstream use.
 
 ## Integration entry-point contract
