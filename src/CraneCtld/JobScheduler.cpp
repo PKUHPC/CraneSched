@@ -7501,7 +7501,8 @@ bool SchedulerAlgo::LocalScheduler::GetNodesAndTrySchedule_(
   std::priority_queue<node_info> topk_nodes_avail;
   int topk_ntasks_sum_avail = 0;
 
-  std::priority_queue<node_info> topk_nodes_current;
+  std::priority_queue<int, std::vector<int>, std::greater<>>
+      topk_capacities_current;
   int topk_ntasks_sum_current = 0;
 
   auto get_max_tasks = [&](const ResourceView& res_on_node) {
@@ -7590,14 +7591,14 @@ bool SchedulerAlgo::LocalScheduler::GetNodesAndTrySchedule_(
 
     // Find all possible nodes that can run the job now.
     if (job->exclusive) {
-      if (node_state->res_total <= node_state->res_avail) {
-        topk_ntasks_sum_current += ntasks_on_node_total;
-        topk_nodes_current.push(
-            node_info{ntasks_on_node_total, node_state->res_total, node_state});
-        if (topk_nodes_current.size() > job->node_num) {
-          topk_ntasks_sum_current -= topk_nodes_current.top().ntasks_on_node;
-          topk_nodes_current.pop();
-        }
+      if (!(node_state->res_total <= node_state->res_avail)) {
+        continue;
+      }
+      topk_ntasks_sum_current += ntasks_on_node_total;
+      topk_capacities_current.push(ntasks_on_node_total);
+      if (topk_capacities_current.size() > job->node_num) {
+        topk_ntasks_sum_current -= topk_capacities_current.top();
+        topk_capacities_current.pop();
       }
 
       bool satisfied = true;
@@ -7629,11 +7630,10 @@ bool SchedulerAlgo::LocalScheduler::GetNodesAndTrySchedule_(
       }
 
       topk_ntasks_sum_current += ntasks_on_node_current;
-      topk_nodes_current.push(
-          node_info{ntasks_on_node_current, node_state->res_avail, node_state});
-      if (topk_nodes_current.size() > job->node_num) {
-        topk_ntasks_sum_current -= topk_nodes_current.top().ntasks_on_node;
-        topk_nodes_current.pop();
+      topk_capacities_current.push(ntasks_on_node_current);
+      if (topk_capacities_current.size() > job->node_num) {
+        topk_ntasks_sum_current -= topk_capacities_current.top();
+        topk_capacities_current.pop();
       }
 
       ResourceView min_res_on_node = node_state->res_avail;
@@ -7694,7 +7694,7 @@ bool SchedulerAlgo::LocalScheduler::GetNodesAndTrySchedule_(
   }
 
   if (job->reason.empty()) {
-    if (topk_nodes_current.size() == job->node_num &&
+    if (topk_capacities_current.size() == job->node_num &&
         topk_ntasks_sum_current >= job->ntasks) {
       job->reason = "Priority";
     } else {
