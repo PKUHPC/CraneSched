@@ -871,6 +871,7 @@ message ReservationInfo {
   // Unformatted allocation membership and stable controller creation order.
   repeated string allocated_nodes = 13;
   uint64 creation_order = 14;
+  bool flex = 15;
 }
 
 message RichError {

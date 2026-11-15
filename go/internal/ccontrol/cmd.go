@@ -47,6 +47,7 @@ var (
 	FlagJson            bool
 	FlagForce           bool
 	FlagReservationName string
+	FlagReservationFlex bool
 	FlagStartTime       string
 	FlagDuration        string
 	FlagNodes           string
@@ -594,6 +595,7 @@ func executeCreateCommand(command *CControlCommand) error {
 }
 
 func executeCreateReservationCommand(command *CControlCommand) error {
+	FlagReservationFlex = false
 	FlagReservationName = command.GetID()
 	if len(FlagReservationName) == 0 {
 		return util.NewCraneErr(util.ErrorCmdArg, fmt.Sprintln("no reservation name specified"))
@@ -625,6 +627,12 @@ func executeCreateReservationCommand(command *CControlCommand) error {
 				return util.NewCraneErr(util.ErrorCmdArg, fmt.Sprintf("invalid nodenum value: %s\n", value))
 			}
 			FlagNodeNum = uint32(nodeNum)
+		case "flex":
+			flex, err := strconv.ParseBool(value)
+			if err != nil {
+				return util.NewCraneErr(util.ErrorCmdArg, fmt.Sprintf("invalid flex value: %s", value))
+			}
+			FlagReservationFlex = flex
 		default:
 			return util.NewCraneErr(util.ErrorCmdArg, fmt.Sprintf("unknown attribute to modify: %s\n", key))
 		}

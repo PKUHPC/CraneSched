@@ -54,6 +54,7 @@ type slurmReservationsOutput struct {
 }
 
 type slurmReservationInfo struct {
+	Flex            bool            `json:"flex"`
 	ReservationName string          `json:"reservation_name"`
 	StartTime       json.RawMessage `json:"start_time,omitempty"`
 	Duration        json.RawMessage `json:"duration,omitempty"`
@@ -181,6 +182,7 @@ func newSlurmReservationInfo(reservation *protos.ReservationInfo) (slurmReservat
 	}
 
 	return slurmReservationInfo{
+		Flex:            reservation.Flex,
 		ReservationName: reservation.ReservationName,
 		StartTime:       startTime,
 		Duration:        duration,

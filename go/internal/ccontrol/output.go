@@ -489,6 +489,10 @@ func formatReservationDetails(res *protos.ReservationInfo) string {
 		res.StartTime.AsTime().In(time.Local).Format("2006-01-02 15:04:05"),
 		res.Duration.AsDuration().String()))
 	buf.WriteString(formatReservationTarget(res))
+	buf.WriteString(fmt.Sprintf("\tFlex=%t\n", res.Flex))
+	if !time.Now().Before(res.StartTime.AsTime().Add(res.Duration.AsDuration())) {
+		buf.WriteString("\tState=EXPIRED\n")
+	}
 	buf.WriteString(formatReservationAccounts(res))
 	buf.WriteString(formatReservationResources(res))
 

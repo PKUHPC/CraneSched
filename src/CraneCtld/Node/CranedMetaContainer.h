@@ -162,6 +162,14 @@ class CranedMetaContainer final {
 
   void FreeResourceFromResv(ResvId resv_id, job_id_t job_id);
 
+  bool RestoreReservation(const crane::grpc::CreateReservationRequest& request);
+
+  // Hold the running-job lock through this check and the end-time update.
+  CraneRichError CheckReservationEndTime(const ResvId& reservation,
+                                         const ResourceV3& allocation,
+                                         absl::Time old_end,
+                                         absl::Time new_end);
+
   // Store Resource reduction events happened during scheduling here.
   // Cases:
   // 1. Craned node down/drain: resources on nodes are reduced.

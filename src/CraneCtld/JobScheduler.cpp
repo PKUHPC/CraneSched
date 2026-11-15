@@ -243,6 +243,51 @@ bool JobScheduler::Init() {
     return false;
   }
 
+  std::unordered_map<ResvId, crane::grpc::CreateReservationRequest>
+      resv_req_map;
+  if (!g_embedded_db_client->RetrieveReservationInfo(&resv_req_map)) {
+    CRANE_ERROR("Failed to retrieve reservation info from embedded DB.");
+    return false;
+  }
+  std::vector<ResvId> reservation_order;
+  std::unordered_set<ResvId> failed_reservations;
+  for (const auto& [id, request] : resv_req_map) {
+    reservation_order.push_back(id);
+    m_reservation_creation_order_ = std::max(
+        m_reservation_creation_order_.load(), request.creation_order());
+  }
+  std::ranges::sort(reservation_order);
+  for (const auto& id : reservation_order) {
+    auto& request = resv_req_map.at(id);
+    bool changed = false;
+    if (request.creation_order() == 0) {
+      request.set_creation_order(++m_reservation_creation_order_);
+      changed = true;
+    }
+    if (!g_meta_container->RestoreReservation(request)) {
+      CRANE_ERROR("Failed to restore reservation {}; continuing recovery", id);
+      failed_reservations.insert(id);
+      resv_req_map.erase(id);
+      continue;
+    }
+    {
+      auto reservation = g_meta_container->GetResvMetaPtr(id);
+      const auto nodes = util::HostNameListToStr(reservation->craned_ids);
+      if (request.craned_regex() != nodes ||
+          request.node_num() != reservation->craned_ids.size()) {
+        request.set_craned_regex(nodes);
+        request.set_node_num(reservation->craned_ids.size());
+        changed = true;
+      }
+    }
+    if (changed) {
+      if (!g_embedded_db_client->UpdateReservationInfo(0, id, request)) {
+        CRANE_ERROR("Failed to persist restored reservation {}", id);
+        return false;
+      }
+    }
+  }
+
   auto& running_queue = snapshot.running_queue;
   std::unordered_map<job_id_t, std::unique_ptr<JobInCtld>>
       recovered_running_jobs;
@@ -250,6 +295,7 @@ bool JobScheduler::Init() {
       recovered_array_child_ids_by_parent;
   std::vector<std::tuple<job_id_t, array_task_id_t, job_id_t>>
       recovered_pending_array_children_to_track;
+  std::vector<job_id_t> failed_recovered_running_job_ids;
   auto fail_recovered_running_job = [this, &recovered_running_jobs](
                                         job_id_t job_id, const char* reason) {
     auto job_it = recovered_running_jobs.find(job_id);
@@ -296,6 +342,28 @@ bool JobScheduler::Init() {
       job_id_t job_id = job->JobId();
 
       CRANE_TRACE("Restore job #{} from embedded running queue.", job->JobId());
+      bool recovery_failed = false;
+      if (!job->reservation.empty() &&
+          !g_meta_container->GetResvMetaPtr(job->reservation)) {
+        CRANE_ERROR("Cannot restore running job #{}: reservation {} is missing",
+                    job_id, job->reservation);
+        job->SetExitCode(ExitCode::EC_EXEC_ERR);
+        recovery_failed = true;
+      }
+      for (const auto& node : job->CranedIds()) {
+        if (g_config.Nodes.contains(node)) continue;
+        CRANE_ERROR(
+            "Cannot restore running job #{}: allocated node {} is missing",
+            job_id, node);
+        job->SetExitCode(ExitCode::EC_CRANED_DOWN);
+        recovery_failed = true;
+      }
+      if (recovery_failed) {
+        job->SetRequeueRequested(false);
+        failed_recovered_running_job_ids.push_back(job_id);
+        recovered_running_jobs.emplace(job_id, std::move(job));
+        continue;
+      }
       auto result = AcquireJobAttributes(job.get());
       if (!result || job->type == crane::grpc::Interactive) {
         job->SetStatus(crane::grpc::Failed);
@@ -395,6 +463,15 @@ bool JobScheduler::Init() {
 
       bool mark_job_as_failed = false;
 
+      if (failed_reservations.contains(job->reservation)) {
+        CRANE_ERROR(
+            "Cannot restore pending job #{}: reservation {} failed recovery",
+            job_id, job->reservation);
+        job->SetExitCode(ExitCode::EC_EXEC_ERR);
+        job->SetRequeueRequested(false);
+        mark_job_as_failed = true;
+      }
+
       if (job->type == crane::grpc::Interactive) {
         CRANE_INFO("Mark interactive job #{} as FAILED", job_id);
         mark_job_as_failed = true;
@@ -405,7 +482,7 @@ bool JobScheduler::Init() {
         mark_job_as_failed = true;
       }
 
-      if (!mark_job_as_failed && !CheckJobValidity(job.get())) {
+      if (!mark_job_as_failed && !CheckJobValidity(job.get(), true)) {
         CRANE_ERROR("CheckJobValidity failed for job #{}", job_id);
         mark_job_as_failed = true;
       }
@@ -487,6 +564,10 @@ bool JobScheduler::Init() {
     LockGuard pending_guard(&m_pending_job_map_mtx_);
     m_array_manager_->RecoverAccountingForRegisteredParents();
 
+    for (job_id_t job_id : failed_recovered_running_job_ids)
+      fail_recovered_running_job(job_id,
+                                 "reservation or allocated node missing");
+
     std::unordered_set<job_id_t> failed_recovered_array_child_ids;
     for (const auto& [parent_id, child_ids] :
          recovered_array_child_ids_by_parent) {
@@ -512,6 +593,20 @@ bool JobScheduler::Init() {
     std::unordered_map<job_id_t, job_db_id_t> db_ids;
     for (auto& [db_id, job_in_embedded_db] : snapshot.final_queue) {
       job_id_t job_id = job_in_embedded_db.runtime_attr().job_id();
+      if (job_in_embedded_db.runtime_attr().requeue_requested() &&
+          failed_reservations.contains(
+              job_in_embedded_db.job_to_ctld().reservation())) {
+        CRANE_ERROR(
+            "Cannot requeue recovered job #{}: reservation {} failed recovery",
+            job_id, job_in_embedded_db.job_to_ctld().reservation());
+        job_in_embedded_db.mutable_runtime_attr()->set_requeue_requested(false);
+        if (!g_embedded_db_client->UpdateRuntimeAttrOfJob(
+                0, db_id, job_in_embedded_db.runtime_attr())) {
+          CRANE_ERROR("Failed to clear requeue request for recovered job #{}",
+                      job_id);
+          return false;
+        }
+      }
       if (job_in_embedded_db.runtime_attr().requeue_requested()) {
         auto job = std::make_unique<JobInCtld>();
         job->SetFieldsByJobToCtld(job_in_embedded_db.job_to_ctld());
@@ -927,6 +1022,13 @@ bool JobScheduler::Init() {
                             orphaned_recovered_step_db_ids.end());
   g_embedded_db_client->PurgeEndedSteps(purged_step_db_ids);
 
+  for (const auto& id : failed_reservations) {
+    if (!g_embedded_db_client->DeleteReservationInfo(0, id)) {
+      CRANE_ERROR("Failed to delete unrecoverable reservation {}", id);
+      return false;
+    }
+  }
+
   std::shared_ptr<uvw::loop> uvw_release_loop = uvw::loop::create();
   m_job_timer_handle_ = uvw_release_loop->resource<uvw::timer_handle>();
   m_job_timer_handle_->on<uvw::timer_event>(
@@ -1093,48 +1195,12 @@ bool JobScheduler::Init() {
   m_resv_clean_thread_ = std::thread(
       [this, loop = uvw_reservation_loop]() { CleanResvThread_(loop); });
 
-  // TODO: Move this to Reservation Mini-Scheduler.
-  // Reservation should be recovered after creating m_resv_clean_thread_ thread.
-  std::unordered_map<ResvId, crane::grpc::CreateReservationRequest>
-      resv_req_map;
-  ok = g_embedded_db_client->RetrieveReservationInfo(&resv_req_map);
-  if (!ok) {
-    CRANE_ERROR("Failed to retrieve reservation info from embedded DB.");
-    return false;
+  for (const auto& [id, request] : resv_req_map) {
+    m_resv_timer_queue_.enqueue(std::make_pair(
+        id, absl::FromUnixSeconds(request.start_time_unix_seconds()) +
+                absl::Seconds(request.duration_seconds())));
   }
-
-  if (!resv_req_map.empty()) {
-    CRANE_INFO("{} reservation(s) recovered.", resv_req_map.size());
-    std::vector<ResvId> reservation_order;
-    for (const auto& [id, request] : resv_req_map)
-      reservation_order.push_back(id);
-    // Old databases have no creation order. Give their existing reservations
-    // a deterministic name order once, ahead of subsequently created entries.
-    std::ranges::sort(reservation_order, [&](const auto& a, const auto& b) {
-      const auto left = resv_req_map.at(a).creation_order();
-      const auto right = resv_req_map.at(b).creation_order();
-      return left == right ? a < b : left < right;
-    });
-    for (const auto& resv_id : reservation_order) {
-      const auto& reservation_req = resv_req_map.at(resv_id);
-      auto res = CreateResv_(reservation_req);
-      if (res) continue;
-
-      CRANE_ERROR("Failed to add reservation {}: {}", resv_id, res.error());
-
-      txn_id_t txn_id{0};
-      auto ok = g_embedded_db_client->BeginReservationDbTransaction(&txn_id);
-      if (!ok)
-        CRANE_ERROR("Failed to begin transaction for reservation {}.", resv_id);
-
-      ok = g_embedded_db_client->DeleteReservationInfo(txn_id, resv_id);
-      if (!ok)
-        CRANE_ERROR("Failed to delete reservation {} from resv DB.", resv_id);
-
-      ok = g_embedded_db_client->CommitReservationDbTransaction(txn_id);
-      if (!ok) CRANE_ERROR("Failed to commit txn for reservation {}.", resv_id);
-    }
-  }
+  if (!resv_req_map.empty()) m_clean_resv_timer_queue_handle_->send();
 
   m_job_deadline_timer_async_handle_ =
       uvw_deadline_loop->resource<uvw::async_handle>();
@@ -1242,8 +1308,16 @@ void JobScheduler::PutRecoveredJobIntoRunningQueueLock_(
     g_meta_container->MallocResourceFromNode(craned_id, job->JobId(),
                                              job->AllocatedRes());
   if (!job->reservation.empty()) {
+    ResourceV3 resv_allocated_res;
+    {
+      auto reservation = g_meta_container->GetResvMetaPtr(job->reservation);
+      CRANE_ASSERT(reservation);
+      for (const auto& [node, res] : job->AllocatedRes().EachNodeResMap())
+        if (reservation->craned_ids.contains(node))
+          resv_allocated_res.AddResourceInNode(node, res);
+    }
     g_meta_container->MallocResourceFromResv(job->reservation, job->JobId(),
-                                             job->AllocatedRes());
+                                             resv_allocated_res);
   }
   if (!job->licenses_count.empty())
     g_license_manager->MallocLicenseWhenRecoverRunning(job->licenses_count);
@@ -1648,28 +1722,36 @@ void JobScheduler::ScheduleThread_() {
           continue;
         }
         absl::Time end_time = job_in_scheduler->end_time;
-        if (job_in_scheduler->reservation.empty()) {
-          // Non-reservation job.
+        bool check_node_changes = job_in_scheduler->reservation.empty();
+        if (!job_in_scheduler->reservation.empty()) {
+          auto resv_meta =
+              g_meta_container->GetResvMetaPtr(job_in_scheduler->reservation);
+          if (!resv_meta) {
+            job_in_scheduler->reason = "Reservation deleted";
+          } else if (absl::Now() >= resv_meta->end_time) {
+            job_in_scheduler->reason = "Reservation Expired";
+          } else if (resv_meta->flex) {
+            check_node_changes = true;
+          } else if (affected_resv_set.contains(
+                         job_in_scheduler->reservation)) {
+            if (resv_meta->end_time < end_time) {
+              job_in_scheduler->reason = "Resource";
+            } else {
+              for (const CranedId& craned_id : job_in_scheduler->craned_ids) {
+                if (!resv_meta->craned_ids.contains(craned_id)) {
+                  job_in_scheduler->reason = "Reservation changed";
+                  break;
+                }
+              }
+            }
+          }
+        }
+        if (check_node_changes) {
           for (const CranedId& craned_id : job_in_scheduler->craned_ids) {
             auto it = craned_id_change_time_map.find(craned_id);
             if (it != craned_id_change_time_map.end() &&
                 it->second < end_time) {
               job_in_scheduler->reason = "Resource changed";
-            }
-          }
-        } else if (affected_resv_set.contains(job_in_scheduler->reservation)) {
-          const auto& resv_meta =
-              g_meta_container->GetResvMetaPtr(job_in_scheduler->reservation);
-          if (resv_meta.get() == nullptr) {
-            job_in_scheduler->reason = "Reservation deleted";
-          } else if (resv_meta->end_time < end_time) {
-            job_in_scheduler->reason = "Resource";
-          } else {
-            for (const CranedId& craned_id : job_in_scheduler->craned_ids) {
-              if (!resv_meta->craned_ids.contains(craned_id)) {
-                job_in_scheduler->reason = "Reservation changed";
-                break;
-              }
             }
           }
         }
@@ -1767,9 +1849,9 @@ void JobScheduler::ScheduleThread_() {
           g_meta_container->MallocResourceFromNode(
               craned_id, launch_job->JobId(), launch_job->AllocatedRes());
         if (launch_job->reservation != "") {
-          g_meta_container->MallocResourceFromResv(launch_job->reservation,
-                                                   launch_job->JobId(),
-                                                   launch_job->AllocatedRes());
+          g_meta_container->MallocResourceFromResv(
+              launch_job->reservation, launch_job->JobId(),
+              job_in_scheduler->resv_allocated_res);
         }
 
         if (launch_job->ShouldLaunchOnAllNodes()) {
@@ -2617,7 +2699,7 @@ std::future<CraneErrCode> JobScheduler::HoldReleaseJobAsync(job_id_t job_id,
 //   2) Apply pd-specific changes (deadline timer, reservation checks at
 //      submit-time semantics) and rn-specific changes (RPC to executing
 //      craneds) separately based on each job's state.
-CraneErrCode JobScheduler::ChangeJobTimeConstraint(
+CraneRichError JobScheduler::ChangeJobTimeConstraint(
     job_id_t job_id, std::optional<int64_t> time_limit_seconds,
     std::optional<int64_t> deadline_time) {
   absl::Time now = absl::Now();
@@ -2627,11 +2709,11 @@ CraneErrCode JobScheduler::ChangeJobTimeConstraint(
       deadline_time.transform(absl::FromUnixSeconds);
 
   if (absl_deadline_time && absl_deadline_time <= now) {
-    return CraneErrCode::ERR_INVALID_PARAM;
+    return FormatRichErr(CraneErrCode::ERR_INVALID_PARAM, "");
   }
   if (time_limit_seconds &&
       !CheckIfTimeLimitSecIsValid(time_limit_seconds.value()))
-    return CraneErrCode::ERR_INVALID_PARAM;
+    return FormatRichErr(CraneErrCode::ERR_INVALID_PARAM, "");
 
   std::vector<std::tuple<job_id_t, std::vector<CranedId>, int64_t,
                          std::optional<int64_t>>>
@@ -2652,25 +2734,38 @@ CraneErrCode JobScheduler::ChangeJobTimeConstraint(
           CRANE_ERROR(
               "Array parent #{} is in the pending map but missing ArrayMeta.",
               job_id);
-          return CraneErrCode::ERR_NON_EXISTENT;
+          return FormatRichErr(CraneErrCode::ERR_NON_EXISTENT, "");
         }
         is_array_parent = true;
       }
 
       if (job->reservation != "") {
-        auto resv_end_time =
-            g_meta_container->GetResvMetaPtr(job->reservation)->end_time;
-        if (time_limit_seconds &&
+        auto resv_meta = g_meta_container->GetResvMetaPtr(job->reservation);
+        if (!resv_meta)
+          return FormatRichErr(CraneErrCode::ERR_INVALID_PARAM,
+                               "Reservation '{}' does not exist",
+                               job->reservation);
+        auto resv_end_time = resv_meta->end_time;
+        if (!resv_meta->flex && time_limit_seconds &&
             resv_end_time <=
                 absl::Now() + absl::Seconds(time_limit_seconds.value())) {
           CRANE_DEBUG("Job #{}'s time limit exceeds reservation end time",
                       job_id);
-          return CraneErrCode::ERR_INVALID_PARAM;
+          return FormatRichErr(
+              CraneErrCode::ERR_INVALID_PARAM,
+              "Requested time limit extends beyond end time {} of reservation "
+              "'{}'",
+              absl::FormatTime(resv_end_time), job->reservation);
         }
-        if (absl_deadline_time && resv_end_time <= absl_deadline_time.value()) {
+        if (!resv_meta->flex && absl_deadline_time &&
+            resv_end_time <= absl_deadline_time.value()) {
           CRANE_DEBUG("Job #{}'s deadline time exceeds reservation end time",
                       job_id);
-          return CraneErrCode::ERR_INVALID_PARAM;
+          return FormatRichErr(
+              CraneErrCode::ERR_INVALID_PARAM,
+              "Deadline {} extends beyond end time {} of reservation '{}'",
+              absl::FormatTime(absl_deadline_time.value()),
+              absl::FormatTime(resv_end_time), job->reservation);
         }
       }
     }
@@ -2682,6 +2777,10 @@ CraneErrCode JobScheduler::ChangeJobTimeConstraint(
         if (job->reservation != "") {
           const auto& reservation_meta =
               g_meta_container->GetResvMetaPtr(job->reservation);
+          if (reservation_meta.get() == nullptr)
+            return FormatRichErr(CraneErrCode::ERR_INVALID_PARAM,
+                                 "Reservation '{}' does not exist",
+                                 job->reservation);
           auto resv_end_time = reservation_meta->end_time;
           absl::Duration new_time_limit =
               time_limit_seconds ? absl::Seconds(time_limit_seconds.value())
@@ -2692,17 +2791,28 @@ CraneErrCode JobScheduler::ChangeJobTimeConstraint(
               EffectiveJobEndTimeAfterTimeConstraintChange_(
                   *job, new_time_limit, new_deadline);
 
-          if (time_limit_seconds && resv_end_time <= new_end_time) {
+          if (!reservation_meta->flex && time_limit_seconds &&
+              resv_end_time <= new_end_time) {
             CRANE_DEBUG("Job #{}'s time limit exceeds reservation end time",
                         job_id);
-            return CraneErrCode::ERR_INVALID_PARAM;
+            return FormatRichErr(
+                CraneErrCode::ERR_INVALID_PARAM,
+                "New end time {} exceeds end time {} of non-FLEX reservation "
+                "'{}'",
+                absl::FormatTime(new_end_time), absl::FormatTime(resv_end_time),
+                job->reservation);
           }
 
-          if (absl_deadline_time &&
+          if (!reservation_meta->flex && absl_deadline_time &&
               resv_end_time <= absl_deadline_time.value()) {
             CRANE_DEBUG("Job #{}'s deadline time exceeds reservation end time",
                         job_id);
-            return CraneErrCode::ERR_INVALID_PARAM;
+            return FormatRichErr(
+                CraneErrCode::ERR_INVALID_PARAM,
+                "Deadline {} extends beyond end time {} of non-FLEX "
+                "reservation '{}'",
+                absl::FormatTime(absl_deadline_time.value()),
+                absl::FormatTime(resv_end_time), job->reservation);
           }
         }
       }
@@ -2710,7 +2820,7 @@ CraneErrCode JobScheduler::ChangeJobTimeConstraint(
 
     if (!found) {
       CRANE_DEBUG("Job #{} not in Pd/Rn queue for time limit change!", job_id);
-      return CraneErrCode::ERR_NON_EXISTENT;
+      return FormatRichErr(CraneErrCode::ERR_NON_EXISTENT, "");
     }
 
     std::vector<JobInCtld*> jobs_to_update{job};
@@ -2756,6 +2866,11 @@ CraneErrCode JobScheduler::ChangeJobTimeConstraint(
       if (target->Status() != crane::grpc::Pending) {
         absl::Time new_end_time = EffectiveJobEndTimeAfterTimeConstraintChange_(
             *target, new_time_limit, new_deadline);
+        if (auto err = g_meta_container->CheckReservationEndTime(
+                target->reservation, target->AllocatedRes(), target->EndTime(),
+                new_end_time);
+            err.code() != CraneErrCode::SUCCESS)
+          return err;
         end_time_updates.emplace_back(target, new_end_time);
         running_jobs_craneds.emplace_back(
             target->JobId(), target->executing_craned_ids,
@@ -2770,7 +2885,7 @@ CraneErrCode JobScheduler::ChangeJobTimeConstraint(
           "Failed to begin fixed-db transaction when changing time constraint "
           "of job #{}.",
           job_id);
-      return CraneErrCode::ERR_UPDATE_DATABASE;
+      return FormatRichErr(CraneErrCode::ERR_UPDATE_DATABASE, "");
     }
 
     for (const auto& [target, job_to_ctld] : pending_updates) {
@@ -2780,7 +2895,7 @@ CraneErrCode JobScheduler::ChangeJobTimeConstraint(
             "Failed to persist time constraint change for job #{} in "
             "fixed-db transaction.",
             target->JobId());
-        return CraneErrCode::ERR_UPDATE_DATABASE;
+        return FormatRichErr(CraneErrCode::ERR_UPDATE_DATABASE, "");
       }
     }
 
@@ -2789,7 +2904,7 @@ CraneErrCode JobScheduler::ChangeJobTimeConstraint(
           "Failed to commit fixed-db transaction when changing time "
           "constraint of job #{}.",
           job_id);
-      return CraneErrCode::ERR_UPDATE_DATABASE;
+      return FormatRichErr(CraneErrCode::ERR_UPDATE_DATABASE, "");
     }
 
     for (const auto& [target, end_time] : end_time_updates) {
@@ -2800,7 +2915,7 @@ CraneErrCode JobScheduler::ChangeJobTimeConstraint(
               0, target->JobDbId(), runtime_attr)) {
         CRANE_ERROR("Failed to persist runtime end_time for job #{}.",
                     target->JobId());
-        return CraneErrCode::ERR_UPDATE_DATABASE;
+        return FormatRichErr(CraneErrCode::ERR_UPDATE_DATABASE, "");
       }
     }
 
@@ -2843,7 +2958,7 @@ CraneErrCode JobScheduler::ChangeJobTimeConstraint(
             "constraint of job #{}.",
             craned_id, target_job_id);
         // TODO: Expose partial-applied time-constraint updates to users.
-        return CraneErrCode::ERR_RPC_FAILURE;
+        return FormatRichErr(CraneErrCode::ERR_RPC_FAILURE, "");
       }
 
       CraneErrCode err = stub->ChangeJobTimeConstraint(
@@ -2853,12 +2968,12 @@ CraneErrCode JobScheduler::ChangeJobTimeConstraint(
             "Failed to change time limit or deadline of job #{} on Node {}: {}",
             target_job_id, craned_id, CraneErrStr(err));
         // TODO: Expose partial-applied time-constraint updates to users.
-        return err;
+        return FormatRichErr(err, "");
       }
     }
   }
 
-  return CraneErrCode::SUCCESS;
+  return FormatRichErr(CraneErrCode::SUCCESS, "");
 }
 
 std::vector<CraneErrCode> JobScheduler::SuspendRunningJobs(
@@ -3127,9 +3242,9 @@ std::vector<CraneErrCode> JobScheduler::SuspendRunningJobs(
   return results;
 }
 
-std::vector<CraneErrCode> JobScheduler::ResumeSuspendedJobs(
+std::vector<CraneRichError> JobScheduler::ResumeSuspendedJobs(
     const std::vector<task_id_t>& job_ids) {
-  std::vector<CraneErrCode> results;
+  std::vector<CraneRichError> results;
   results.reserve(job_ids.size());
   for (task_id_t job_id : job_ids) {
     std::vector<CranedId> executing_nodes;
@@ -3205,7 +3320,7 @@ std::vector<CraneErrCode> JobScheduler::ResumeSuspendedJobs(
       auto iter = m_running_job_map_.find(job_id);
       if (iter == m_running_job_map_.end()) {
         CRANE_TRACE("Job #{} not in Rn queue for resume", job_id);
-        results.emplace_back(CraneErrCode::ERR_NON_EXISTENT);
+        results.emplace_back(FormatRichErr(CraneErrCode::ERR_NON_EXISTENT, ""));
         continue;
       }
 
@@ -3213,14 +3328,16 @@ std::vector<CraneErrCode> JobScheduler::ResumeSuspendedJobs(
       if (job->Status() != crane::grpc::Suspended) {
         CRANE_TRACE("Job #{} is not suspended (status {}) for resume", job_id,
                     static_cast<int>(job->Status()));
-        results.emplace_back(CraneErrCode::ERR_INVALID_PARAM);
+        results.emplace_back(
+            FormatRichErr(CraneErrCode::ERR_INVALID_PARAM, ""));
         continue;
       }
 
       executing_nodes = job->executing_craned_ids;
       if (executing_nodes.empty()) {
         CRANE_WARN("Job #{} has no executing craned when resuming", job_id);
-        results.emplace_back(CraneErrCode::ERR_INVALID_PARAM);
+        results.emplace_back(
+            FormatRichErr(CraneErrCode::ERR_INVALID_PARAM, ""));
         continue;
       }
 
@@ -3259,6 +3376,13 @@ std::vector<CraneErrCode> JobScheduler::ResumeSuspendedJobs(
                 absl::FormatTime(new_end_time));
           }
 
+          if (auto err = g_meta_container->CheckReservationEndTime(
+                  job->reservation, job->AllocatedRes(), job->EndTime(),
+                  new_end_time);
+              err.code() != CraneErrCode::SUCCESS) {
+            results.emplace_back(std::move(err));
+            continue;
+          }
           job->SetEndTime(new_end_time);
         }
         job->SetSuspendTime(absl::InfinitePast());
@@ -3271,7 +3395,8 @@ std::vector<CraneErrCode> JobScheduler::ResumeSuspendedJobs(
         job->SetSuspendTime(prev_suspend_time);
         CRANE_ERROR("Failed to persist pre-resume runtime attrs for job #{}",
                     job_id);
-        results.emplace_back(CraneErrCode::ERR_GENERIC_FAILURE);
+        results.emplace_back(
+            FormatRichErr(CraneErrCode::ERR_GENERIC_FAILURE, ""));
         continue;
       }
 
@@ -3301,7 +3426,7 @@ std::vector<CraneErrCode> JobScheduler::ResumeSuspendedJobs(
       CRANE_WARN("Job #{} resume skipped because craned(s) {} are offline.",
                  job_id, absl::StrJoin(offline_nodes, ","));
       rollback_resume_preparation();
-      results.emplace_back(CraneErrCode::ERR_RPC_FAILURE);
+      results.emplace_back(FormatRichErr(CraneErrCode::ERR_RPC_FAILURE, ""));
       continue;
     }
 
@@ -3382,9 +3507,10 @@ std::vector<CraneErrCode> JobScheduler::ResumeSuspendedJobs(
             job_id);
       }
 
-      results.emplace_back(failure_code == CraneErrCode::SUCCESS
-                               ? CraneErrCode::ERR_GENERIC_FAILURE
-                               : failure_code);
+      results.emplace_back(FormatRichErr(failure_code == CraneErrCode::SUCCESS
+                                             ? CraneErrCode::ERR_GENERIC_FAILURE
+                                             : failure_code,
+                                         ""));
       continue;
     }
 
@@ -3399,7 +3525,7 @@ std::vector<CraneErrCode> JobScheduler::ResumeSuspendedJobs(
             "Job #{} completed concurrently after resume RPC; "
             "end_time was pre-extended.",
             job_id);
-        results.emplace_back(CraneErrCode::SUCCESS);
+        results.emplace_back(FormatRichErr(CraneErrCode::SUCCESS, ""));
         continue;
       }
 
@@ -3445,7 +3571,8 @@ std::vector<CraneErrCode> JobScheduler::ResumeSuspendedJobs(
                 "may be required.",
                 job_id);
           }
-          results.emplace_back(CraneErrCode::ERR_GENERIC_FAILURE);
+          results.emplace_back(
+              FormatRichErr(CraneErrCode::ERR_GENERIC_FAILURE, ""));
           continue;
         }
       }
@@ -3468,7 +3595,7 @@ std::vector<CraneErrCode> JobScheduler::ResumeSuspendedJobs(
           "Job #{} completed before time limit update; skipping time limit "
           "update.",
           job_id);
-      results.emplace_back(CraneErrCode::SUCCESS);
+      results.emplace_back(FormatRichErr(CraneErrCode::SUCCESS, ""));
       continue;
     }
 
@@ -3574,11 +3701,11 @@ std::vector<CraneErrCode> JobScheduler::ResumeSuspendedJobs(
         }
       }
 
-      results.emplace_back(timelimit_failure_code);
+      results.emplace_back(FormatRichErr(timelimit_failure_code, ""));
       continue;
     }
 
-    results.emplace_back(CraneErrCode::SUCCESS);
+    results.emplace_back(FormatRichErr(CraneErrCode::SUCCESS, ""));
   }
   return results;
 }
@@ -5003,6 +5130,7 @@ std::expected<void, std::string> JobScheduler::CreateResv_(
                   .part_id = partition,
                   .start_time = start_time,
                   .end_time = end_time,
+                  .flex = request.flex(),
                   .accounts_black_list = allowed_accounts.empty(),
                   .users_black_list = allowed_users.empty(),
                   .accounts = allowed_accounts.empty()
@@ -5251,7 +5379,7 @@ void JobScheduler::CleanResvTimerQueueCb_(
       m_resv_timer_handles_.erase(timer_it);
     }
 
-    int64_t secs = absl::ToInt64Seconds(end_time - now);
+    int64_t secs = std::max<int64_t>(0, absl::ToInt64Seconds(end_time - now));
     auto on_timer_cb = [this, reservation_id](const uvw::timer_event&,
                                               uvw::timer_handle& handle) {
       auto err = DeleteResvMeta_(reservation_id);
@@ -7455,6 +7583,36 @@ void JobScheduler::TerminateStepsOnOtherNodes(
   }
 }
 
+void SchedulerAlgo::NodeState::UpdateResource(absl::Time start_time,
+                                              absl::Time end_time,
+                                              const ResourceView& res,
+                                              bool is_release) {
+  CRANE_ASSERT(part_node_state == nullptr);
+  auto update = [&](NodeState* owner, absl::Time start, absl::Time end) {
+    if (start >= end) return;
+    owner->UpdateResourceInNode(start, end, res, is_release);
+    for (auto* selector : owner->selectors)
+      selector->UpdateCost(craned_id, start, end, res, is_release);
+    if (owner == this) {
+      for (auto* reservation : resv_node_states) {
+        if (!reservation->flex) continue;
+        for (auto* selector : reservation->selectors)
+          selector->UpdateCost(craned_id, start, end, res, is_release);
+      }
+    }
+  };
+  for (auto* reservation : resv_node_states) {
+    if (reservation->resv_end_time <= start_time) continue;
+    if (reservation->resv_start_time >= end_time) break;
+    update(this, start_time, std::min(end_time, reservation->resv_start_time));
+    auto end = std::min(end_time, reservation->resv_end_time);
+    update(reservation, std::max(start_time, reservation->resv_start_time),
+           end);
+    start_time = end;
+  }
+  update(this, start_time, end_time);
+}
+
 bool SchedulerAlgo::LocalScheduler::CalculateRunningNodesAndStartTime_(
     const absl::Time& now, PdJobInScheduler* job,
     const absl::flat_hash_map<std::string, std::vector<std::string>>&
@@ -7517,10 +7675,10 @@ bool SchedulerAlgo::LocalScheduler::GetNodesAndTrySchedule_(
   for (const auto& node_state :
        m_node_selector_->GetOrderedNodesSet() | std::views::values) {
     const auto& craned_id = node_state->craned_id;
-    auto& time_avail_res_map = node_state->time_avail_res_map;
+    auto time_avail_res_map = node_state->GetTimeAvailResView();
     // Number of jobs is not less than map size.
     // When condition is true, the craned has too many jobs.
-    if (time_avail_res_map.size() >= kAlgoMaxJobNumPerNode) {
+    if (time_avail_res_map.EstimatedSize() >= kAlgoMaxJobNumPerNode) {
       if constexpr (kAlgoTraceOutput) {
         CRANE_TRACE("Craned {} has too many jobs. Skipping this craned.",
                     craned_id);
@@ -7570,9 +7728,8 @@ bool SchedulerAlgo::LocalScheduler::GetNodesAndTrySchedule_(
       continue;
     }
 
-    const auto& [last_time, last_res] = *time_avail_res_map.rbegin();
-    if (job->reason.empty() && last_time < earliest_end_time &&
-        last_res.IsZero()) {
+    if (job->reason.empty() &&
+        time_avail_res_map.EndTime() < earliest_end_time) {
       job->reason = "Resource";
     }
 
@@ -7728,9 +7885,10 @@ bool SchedulerAlgo::LocalScheduler::MaterializeResource_(
     const std::vector<std::variant<PdJobInScheduler*, RnJobInScheduler*>>*
         resources_to_release) const {
   ResourceV3 allocated_res;
+  ResourceV3 resv_allocated_res;
   for (const auto& [craned_id, planned_res] : job->planned_res) {
-    ResourceInNodeV3 available_res =
-        m_node_selector_->GetNodeState(craned_id)->res_avail_v3;
+    const auto* node = m_node_selector_->GetNodeState(craned_id);
+    ResourceInNodeV3 available_res = node->PhysicalNode()->res_avail_v3;
 
     if (resources_to_release != nullptr) {
       for (const auto& released_job : *resources_to_release) {
@@ -7755,9 +7913,12 @@ bool SchedulerAlgo::LocalScheduler::MaterializeResource_(
       return false;
     }
     allocated_res.AddResourceInNode(craned_id, feasible_res);
+    if (node->part_node_state)
+      resv_allocated_res.AddResourceInNode(craned_id, feasible_res);
   }
 
   job->allocated_res = std::move(allocated_res);
+  job->resv_allocated_res = std::move(resv_allocated_res);
   return true;
 }
 
@@ -7770,12 +7931,28 @@ bool SchedulerAlgo::LocalScheduler::TryPreempt_(
   auto qit = qos_preempt_map.find(job->qos);
   if (qit == qos_preempt_map.end() || qit->second.empty()) return false;
 
+  absl::Time seg_start = now;
+  absl::Time seg_end = now + job->time_limit;
+  for (const auto* node : nodes_to_sched) {
+    if (node->part_node_state && !node->flex) {
+      if (seg_start < node->resv_start_time || seg_end > node->resv_end_time)
+        return false;
+      continue;
+    }
+    for (const auto* reservation : node->PhysicalNode()->resv_node_states) {
+      if (reservation->resv_start_time >= seg_end) break;
+      if (reservation != node && reservation->resv_end_time > seg_start)
+        return false;
+    }
+  }
+
   absl::flat_hash_set<std::variant<PdJobInScheduler*, RnJobInScheduler*>>
       preemptable_set;
   for (const auto* node : nodes_to_sched) {
     for (const auto& qos : qit->second) {
-      auto it = node->qos_job_map.find(qos);
-      if (it != node->qos_job_map.end()) {
+      const auto& qos_job_map = node->PhysicalNode()->qos_job_map;
+      auto it = qos_job_map.find(qos);
+      if (it != qos_job_map.end()) {
         preemptable_set.insert(it->second.begin(), it->second.end());
       }
     }
@@ -7818,8 +7995,6 @@ bool SchedulerAlgo::LocalScheduler::TryPreempt_(
         }
       });
 
-  absl::Time seg_start = now;
-  absl::Time seg_end = now + job->time_limit;
   std::vector<PreemptSegTree> seg_trees;
   seg_trees.reserve(nodes_to_sched.size());
   absl::flat_hash_map<CranedId, size_t> node_index;
@@ -7830,7 +8005,7 @@ bool SchedulerAlgo::LocalScheduler::TryPreempt_(
     seg_trees.emplace_back(seg_start, seg_end);
 
     auto& tree = seg_trees.back();
-    const auto& tmap = node->time_avail_res_map;
+    const auto tmap = node->GetTimeAvailResView();
     for (auto it = tmap.begin(); it != tmap.end();) {
       absl::Time st = std::max(it->first, seg_start);
       auto nxt = std::next(it);
@@ -7994,10 +8169,9 @@ void SchedulerAlgo::NodeSelect(
   absl::flat_hash_map<std::string, std::vector<std::string>> qos_preempt_map;
 
   for (const auto& job : pending_jobs) {
-    auto& pd_job_ptr_vec = job->reservation.empty()
-                               ? part_pd_job_ptr_map[job->partition_id]
-                               : resv_pd_job_ptr_map[job->reservation];
-    pd_job_ptr_vec.emplace_back(job.get());
+    part_pd_job_ptr_map[job->partition_id].emplace_back(job.get());
+    if (!job->reservation.empty())
+      resv_pd_job_ptr_map[job->reservation].emplace_back(job.get());
     qos_preempt_map[job->qos];
   }
 
@@ -8038,8 +8212,6 @@ void SchedulerAlgo::NodeSelect(
   absl::flat_hash_map<PartitionId, std::vector<NodeState*>>
       part_node_state_ptrs_map;
 
-  absl::flat_hash_map<CranedId, bool> craned_available_map;
-
   {
     auto all_partitions_meta_map =
         g_meta_container->GetAllPartitionsMetaMapConstPtr();
@@ -8057,12 +8229,6 @@ void SchedulerAlgo::NodeSelect(
 
   {
     auto craned_meta_map = g_meta_container->GetCranedMetaMapConstPtr();
-    craned_available_map.reserve(craned_meta_map->size());
-    for (auto& [craned_id, craned_meta_sync] : *craned_meta_map) {
-      auto craned_meta = craned_meta_sync.GetExclusivePtr();
-      craned_available_map.emplace(craned_id,
-                                   craned_meta->alive && !craned_meta->drain);
-    }
     for (const auto& [partition_id, craned_ids] : part_node_ids_map) {
       for (const auto& craned_id : craned_ids) {
         auto it = node_state_map.find(craned_id);
@@ -8083,6 +8249,15 @@ void SchedulerAlgo::NodeSelect(
     }
   }
 
+  for (const auto& job : running_jobs) {
+    for (const auto& [craned_id, res] : job->allocated_res.EachNodeResMap()) {
+      auto it = node_state_map.find(craned_id);
+      if (it == node_state_map.end()) continue;
+      it->second.AddAllocatedRes(job->end_time, res);
+      it->second.qos_job_map[job->qos].emplace(job.get());
+    }
+  }
+
   for (const auto& [partition_id, craned_ids] : part_node_ids_map) {
     auto& node_info_vec = part_node_state_ptrs_map[partition_id];
     node_info_vec.reserve(craned_ids.size());
@@ -8093,19 +8268,28 @@ void SchedulerAlgo::NodeSelect(
     }
   }
 
+  for (auto& [craned_id, node_state] : node_state_map)
+    node_state.InitTimeAvailResMap(now);
+
   // For nodes in reservation, res_avail on node and running jobs are
   // collected
-  absl::flat_hash_map<
-      ResvId, std::pair<absl::Time, absl::flat_hash_map<CranedId, NodeState>>>
-      resv_node_state_map;
-  absl::flat_hash_map<ResvId, std::vector<NodeState*>> resv_node_state_ptrs_map;
+  struct ResvInfo {
+    absl::Time end_time;
+    bool flex{false};
+    absl::flat_hash_map<CranedId, NodeState> nodes;
+  };
+  absl::flat_hash_map<ResvId, ResvInfo> resv_node_state_map;
+  absl::flat_hash_map<std::pair<PartitionId, ResvId>, std::vector<NodeState*>>
+      resv_node_state_ptrs_map;
 
   {
     auto reservation_meta_map = g_meta_container->GetResvMetaMapPtr();
     for (auto& [reservation_id, reservation_meta] : *reservation_meta_map) {
       auto resv_meta = reservation_meta.GetExclusivePtr();
+      auto& resv_info = resv_node_state_map[reservation_id];
+      resv_info.end_time = resv_meta->end_time;
+      resv_info.flex = resv_meta->flex;
       if (now >= resv_meta->end_time) {
-        CRANE_WARN("Reservation {} expired but not cleaned up", reservation_id);
         continue;
       }
       for (const auto& [craned_id, _] : resv_meta->res_total.EachNodeResMap()) {
@@ -8116,102 +8300,80 @@ void SchedulerAlgo::NodeSelect(
                        resv_meta->start_time);
         }
       }
-      if (now >= resv_meta->start_time) {
-        for (const auto& [craned_id, res] :
-             resv_meta->res_total.EachNodeResMap()) {
-          auto node_state_it = node_state_map.find(craned_id);
-          if (node_state_it != node_state_map.end()) {
-            node_state_it->second.AddAllocatedRes(resv_meta->end_time, res);
-          }
-        }
-        auto it = resv_pd_job_ptr_map.find(reservation_id);
-        if (it == resv_pd_job_ptr_map.end()) {
-          continue;  // no pending jobs, skip
-        }
-        auto& [resv_end_time, resv_craned_meta] =
-            resv_node_state_map[reservation_id];
-        resv_end_time = resv_meta->end_time;
-        for (const auto& [craned_id, res] :
-             resv_meta->res_total.EachNodeResMap()) {
-          auto available_it = craned_available_map.find(craned_id);
-          bool available = false;
-          if (available_it == craned_available_map.end()) {
-            CRANE_ERROR("Craned {} in reservation {} not found", craned_id,
-                        reservation_id);
-          } else {
-            available = available_it->second;
-          }
-          resv_craned_meta.emplace(craned_id,
-                                   NodeState(craned_id, res, available));
-        }
-        auto& resv_node_info = resv_node_state_ptrs_map[reservation_id];
-        for (auto& [craned_id, node_state] : resv_craned_meta) {
-          resv_node_info.emplace_back(&node_state);
-        }
-      } else {
-        for (const auto& [craned_id, res] :
-             resv_meta->res_total.EachNodeResMap()) {
-          auto node_state_it = node_state_map.find(craned_id);
-          if (node_state_it != node_state_map.end()) {
-            node_state_it->second.AddReservedRes(resv_meta->start_time,
-                                                 resv_meta->end_time, res);
-          }
-        }
+      for (const auto& [craned_id, res] :
+           resv_meta->res_total.EachNodeResMap()) {
+        auto part_it = node_state_map.find(craned_id);
+        if (part_it == node_state_map.end()) continue;
+        auto& node =
+            resv_info.nodes
+                .emplace(craned_id,
+                         NodeState(craned_id, res, part_it->second.available))
+                .first->second;
+        node.part_node_state = &part_it->second;
+        node.flex = resv_meta->flex;
+        node.resv_start_time = std::max(now, resv_meta->start_time);
+        node.resv_end_time = resv_meta->end_time;
+        auto& p = part_it->second.time_avail_res_map;
+        auto& r = node.time_avail_res_map;
+        auto end =
+            p.try_emplace(node.resv_end_time,
+                          std::prev(p.upper_bound(node.resv_end_time))->second)
+                .first;
+        auto begin =
+            p.try_emplace(
+                 node.resv_start_time,
+                 std::prev(p.upper_bound(node.resv_start_time))->second)
+                .first;
+        r.insert(begin, end);
+        if (node.resv_start_time > now) r.emplace(now, ResourceView{});
+        r.emplace(node.resv_end_time, ResourceView{});
+        p.erase(begin, end);
+        p.emplace(node.resv_start_time, ResourceView{});
       }
     }
   }
 
-  {
-    for (const auto& job : running_jobs) {
-      if (job->reservation.empty()) {
-        for (auto& [craned_id, res] : job->allocated_res.EachNodeResMap()) {
-          auto it = node_state_map.find(craned_id);
-          if (it != node_state_map.end()) {
-            it->second.AddAllocatedRes(job->end_time, res);
-            it->second.qos_job_map[job->qos].emplace(job.get());
-          }
-        }
-      } else {
-        auto it = resv_node_state_map.find(job->reservation);
-        if (it == resv_node_state_map.end()) {
-          CRANE_ERROR(
-              "Reservation {} of running job #{} not found in "
-              "resv_node_state_"
-              "map",
-              job->reservation, job->job_id);
-          continue;
-        }
-        auto& craned_id_node_map = it->second.second;
-        for (auto& [craned_id, res] : job->allocated_res.EachNodeResMap()) {
-          auto& ns = craned_id_node_map.at(craned_id);
-          ns.AddAllocatedRes(job->end_time, res);
-          ns.qos_job_map[job->qos].emplace(job.get());
-        }
-      }
-    }
-  }
-
-  // Build TimeAvailResMap
-  for (auto& [craned_id, node_state] : node_state_map) {
-    node_state.InitTimeAvailResMap(now);
-  }
   for (auto& [resv_id, resv_info] : resv_node_state_map) {
-    for (auto& [craned_id, node_state] : resv_info.second) {
-      node_state.InitTimeAvailResMap(now, resv_info.first);
+    if (now >= resv_info.end_time) continue;
+    for (auto& [craned_id, node] : resv_info.nodes) {
+      node.part_node_state->resv_node_states.push_back(&node);
+      node.res_avail = node.GetTimeAvailResView().begin()->second;
     }
+    auto jobs = resv_pd_job_ptr_map.find(resv_id);
+    if (jobs == resv_pd_job_ptr_map.end()) continue;
+    for (const auto* job : jobs->second) {
+      auto [it, inserted] = resv_node_state_ptrs_map.try_emplace(
+          std::make_pair(job->partition_id, resv_id));
+      if (!inserted) continue;
+      for (auto* part_node : part_node_state_ptrs_map[job->partition_id]) {
+        auto resv_node = resv_info.nodes.find(part_node->craned_id);
+        if (resv_node != resv_info.nodes.end()) {
+          it->second.push_back(&resv_node->second);
+        } else if (resv_info.flex) {
+          it->second.push_back(part_node);
+        }
+      }
+    }
+  }
+
+  for (auto& [craned_id, node_state] : node_state_map) {
+    node_state.res_avail = node_state.time_avail_res_map.begin()->second;
+    std::ranges::sort(node_state.resv_node_states, {},
+                      &NodeState::resv_start_time);
   }
 
   // Build LocalSchedulers
   // TODO: do it in parallel
   absl::flat_hash_map<PartitionId, LocalScheduler> part_scheduler_map;
-  absl::flat_hash_map<ResvId, LocalScheduler> resv_scheduler_map;
+  absl::flat_hash_map<std::pair<PartitionId, ResvId>, LocalScheduler>
+      resv_scheduler_map;
   for (const auto& [part_id, node_state_ptrs_vec] : part_node_state_ptrs_map) {
     part_scheduler_map[part_id].InitializeNodeSelector<MinCpuTimeRatioFirst>(
-        now, node_state_ptrs_vec);
+        now, node_state_ptrs_vec, node_state_map);
   }
   for (const auto& [resv_id, node_state_ptrs_vec] : resv_node_state_ptrs_map) {
     resv_scheduler_map[resv_id].InitializeNodeSelector<MinCpuTimeRatioFirst>(
-        now, node_state_ptrs_vec);
+        now, node_state_ptrs_vec, node_state_map);
   }
 
   std::vector<PdJobInScheduler*> job_ptr_vec;
@@ -8235,12 +8397,15 @@ void SchedulerAlgo::NodeSelect(
       }
       scheduler = &part_scheduler_map[job->partition_id];
     } else {
-      auto it = resv_scheduler_map.find(job->reservation);
+      auto it = resv_scheduler_map.find(
+          std::make_pair(job->partition_id, job->reservation));
       if (it == resv_scheduler_map.end()) {
-        job->reason = "Reservation Not Found";
+        job->reason = resv_node_state_map.contains(job->reservation)
+                          ? "Reservation Expired"
+                          : "Reservation Not Found";
         continue;
       }
-      scheduler = &resv_scheduler_map[job->reservation];
+      scheduler = &it->second;
     }
 
     if (auto result = g_account_meta_container->CheckMetaResource(*job);
@@ -8271,23 +8436,26 @@ void SchedulerAlgo::NodeSelect(
                     absl::ToInt64Seconds(job->end_time - now));
       }
 
-      std::vector<job_id_t> preempted_rn_jobs;
-      for (const auto& preempted : job->preempted_jobs) {
-        scheduler->UpdateNodeSelectorWithPreemptedJob(now, preempted);
-        if (std::holds_alternative<PdJobInScheduler*>(preempted)) {
-          std::get<PdJobInScheduler*>(preempted)->reason = "Preempted";
-          continue;
+      if (job->reservation.empty() ||
+          job->start_time < resv_node_state_map.at(job->reservation).end_time) {
+        std::vector<job_id_t> preempted_rn_jobs;
+        for (const auto& preempted : job->preempted_jobs) {
+          scheduler->UpdateNodeSelectorWithPreemptedJob(now, preempted);
+          if (std::holds_alternative<PdJobInScheduler*>(preempted)) {
+            std::get<PdJobInScheduler*>(preempted)->reason = "Preempted";
+            continue;
+          }
+          auto* rn = std::get<RnJobInScheduler*>(preempted);
+          if (!m_preempting_set_.insert(rn->job_id).second) continue;
+          CRANE_INFO("Preempting running job #{} for job #{}", rn->job_id,
+                     job->job_id);
+          preempted_rn_jobs.push_back(rn->job_id);
         }
-        auto* rn = std::get<RnJobInScheduler*>(preempted);
-        if (!m_preempting_set_.insert(rn->job_id).second) continue;
-        CRANE_INFO("Preempting running job #{} for job #{}", rn->job_id,
-                   job->job_id);
-        preempted_rn_jobs.push_back(rn->job_id);
-      }
-      // TODO(preempt): dispatch to REQUEUE / SUSPEND queue when supported.
-      g_job_scheduler->EnqueuePreemptCancel(std::move(preempted_rn_jobs));
+        // TODO(preempt): dispatch to REQUEUE / SUSPEND queue when supported.
+        g_job_scheduler->EnqueuePreemptCancel(std::move(preempted_rn_jobs));
 
-      scheduler->UpdateNodeSelectorWithScheduledJob(now, job);
+        scheduler->UpdateNodeSelectorWithScheduledJob(now, job);
+      }
     }
   }
 }
@@ -8880,7 +9048,8 @@ CraneExpectedRich<void> JobScheduler::AcquireJobAttributes(JobInCtld* job) {
   return {};
 }
 
-CraneExpectedRich<void> JobScheduler::CheckJobValidity(JobInCtld* job) {
+CraneExpectedRich<void> JobScheduler::CheckJobValidity(JobInCtld* job,
+                                                       bool recovering) {
   if (auto valid = PreJobSubmitCheck(job); !valid) {
     return std::unexpected(
         FormatRichErr(CraneErrCode::ERR_INVALID_PARAM, "{}", valid.error()));
@@ -9013,7 +9182,8 @@ CraneExpectedRich<void> JobScheduler::CheckJobValidity(JobInCtld* job) {
 
     {
       CranedMetaContainer::ResvMetaPtr resv_meta;
-      if (job->reservation != "") {
+      if (!job->reservation.empty() &&
+          (!recovering || g_meta_container->GetResvMetaPtr(job->reservation))) {
         if (!g_meta_container->GetResvMetaMapConstPtr()->contains(
                 job->reservation)) {
           CRANE_TRACE("Reservation {} not found for job #{}", job->reservation,
@@ -9025,6 +9195,11 @@ CraneExpectedRich<void> JobScheduler::CheckJobValidity(JobInCtld* job) {
         }
 
         resv_meta = g_meta_container->GetResvMetaPtr(job->reservation);
+        if (!recovering && absl::Now() >= resv_meta->end_time)
+          return std::unexpected(FormatRichErr(
+              CraneErrCode::ERR_INVALID_PARAM,
+              "Invalid --reservation value '{}': reservation has expired",
+              job->reservation));
 
         if (resv_meta->part_id != "" &&
             resv_meta->part_id != job->partition_id) {
@@ -9061,7 +9236,7 @@ CraneExpectedRich<void> JobScheduler::CheckJobValidity(JobInCtld* job) {
               job->reservation));
         }
 
-        if (!job->included_nodes.empty()) {
+        if (!resv_meta->flex && !job->included_nodes.empty()) {
           auto reserved_craned_id_list = resv_meta->craned_ids;
           std::unordered_set<std::string> reserved_craned_id_set;
           reserved_craned_id_set.insert(reserved_craned_id_list.begin(),
@@ -9157,7 +9332,7 @@ CraneExpectedRich<void> JobScheduler::CheckJobValidity(JobInCtld* job) {
         return true;
       };
 
-      if (job->reservation != "") {
+      if (resv_meta && !resv_meta->flex) {
         for (const auto& [craned_id, resource] :
              resv_meta->res_total.EachNodeResMap()) {
           if ((!job->included_nodes.empty() &&
