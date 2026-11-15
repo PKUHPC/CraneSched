@@ -77,7 +77,7 @@ requires a new attempt; missing UID receipts or unfinished cleanup block new
 admission. Cancellation stops test processes before environment reclamation.
 
 The entry point retains packages, complete logs, test identities and diagnostic
-evidence internally. Public Actions receives only aggregate counts and phase
+evidence internally. Public Actions receives case names, terminal results, aggregate counts and phase
 outcomes. Success requires nonempty, complete execution and successful cleanup.
 It writes `complete=true`, `expected=<count>` and `passed=<count>` to
 `GITHUB_OUTPUT`; a failed or incomplete execution returns nonzero. The summary
