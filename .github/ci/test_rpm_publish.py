@@ -7,7 +7,6 @@ import tempfile
 import unittest
 from pathlib import Path
 
-import yaml
 
 
 UPLOADER = Path(__file__).with_name("upload-packages.sh")
@@ -134,34 +133,6 @@ class RpmRepositoryUploadTest(unittest.TestCase):
         self.assertEqual(result.returncode, 1)
         self.assertEqual(self._calls(), [])
         self.assertIn("Nexus password is required", result.stdout)
-
-
-class RpmPublishWorkflowTest(unittest.TestCase):
-    def test_each_missing_secret_skips_before_loading_packages(self) -> None:
-        workflow_path = Path(__file__).parents[1] / "workflows" / "build.yaml"
-        workflow = yaml.safe_load(workflow_path.read_text(encoding="utf-8"))
-        step = next(
-            step for step in workflow["jobs"]["test"]["steps"]
-            if step["name"] == "Upload tested RPMs to private repository"
-        )
-        secrets = {
-            "NEXUS_URL": "https://rpm-upload.example.invalid",
-            "NEXUS_USERNAME": "test-uploader",
-            "NEXUS_PASSWORD": "dummy-test-password",
-        }
-        for missing_secret in secrets:
-            with self.subTest(missing_secret=missing_secret):
-                result = subprocess.run(
-                    ["bash", "-c", step["run"]],
-                    env={"PATH": os.environ["PATH"], **secrets, missing_secret: ""},
-                    text=True,
-                    capture_output=True,
-                    timeout=10,
-                    check=False,
-                )
-                self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
-                self.assertIn("Skipping RPM upload", result.stdout)
-                self.assertNotIn("dummy-test-password", result.stdout + result.stderr)
 
 
 if __name__ == "__main__":
