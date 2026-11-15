@@ -6,16 +6,18 @@ endif ()
 include(GoogleTest)
 
 # The test includes CtldGrpcServer.cpp to exercise its file-local helpers.
-# Reuse the daemon's remaining sources and build settings without test hooks.
+# Reuse the daemon's remaining sources and build settings.
 get_target_property(job_query_sources cranectld SOURCES)
 list(FILTER job_query_sources EXCLUDE REGEX "(^|/)(CraneCtld|CtldGrpcServer)\\.cpp$")
 list(TRANSFORM job_query_sources PREPEND "${PROJECT_SOURCE_DIR}/src/CraneCtld/")
 get_target_property(job_query_libraries cranectld LINK_LIBRARIES)
 get_target_property(job_query_definitions cranectld COMPILE_DEFINITIONS)
 get_target_property(job_query_includes cranectld INCLUDE_DIRECTORIES)
-add_executable(job_query_test JobQueryTest.cpp ${job_query_sources})
+add_executable(job_query_test JobQueryTest.cpp ReservationFlexTest.cpp ${job_query_sources})
 target_link_libraries(job_query_test PRIVATE
         GTest::gtest GTest::gtest_main ${job_query_libraries})
+target_link_options(job_query_test PRIVATE
+        "LINKER:--wrap=_ZN4Ctld20AccountMetaContainer17CheckMetaResourceB5cxx11ERKNS_16PdJobInSchedulerE")
 target_compile_definitions(job_query_test PRIVATE ${job_query_definitions})
 target_include_directories(job_query_test PRIVATE ${job_query_includes})
 target_precompile_headers(job_query_test PRIVATE

@@ -333,6 +333,11 @@ func preParseGlobalFlags(args []string) []string {
 			FlagJson = true
 		case "--force":
 			FlagForce = true
+		case "--flex":
+			if !hasValueInSameArg {
+				flagValue = "true"
+			}
+			remainingArgs = append(remainingArgs, "flex="+flagValue)
 		case "--enabled", "--level":
 			key := strings.TrimPrefix(flagName, "--")
 			if hasValueInSameArg {
