@@ -67,6 +67,7 @@ jobs:
           if [[ ! -d "$state/source/.git" ]]; then
             git init "$state/source"
           fi
+          git -C "$state/source" config remote.origin.url "$(git -C "$source_checkout" remote get-url origin)"
           git -C "$state/source" fetch --no-tags --update-shallow "$source_checkout" "$source_sha"
           git -C "$state/source" checkout --force --detach "$source_sha"
           cd -P "$state/source"
@@ -84,7 +85,8 @@ jobs:
           make -C go all tool PREFIX=/usr STRIP=true CHECK_GPU=0
           mkdir -p "$artifact_dir/packages/backend" "$artifact_dir/packages/go"
           (cd cmake-build-ci-debug && cpack -G RPM -B "$artifact_dir/packages/backend")
-          make -C go package SKIP_REBUILD=true CHECK_GPU=0
+          make -C go package SKIP_REBUILD=true CHECK_GPU=0 \
+            GORELEASER_SNAPSHOT=false GORELEASER_RELEASE_ARGS=--skip=validate
           cp go/build/dist/*.rpm "$artifact_dir/packages/go/"
           python3 - <<'PY'
           import hashlib
