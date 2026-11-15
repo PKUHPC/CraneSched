@@ -3,7 +3,7 @@
  * Changsha Institute for Computing and Digital Economy
  */
 
-#include "Pmi2Transport.h"
+#include "Transport.h"
 
 #include <poll.h>
 #include <sys/socket.h>
@@ -17,7 +17,7 @@
 
 #include "Pmi2Codec.h"
 
-namespace crane::pmi2 {
+namespace crane::pmi {
 namespace {
 bool WaitForFd(int fd, short events,
                std::chrono::steady_clock::time_point deadline) {
@@ -62,6 +62,11 @@ bool Transport::WriteAll(const void* data, size_t size) {
 
 bool Transport::ReadAll(void* data, size_t size) {
   auto* bytes = static_cast<char*>(data);
+  const auto buffered = std::min(size, m_input_.size());
+  std::memcpy(bytes, m_input_.data(), buffered);
+  m_input_.erase(0, buffered);
+  bytes += buffered;
+  size -= buffered;
   const auto deadline = std::chrono::steady_clock::now() + m_timeout_;
   while (size > 0) {
     if (!WaitForFd(m_fd_, POLLIN, deadline)) return false;
@@ -78,24 +83,33 @@ bool Transport::ReadAll(void* data, size_t size) {
   return true;
 }
 
-bool Transport::SendInit(std::string_view line) {
+bool Transport::SendLine(std::string_view line) {
   return WriteAll(line.data(), line.size());
 }
 
-std::optional<std::string> Transport::ReceiveInit() {
-  std::string result;
-  result.reserve(256);
-  while (result.size() <= 1024) {
-    char ch;
-    if (!ReadAll(&ch, 1)) return std::nullopt;
-    result.push_back(ch);
-    if (ch == '\n') return result;
+std::optional<std::string> Transport::ReceiveLine(size_t limit) {
+  const auto deadline = std::chrono::steady_clock::now() + m_timeout_;
+  for (;;) {
+    if (auto end = m_input_.find('\n'); end != std::string::npos) {
+      if (end + 1 > limit) return std::nullopt;
+      auto line = m_input_.substr(0, end + 1);
+      m_input_.erase(0, end + 1);
+      return line;
+    }
+    if (m_input_.size() >= limit || !WaitForFd(m_fd_, POLLIN, deadline))
+      return std::nullopt;
+    char buffer[4096];
+    auto received = recv(m_fd_, buffer, sizeof(buffer), MSG_DONTWAIT);
+    if (received > 0)
+      m_input_.append(buffer, static_cast<size_t>(received));
+    else if (received == 0 ||
+             (errno != EINTR && errno != EAGAIN && errno != EWOULDBLOCK))
+      return std::nullopt;
   }
-  return std::nullopt;
 }
 
 bool Transport::SendFrame(std::string_view body) {
-  if (body.empty() || body.size() > Codec::kMaxFrame) return false;
+  if (body.empty() || body.size() > crane::pmi2::Codec::kMaxFrame) return false;
   std::string header = std::to_string(body.size());
   if (header.size() > 6) return false;
   header.insert(header.begin(), 6 - header.size(), ' ');
@@ -115,7 +129,7 @@ std::optional<std::string> Transport::ReceiveFrame() {
   auto [end, error] = std::from_chars(
       length_text.data(), length_text.data() + length_text.size(), length);
   if (error != std::errc{} || end != length_text.data() + length_text.size() ||
-      length == 0 || length > Codec::kMaxFrame)
+      length == 0 || length > crane::pmi2::Codec::kMaxFrame)
     return std::nullopt;
   std::string body(length, '\0');
   if (!ReadAll(body.data(), body.size())) return std::nullopt;
@@ -130,4 +144,4 @@ void Transport::Close() {
   }
 }
 
-}  // namespace crane::pmi2
+}  // namespace crane::pmi

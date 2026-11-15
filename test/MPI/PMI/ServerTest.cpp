@@ -215,6 +215,33 @@ TEST(Pmi2Server, Pmi1ClientInitializesAndExchangesKvsAcrossRanks) {
   for (uint32_t rank = 0; rank < 3; ++rank) server.TaskExited(rank);
 }
 
+TEST(Pmi1Client, NativeApiExchangesKvsAcrossNodesWithNoncontiguousCliques) {
+  auto step = Step(18);
+  step.add_nodelist("node1");
+  for (uint32_t node : {1, 0, 1}) step.add_task_node_list(node);
+  auto config = Config();
+  config.CranedIdToNodeHostname["node1"] = "localhost";
+  config.CranedIdToNodeAddr["node1"] = "127.0.0.1";
+  std::vector<std::unique_ptr<pmi::Server>> servers;
+  for (const auto& id : step.nodelist()) {
+    config.CranedIdOfThisNode = id;
+    auto server = std::make_unique<pmi::Server>();
+    ASSERT_TRUE(server->Init(config, step, {}, 3s));
+    servers.push_back(std::move(server));
+  }
+  ASSERT_TRUE(servers[0]->ReceivePeers({{"node1", servers[1]->Port()}}));
+  ASSERT_TRUE(servers[1]->ReceivePeers({{"node0", servers[0]->Port()}}));
+  Clients clients;
+  for (uint32_t rank = 0; rank < 4; ++rank) {
+    auto launch = servers[rank % 2]->PrepareTask(rank);
+    ASSERT_TRUE(launch);
+    launch->env["SLURM_GTIDS"] = rank % 2 == 0 ? "0,2" : "1,3";
+    ASSERT_TRUE(clients.Start(std::move(*launch), "unused", "normal",
+                              PMI1_API_TEST_CLIENT));
+  }
+  clients.ExpectExit();
+}
+
 TEST(Pmi2Server, RejectsMixedProtocolsOnOneNode) {
   auto step = Step(9);
   step.add_task_node_list(0);
@@ -391,6 +418,7 @@ TEST(Pmi2Server, PartialFramesAndPmi1Negotiation) {
   Send(old->fd, "cmd=get_appnum\n");
   auto appnum = Read(old->fd);
   EXPECT_NE(appnum.find("cmd=appnum"), std::string::npos);
+  EXPECT_NE(appnum.find("rc=0"), std::string::npos);
   EXPECT_NE(appnum.find("appnum=-1"), std::string::npos);
   Send(old->fd, "cmd=get key=missing\n");
   auto missing = pmi::pmi1::Codec::ParseLine(Read(old->fd));

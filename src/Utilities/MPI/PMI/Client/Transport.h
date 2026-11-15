@@ -11,7 +11,7 @@
 #include <string>
 #include <string_view>
 
-namespace crane::pmi2 {
+namespace crane::pmi {
 
 class Transport final {
  public:
@@ -20,8 +20,8 @@ class Transport final {
   Transport(const Transport&) = delete;
   Transport& operator=(const Transport&) = delete;
 
-  bool SendInit(std::string_view line);
-  std::optional<std::string> ReceiveInit();
+  bool SendLine(std::string_view line);
+  std::optional<std::string> ReceiveLine(size_t limit = 1024);
   bool SendFrame(std::string_view body);
   std::optional<std::string> ReceiveFrame();
   void Close();
@@ -30,8 +30,9 @@ class Transport final {
   bool WriteAll(const void* data, size_t size);
   bool ReadAll(void* data, size_t size);
 
+  std::string m_input_;
   int m_fd_;
   std::chrono::milliseconds m_timeout_;
 };
 
-}  // namespace crane::pmi2
+}  // namespace crane::pmi

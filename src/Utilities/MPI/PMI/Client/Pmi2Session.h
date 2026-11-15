@@ -10,11 +10,12 @@
 #include <string>
 
 #include "Pmi2Codec.h"
+#include "Transport.h"
 #include "crane/pmi2/pmi2.h"
 
 namespace crane::pmi2 {
 
-class Transport;
+using crane::pmi::Transport;
 
 class Session final {
  public:

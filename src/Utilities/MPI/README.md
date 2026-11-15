@@ -12,14 +12,23 @@ Vendor selectors and SDK library paths remain part of the user's environment.
 | `StepControlClient.*`, `EndpointRendezvous.*` | Protocol-independent endpoint exchange and step termination |
 | `PMI/Runtime.*`, `PMI/Server/` | Local channels, step topology, KVS visibility, distributed fences and Ring scans |
 | `PMI/Protocol/` | Handshake, PMI-1 and PMI-2 dispatch, framing and reply encoding |
-| `PMI/Client/` | Public `libpmi2` client implementation and its installed header |
+| `PMI/Client/` | Native C++ `libpmi` / `libpmi2` clients, public C headers and shared FD transport |
 | `Pmix/Server.*`, `Pmix/Namespace.cpp`, `Pmix/Operations.cpp` | PMIx lifecycle, namespace metadata and host operations |
 | `Pmix/Collective/`, `Pmix/Modex/`, `Pmix/Transport/` | Collective state, direct-modex completion and gRPC/UCX transport |
 
 The PMI codecs have one implementation shared by the server and client. The
-installed `libpmi2.so.0` ABI and `crane/pmi2/pmi2.h` path are independent of the
-source layout. `CRANE_ENABLE_PMI2` controls both PMI wire versions and the client
-library; `CRANE_ENABLE_PMIX` and `CRANE_ENABLE_UCX` retain their existing roles.
+installed `libpmi.so.0` and `libpmi2.so.0` ABIs and `crane/pmi1/pmi.h` /
+`crane/pmi2/pmi2.h` paths are independent of the source layout.
+`CRANE_ENABLE_PMI2` controls both PMI wire versions and their client libraries;
+`CRANE_ENABLE_PMIX` and `CRANE_ENABLE_UCX` retain their existing roles.
+
+The PMI-1 client installs under `${libdir}/crane/pmi1`, separately from Slurm's
+libraries. It uses the inherited `PMI_FD` channel, supports singleton operation,
+KVS/commit/barrier, finalization, abort and actual local clique membership from
+`SLURM_GTIDS`. KVS puts reach the server immediately; the barrier publishes the
+round. Dynamic process creation and name services return an unsupported result.
+Open MPI's `s1` plugin can link this standard C ABI directly; no replacement of
+the MPI SDK itself is needed. Select the private library directory explicitly.
 
 ## Endpoint exchange and lifetime
 

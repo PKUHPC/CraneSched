@@ -15,13 +15,13 @@
 
 #include "Pmi2Codec.h"
 #include "Pmi2Session.h"
-#include "Pmi2Transport.h"
+#include "Transport.h"
 
 namespace {
 
+using crane::pmi::Transport;
 using crane::pmi2::Codec;
 using crane::pmi2::Fields;
-using crane::pmi2::Transport;
 
 TEST(Pmi2Codec, EscapesAndUnescapesSemicolons) {
   Fields fields{{"cmd", "kvs-put"}, {"key", "escaped"}, {"value", "a;b=c;;d"}};
@@ -52,6 +52,19 @@ TEST(Pmi2Transport, HandlesPartialFrameWrites) {
   EXPECT_TRUE(send_ok);
   ASSERT_TRUE(body);
   EXPECT_EQ(*body, "cmd=finalize-response;rc=0;");
+}
+
+TEST(PmiTransport, PreservesFramesPrefetchedWithTheHandshakeLine) {
+  int sockets[2];
+  ASSERT_EQ(socketpair(AF_UNIX, SOCK_STREAM, 0, sockets), 0);
+  Transport sender(sockets[0], std::chrono::seconds(1));
+  Transport receiver(sockets[1], std::chrono::seconds(1));
+  const std::string body = "cmd=finalize-response;rc=0;";
+  std::string header = std::to_string(body.size());
+  header.insert(header.begin(), 6 - header.size(), ' ');
+  ASSERT_TRUE(sender.SendLine("cmd=response_to_init rc=0\n" + header + body));
+  EXPECT_EQ(receiver.ReceiveLine(1024), "cmd=response_to_init rc=0\n");
+  EXPECT_EQ(receiver.ReceiveFrame(), body);
 }
 
 }  // namespace

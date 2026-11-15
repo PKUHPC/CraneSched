@@ -13,19 +13,13 @@
 #include <cstring>
 #include <string_view>
 
-#include "Pmi2Transport.h"
+#include "Transport.h"
+#include "Utilities.h"
 
 namespace crane::pmi2 {
 namespace {
 
-std::optional<int> ParseInt(std::string_view value) {
-  int result = 0;
-  auto [end, error] =
-      std::from_chars(value.data(), value.data() + value.size(), result);
-  if (error != std::errc{} || end != value.data() + value.size())
-    return std::nullopt;
-  return result;
-}
+using crane::pmi::ParseInt;
 
 bool IsTrue(std::string_view value) {
   return value == "TRUE" || value == "true" || value == "1";
@@ -98,8 +92,8 @@ int Session::Initialize(int* spawned, int* size, int* rank, int* appnum) {
   };
 
   Fields init{{"cmd", "init"}, {"pmi_version", "2"}, {"pmi_subversion", "0"}};
-  if (!m_transport_->SendInit(Codec::EncodeInit(init))) return fail();
-  auto init_response = m_transport_->ReceiveInit();
+  if (!m_transport_->SendLine(Codec::EncodeInit(init))) return fail();
+  auto init_response = m_transport_->ReceiveLine();
   if (!init_response) return fail();
   auto init_fields = Codec::ParseInit(*init_response);
   if (!init_fields || init_fields->at("cmd") != "response_to_init" ||
