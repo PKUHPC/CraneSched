@@ -511,7 +511,7 @@ if (CRANE_ENABLE_BPF)
             ${CMAKE_BINARY_DIR}/src/Misc/BPF/cgroup_dev_bpf.o
             DESTINATION /usr/local/lib64/bpf/
             COMPONENT cranedc
-            PERMISSIONS OWNER_READ GROUP_READ WORLD_READ)
+            PERMISSIONS OWNER_READ OWNER_WRITE GROUP_READ WORLD_READ)
 endif ()
 
 # Install unit files
