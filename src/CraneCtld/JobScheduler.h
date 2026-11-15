@@ -136,8 +136,6 @@ struct PdJobInScheduler {
   std::vector<CranedId> craned_ids;
   std::vector<std::variant<PdJobInScheduler*, RnJobInScheduler*>>
       preempted_jobs;
-  bool has_overlapping_reservation{false};
-  bool has_down_or_drain_node{false};
 
   google::protobuf::RepeatedPtrField<crane::grpc::JobToCtld::License>
       req_licenses;
@@ -148,8 +146,6 @@ struct PdJobInScheduler {
   std::string qos;
   std::string username;
   std::list<std::string> account_chain;
-
-  bool is_scheduled() const { return reason.empty(); }
 
   // True iff this candidate represents an array parent template. On successful
   // allocation the scheduler asks ArrayManager to materialize a child
@@ -704,12 +700,10 @@ class SchedulerAlgo {
       m_node_selector_->AllocateResource(
           job->start_time, job->end_time, job->planned_res,
           job->start_time == now ? &job->allocated_res : nullptr);
-      if (job->is_scheduled()) {
-        for (const CranedId& craned_id : job->craned_ids) {
-          m_node_selector_->GetNodeState(craned_id)
-              ->qos_job_map[job->qos]
-              .emplace(job);
-        }
+      for (const CranedId& craned_id : job->craned_ids) {
+        m_node_selector_->GetNodeState(craned_id)
+            ->qos_job_map[job->qos]
+            .emplace(job);
       }
     }
 
@@ -736,12 +730,10 @@ class SchedulerAlgo {
         m_node_selector_->ReleaseResourceIfPresent(
             pd->start_time, pd->end_time, pd->planned_res,
             pd->start_time == now ? &pd->allocated_res : nullptr);
-        if (pd->is_scheduled()) {
-          for (const CranedId& craned_id : pd->craned_ids) {
-            auto* node_state = m_node_selector_->GetNodeStateOrNull(craned_id);
-            if (!node_state) continue;
-            node_state->qos_job_map[pd->qos].erase(pd);
-          }
+        for (const CranedId& craned_id : pd->craned_ids) {
+          auto* node_state = m_node_selector_->GetNodeStateOrNull(craned_id);
+          if (!node_state) continue;
+          node_state->qos_job_map[pd->qos].erase(pd);
         }
       }
     }

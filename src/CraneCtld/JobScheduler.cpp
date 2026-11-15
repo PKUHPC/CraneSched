@@ -7501,6 +7501,9 @@ bool SchedulerAlgo::LocalScheduler::GetNodesAndTrySchedule_(
   std::priority_queue<node_info> topk_nodes_avail;
   int topk_ntasks_sum_avail = 0;
 
+  std::priority_queue<node_info> topk_nodes_current;
+  int topk_ntasks_sum_current = 0;
+
   auto get_max_tasks = [&](const ResourceView& res_on_node) {
     if (!(min_res_view <= res_on_node)) return 0;
     if (job->req_task_res_view.IsZero()) {
@@ -7561,10 +7564,12 @@ bool SchedulerAlgo::LocalScheduler::GetNodesAndTrySchedule_(
 
     if (job->reservation.empty() &&
         node_state->earliest_reservation_start < earliest_end_time) {
-      job->has_overlapping_reservation = true;
+      job->reason = "Resource Reserved";
     }
-    job->has_down_or_drain_node |= !node_state->available;
     if (!node_state->available) {
+      if (job->reason.empty()) {
+        job->reason = "Node Down or Drain";
+      }
       continue;
     }
 
@@ -7585,6 +7590,16 @@ bool SchedulerAlgo::LocalScheduler::GetNodesAndTrySchedule_(
 
     // Find all possible nodes that can run the job now.
     if (job->exclusive) {
+      if (node_state->res_total <= node_state->res_avail) {
+        topk_ntasks_sum_current += ntasks_on_node_total;
+        topk_nodes_current.push(
+            node_info{ntasks_on_node_total, node_state->res_total, node_state});
+        if (topk_nodes_current.size() > job->node_num) {
+          topk_ntasks_sum_current -= topk_nodes_current.top().ntasks_on_node;
+          topk_nodes_current.pop();
+        }
+      }
+
       bool satisfied = true;
       for (const auto& [time, res] : time_avail_res_map) {
         if (time >= earliest_end_time) break;
@@ -7608,9 +7623,19 @@ bool SchedulerAlgo::LocalScheduler::GetNodesAndTrySchedule_(
         break;
       }
     } else {
-      if (!(min_res_view <= node_state->res_avail)) {
+      int ntasks_on_node_current = get_max_tasks(node_state->res_avail);
+      if (ntasks_on_node_current == 0) {
         continue;
       }
+
+      topk_ntasks_sum_current += ntasks_on_node_current;
+      topk_nodes_current.push(
+          node_info{ntasks_on_node_current, node_state->res_avail, node_state});
+      if (topk_nodes_current.size() > job->node_num) {
+        topk_ntasks_sum_current -= topk_nodes_current.top().ntasks_on_node;
+        topk_nodes_current.pop();
+      }
+
       ResourceView min_res_on_node = node_state->res_avail;
 
       for (const auto& [time, res] : time_avail_res_map) {
@@ -7666,6 +7691,15 @@ bool SchedulerAlgo::LocalScheduler::GetNodesAndTrySchedule_(
       job->craned_ids.emplace_back(craned_id);
     }
     return true;
+  }
+
+  if (job->reason.empty()) {
+    if (topk_nodes_current.size() == job->node_num &&
+        topk_ntasks_sum_current >= job->ntasks) {
+      job->reason = "Priority";
+    } else {
+      job->reason = "Resource";
+    }
   }
 
   if (topk_nodes_total.size() < job->node_num ||
@@ -8209,16 +8243,6 @@ void SchedulerAlgo::NodeSelect(
 
   g_license_manager->CheckLicenseCountSufficient(&job_ptr_vec);
 
-  auto set_candidate_node_reason = [](PdJobInScheduler* job) {
-    if (!job->reason.empty()) return true;
-    if (job->has_overlapping_reservation) {
-      job->reason = "Resource Reserved";
-    } else if (job->has_down_or_drain_node) {
-      job->reason = "Node Down or Drain";
-    }
-    return !job->reason.empty();
-  };
-
   // Schedule pending jobs
   // TODO: do it in parallel
   for (const auto& job : job_ptr_vec) {
@@ -8252,10 +8276,14 @@ void SchedulerAlgo::NodeSelect(
 
     if (!ok) {
       // Leave start_time unset
-      if (!set_candidate_node_reason(job)) {
-        job->reason = "Resource";
-      }
+      if (job->reason.empty()) job->reason = "Resource";
     } else {
+      if (job->start_time == now) {
+        job->reason.clear();
+      } else if (job->reason.empty()) {
+        job->reason = "Priority";
+      }
+
       // FIXME: Keep this consistent with deadline-aware placement once the
       // scheduler uses effective job end time.
       job->end_time = job->start_time + job->time_limit;
@@ -8282,34 +8310,6 @@ void SchedulerAlgo::NodeSelect(
       g_job_scheduler->EnqueuePreemptCancel(std::move(preempted_rn_jobs));
 
       scheduler->UpdateNodeSelectorWithScheduledJob(now, job);
-
-      if (job->start_time != now) {
-        if (set_candidate_node_reason(job)) {
-          continue;
-        }
-        if (job->reservation.empty()) {
-          for (const CranedId& craned_id : job->craned_ids) {
-            const auto& res_avail = node_state_map.at(craned_id).res_avail;
-            if (!(job->planned_res.at(craned_id) <= res_avail)) {
-              job->reason = "Resource";
-              break;
-            }
-          }
-        } else {
-          for (const CranedId& craned_id : job->craned_ids) {
-            const auto& res_avail = resv_node_state_map.at(job->reservation)
-                                        .second.at(craned_id)
-                                        .res_avail;
-            if (!(job->planned_res.at(craned_id) <= res_avail)) {
-              job->reason = "Resource";
-              break;
-            }
-          }
-        }
-        if (job->reason.empty()) {
-          job->reason = "Priority";
-        }
-      }
     }
   }
 }
