@@ -86,7 +86,7 @@ jobs:
           mkdir -p "$artifact_dir/packages/backend" "$artifact_dir/packages/go"
           (cd cmake-build-ci-debug && cpack -G RPM -B "$artifact_dir/packages/backend")
           GITHUB_TOKEN='${{ github.token }}' make -C go package SKIP_REBUILD=true CHECK_GPU=0 \
-            GORELEASER_SNAPSHOT=false GORELEASER_RELEASE_ARGS=--skip=validate
+            GORELEASER_SNAPSHOT=false GORELEASER_RELEASE_ARGS=--skip=publish,validate
           cp go/build/dist/*.rpm "$artifact_dir/packages/go/"
           python3 - <<'PY'
           import hashlib

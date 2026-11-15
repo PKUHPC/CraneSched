@@ -67,6 +67,8 @@ tag validation that requires a release tag. Snapshot mode hardcodes package vers
 `0.0.0`, which does not identify the selected product source. GoReleaser receives the
 workflow's read-only GitHub token only in its packaging process. The manifest gate checks
 all five RPM versions against that source revision and `VERSION` before downstream use.
+CI skips GoReleaser validation that requires a release tag and skips publishing; RPMs
+remain local workflow outputs and are not uploaded as GitHub Releases.
 
 ## Integration entry-point contract
 
