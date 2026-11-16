@@ -22,7 +22,7 @@ set(CRANE_UNIT_TEST_TARGETS
     mpi_endpoint_test
 )
 if (CRANE_ENABLE_PMI2)
-    list(APPEND CRANE_UNIT_TEST_TARGETS pmi2_server_test pmi2_client_test)
+    list(APPEND CRANE_UNIT_TEST_TARGETS pmi2_server_test pmi1_client_test pmi2_client_test)
 endif ()
 if (CRANE_ENABLE_PMIX)
     list(APPEND CRANE_UNIT_TEST_TARGETS pmix_state_test)
