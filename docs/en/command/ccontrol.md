@@ -555,6 +555,7 @@ Different operations require different permission levels:
 | Operation | Permission Required |
 |-----------|-------------------|
 | Show commands | User can view their own jobs; admin can view all |
+| Show reservation | All users, including system users not registered with Crane |
 | Update node | Administrator only |
 | Update partition | Administrator only |
 | Update job | Job owner or administrator |
