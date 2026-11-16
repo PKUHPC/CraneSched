@@ -1,6 +1,7 @@
 package cinfo
 
 import (
+	"bytes"
 	"context"
 	"encoding/json"
 	"github.com/PKUHPC/CraneSched/go/generated/protos"
@@ -11,6 +12,7 @@ import (
 	"strings"
 	"testing"
 
+	log "github.com/sirupsen/logrus"
 	"google.golang.org/grpc"
 	"google.golang.org/protobuf/proto"
 )
@@ -148,5 +150,60 @@ func TestExistingSlurmOutputUsesNativeRows(t *testing.T) {
 		reply.Partitions[1].Name != "batch*" || reply.Partitions[1].NodeLists[0].NodeList != "n[1-2]" ||
 		reply.Partitions[1].NodeLists[1].Reason != "offline" {
 		t.Fatal(got)
+	}
+}
+
+func TestRequestedNodeDiagnosticsRecognizeRuntimeHostname(t *testing.T) {
+	// worker01 was bound to the FUTURE node f1 at runtime, so the client
+	// configuration has no alias for it.
+	reply := &protos.QueryClusterInfoReply{Nodes: []*protos.CranedInfo{{Hostname: "f1", NodeHostname: "worker01"}}}
+	oldNodes, oldOutput, oldLevel := FlagFilterNodes, log.StandardLogger().Out, log.GetLevel()
+	t.Cleanup(func() {
+		FlagFilterNodes = oldNodes
+		log.SetOutput(oldOutput)
+		log.SetLevel(oldLevel)
+	})
+	var diagnostics bytes.Buffer
+	log.SetOutput(&diagnostics)
+	log.SetLevel(log.InfoLevel)
+	for requested, missing := range map[string]string{
+		"f1":                "",
+		"worker01":          "",
+		"f1,worker01,other": "other",
+	} {
+		diagnostics.Reset()
+		FlagFilterNodes = []string{requested}
+		ExtraDealNodeList(reply, map[string]string{})
+		got := diagnostics.String()
+		if missing == "" && got != "" || missing != "" && !strings.Contains(got, "filter condition: "+missing+".") {
+			t.Errorf("%q: unexpected diagnostics %q", requested, got)
+		}
+	}
+}
+
+func TestFutureStateIsFilterableAndHasNoPowerState(t *testing.T) {
+	oldStates := FlagFilterCranedStates
+	t.Cleanup(func() { FlagFilterCranedStates = oldStates })
+	future := &protos.CranedInfo{Hostname: "f1", PartitionNames: []string{"batch"}, ResourceState: protos.CranedResourceState_CRANE_FUTURE}
+	idle := &protos.CranedInfo{Hostname: "n1", ResourceState: protos.CranedResourceState_CRANE_IDLE}
+	for states, wantFuture := range map[string]bool{"": true, "FUTURE": true, "idle": false} {
+		FlagFilterCranedStates = nil
+		if states != "" {
+			FlagFilterCranedStates = []string{states}
+		}
+		matches, err := parseStateFilter()
+		if err != nil {
+			t.Fatal(err)
+		}
+		if matches(future) != wantFuture || matches(idle) == (states == "FUTURE") {
+			t.Errorf("states %q: future=%v idle=%v", states, matches(future), matches(idle))
+		}
+	}
+	got := FindTableDataByReply(&protos.QueryClusterInfoReply{
+		Partitions: []*protos.PartitionInfo{{Name: "batch", State: protos.PartitionState_PARTITION_UP, TotalNodes: 1}},
+		Nodes:      []*protos.CranedInfo{future},
+	})
+	if want := [][]string{{"batch", "up", "1", "future", "f1"}}; !reflect.DeepEqual(got, want) {
+		t.Fatalf("got %v want %v", got, want)
 	}
 }

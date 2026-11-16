@@ -1201,7 +1201,7 @@ std::vector<std::string> CranedMetaContainer::DeleteOrResetNodes_(
       auto& node = *nodes.at(id);
       g_craned_keeper->RetireCraned(id);
       if (node.static_meta.node_hostname != id) {
-        util::write_lock_guard lock(g_config.CranedIdByAliasMtx);
+        util::write_lock_guard lock(g_craned_id_by_alias_mtx);
         g_config.CranedIdByAlias.erase(node.static_meta.node_hostname);
       }
       for (const auto& part_id : node.static_meta.partition_ids) {
@@ -1415,7 +1415,7 @@ void CranedMetaContainer::ClaimFutureNode_(const CranedId& craned_id,
   if (!node_hostname.empty()) {
     node_meta->static_meta.node_hostname = node_hostname;
     if (node_hostname != craned_id) {
-      util::write_lock_guard lock(g_config.CranedIdByAliasMtx);
+      util::write_lock_guard lock(g_craned_id_by_alias_mtx);
       g_config.CranedIdByAlias[node_hostname] = craned_id;
     }
   }
