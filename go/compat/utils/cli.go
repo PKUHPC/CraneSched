@@ -82,7 +82,7 @@ func (s *OptionScanner) Next() (Option, error) {
 			}
 			if spec.Argument == RequiredArgument && !attached {
 				if len(s.args) == 0 {
-					return Option{}, fmt.Errorf("option '%s' requires an argument", arg)
+					return Option{}, fmt.Errorf("option '--%s' requires an argument", spec.Name)
 				}
 				value, s.args = s.args[0], s.args[1:]
 			}

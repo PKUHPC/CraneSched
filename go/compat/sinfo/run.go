@@ -5,14 +5,19 @@
 package sinfo
 
 import (
+	"bufio"
 	"bytes"
 	"context"
 	"errors"
 	"fmt"
-	"github.com/PKUHPC/CraneSched/go/compat/utils"
 	"io"
+	"os"
 	"strings"
 	"time"
+
+	"github.com/PKUHPC/CraneSched/go/compat/utils"
+	"golang.org/x/sys/unix"
+	"golang.org/x/term"
 )
 
 const defaultConfigPath = "/etc/crane/config.yaml"
@@ -51,15 +56,54 @@ func waitForIteration(ctx context.Context, interval time.Duration) error {
 }
 
 func reportError(w io.Writer, err error) {
-	var diagnostic *commandError
-	if errors.As(err, &diagnostic) {
+	if diagnostic, ok := errors.AsType[*commandError](err); ok {
 		_, _ = io.WriteString(w, diagnostic.message)
 	} else {
 		_, _ = fmt.Fprintf(w, "sinfo: error: %s\n", err)
 	}
 }
 
-func (r runner) run(ctx context.Context, argv []string, env map[string]string, stdout, stderr io.Writer) int {
+// stdoutBuffer keeps the final partial block private, even when a complete
+// report is larger than the buffer. bufio.Writer alone bypasses buffering for
+// large writes, publishing that partial block before the reference would.
+type stdoutBuffer struct{ buffer *bufio.Writer }
+
+func (w stdoutBuffer) Write(p []byte) (int, error) {
+	written := 0
+	for len(p) != 0 {
+		if w.buffer.Available() == 0 {
+			if err := w.buffer.Flush(); err != nil {
+				return written, err
+			}
+		}
+		n, err := w.buffer.Write(p[:min(len(p), w.buffer.Available())])
+		written += n
+		if err != nil {
+			return written, err
+		}
+		p = p[n:]
+	}
+	return written, nil
+}
+
+func (r runner) run(ctx context.Context, argv []string, env map[string]string, stdout, stderr io.Writer) (rc int) {
+	if file, ok := stdout.(*os.File); ok && !term.IsTerminal(int(file.Fd())) {
+		// Match Linux stdio's full buffering for files and pipes. Terminal
+		// reports already end in newlines and remain visible on each iteration.
+		size := 8192
+		var stat unix.Stat_t
+		if unix.Fstat(int(file.Fd()), &stat) == nil && stat.Blksize > 0 && stat.Blksize < int64(size) {
+			size = int(stat.Blksize)
+		}
+		buffer := bufio.NewWriterSize(stdout, size)
+		stdout = stdoutBuffer{buffer}
+		defer func() {
+			if err := buffer.Flush(); err != nil && rc == 0 {
+				reportError(stderr, err)
+				rc = 1
+			}
+		}()
+	}
 	clock := r.now
 	location := utils.CommandTimezone(env)
 	r.now = func() time.Time { return clock().In(location) }
@@ -101,7 +145,6 @@ func (r runner) run(ctx context.Context, argv []string, env map[string]string, s
 	}
 	defer source.Close()
 	r.renderer.TimeFormat = timeFormatter(env["SLURM_TIME_FORMAT"], r.now(), stderr)
-	rc := 0
 	for {
 		if ctx.Err() != nil {
 			return rc
@@ -150,15 +193,6 @@ func (r runner) run(ctx context.Context, argv []string, env map[string]string, s
 func (r runner) render(w, stderr io.Writer, argv []string, s *snapshot, o *plan) error {
 	if o.Reservations {
 		return r.renderer.reservations(w, s.Reservations, o.NoHeader, r.now())
-	}
-	if name, single := o.NodeFilter.Single(); single {
-		found := false
-		for _, n := range s.Nodes {
-			found = found || n.Name == name
-		}
-		if !found {
-			return &commandError{"slurm_load_node: Invalid node name specified\n"}
-		}
 	}
 	rows := buildRows(s, o)
 	sortRows(rows, o)

@@ -44,6 +44,8 @@ func TestOptionScanner(t *testing.T) {
 		{"ambiguous", []string{"--he"}, false, nil, "option '--he' is ambiguous; possibilities: '--help' '--header'"},
 		{"unknown", []string{"--unknown=x"}, false, nil, "unrecognized option '--unknown=x'"},
 		{"missing_long", []string{"--output"}, false, nil, "option '--output' requires an argument"},
+		{"missing_long_prefix", []string{"--out"}, false, nil, "option '--output' requires an argument"},
+		{"missing_alias_prefix", []string{"--cl"}, false, nil, "option '--cluster' requires an argument"},
 		{"missing_short", []string{"-o"}, false, nil, "option requires an argument -- 'o'"},
 		{"unexpected_value", []string{"--help=x"}, false, nil, "option '--help' doesn't allow an argument"},
 		{"unknown_short", []string{"-x"}, false, nil, "invalid option -- 'x'"},
