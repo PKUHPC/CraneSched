@@ -7501,10 +7501,6 @@ bool SchedulerAlgo::LocalScheduler::GetNodesAndTrySchedule_(
   std::priority_queue<node_info> topk_nodes_avail;
   int topk_ntasks_sum_avail = 0;
 
-  std::priority_queue<int, std::vector<int>, std::greater<>>
-      topk_capacities_current;
-  int topk_ntasks_sum_current = 0;
-
   auto get_max_tasks = [&](const ResourceView& res_on_node) {
     if (!(min_res_view <= res_on_node)) return 0;
     if (job->req_task_res_view.IsZero()) {
@@ -7574,6 +7570,12 @@ bool SchedulerAlgo::LocalScheduler::GetNodesAndTrySchedule_(
       continue;
     }
 
+    const auto& [last_time, last_res] = *time_avail_res_map.rbegin();
+    if (job->reason.empty() && last_time < earliest_end_time &&
+        last_res.IsZero()) {
+      job->reason = "Resource";
+    }
+
     if (topk_nodes_total.size() < job->node_num ||
         topk_ntasks_sum_total < job->ntasks) {
       topk_ntasks_sum_total += ntasks_on_node_total;
@@ -7594,13 +7596,6 @@ bool SchedulerAlgo::LocalScheduler::GetNodesAndTrySchedule_(
       if (!(node_state->res_total <= node_state->res_avail)) {
         continue;
       }
-      topk_ntasks_sum_current += ntasks_on_node_total;
-      topk_capacities_current.push(ntasks_on_node_total);
-      if (topk_capacities_current.size() > job->node_num) {
-        topk_ntasks_sum_current -= topk_capacities_current.top();
-        topk_capacities_current.pop();
-      }
-
       bool satisfied = true;
       for (const auto& [time, res] : time_avail_res_map) {
         if (time >= earliest_end_time) break;
@@ -7624,16 +7619,8 @@ bool SchedulerAlgo::LocalScheduler::GetNodesAndTrySchedule_(
         break;
       }
     } else {
-      int ntasks_on_node_current = get_max_tasks(node_state->res_avail);
-      if (ntasks_on_node_current == 0) {
+      if (get_max_tasks(node_state->res_avail) == 0) {
         continue;
-      }
-
-      topk_ntasks_sum_current += ntasks_on_node_current;
-      topk_capacities_current.push(ntasks_on_node_current);
-      if (topk_capacities_current.size() > job->node_num) {
-        topk_ntasks_sum_current -= topk_capacities_current.top();
-        topk_capacities_current.pop();
       }
 
       ResourceView min_res_on_node = node_state->res_avail;
@@ -7691,15 +7678,6 @@ bool SchedulerAlgo::LocalScheduler::GetNodesAndTrySchedule_(
       job->craned_ids.emplace_back(craned_id);
     }
     return true;
-  }
-
-  if (job->reason.empty()) {
-    if (topk_capacities_current.size() == job->node_num &&
-        topk_ntasks_sum_current >= job->ntasks) {
-      job->reason = "Priority";
-    } else {
-      job->reason = "Resource";
-    }
   }
 
   if (topk_nodes_total.size() < job->node_num ||
@@ -8274,16 +8252,16 @@ void SchedulerAlgo::NodeSelect(
     bool ok = scheduler->CalculateRunningNodesAndStartTime_(
         now, job, qos_preempt_map, m_preempting_set_);
 
-    if (!ok) {
-      // Leave start_time unset
-      if (job->reason.empty()) job->reason = "Resource";
+    if (job->start_time == now) {
+      job->reason.clear();
     } else {
-      if (job->start_time == now) {
-        job->reason.clear();
-      } else if (job->reason.empty()) {
-        job->reason = "Priority";
+      if (job->reason.empty()) {
+        job->reason = scheduler->has_blocked_job ? "Priority" : "Resource";
       }
+      scheduler->has_blocked_job = true;
+    }
 
+    if (ok) {
       // FIXME: Keep this consistent with deadline-aware placement once the
       // scheduler uses effective job end time.
       job->end_time = job->start_time + job->time_limit;

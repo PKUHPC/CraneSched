@@ -660,6 +660,8 @@ class SchedulerAlgo {
     using LockGuard = absl::MutexLock;
     using TimeAvailResMap = std::map<absl::Time, ResourceView>;
 
+    bool has_blocked_job{false};
+
     template <typename Policy, typename... Args>
     void InitializeNodeSelector(const absl::Time& now,
                                 const std::vector<NodeState*>& node_info_vec,
