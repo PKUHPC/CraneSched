@@ -127,8 +127,8 @@ COMMANDS:
     suffixes B, K, M and G are supported. Sockets defaults to 1.
 
   delete node NodeName=<hostlist>
-    Delete nodes created at runtime.
-    Nodes must have no allocated or completing jobs or reservations.
+    Delete nodes created at runtime. Stop their craned first;
+    nodes must have no allocated or completing jobs or reservations.
 
   create reservation <name> [startTime=<time>] [duration=<duration>] [partition=<partition>]
                     [nodes=<nodelist>] [account=<account>] [user=<username>]

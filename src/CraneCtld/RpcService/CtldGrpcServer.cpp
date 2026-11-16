@@ -40,7 +40,8 @@
 namespace Ctld {
 
 // Extract the IP part from a grpc peer string like "ipv4:1.2.3.4:port" or
-// "ipv6:[::1]:port". Returns an empty string on failure.
+// "ipv6:%5B::1%5D:port" (grpc percent-encodes the brackets). Returns an empty
+// string on failure.
 static std::string PeerIpFromContext(const grpc::ServerContext* context) {
   std::string peer = context->peer();
   size_t scheme_pos = peer.find(':');
@@ -48,8 +49,8 @@ static std::string PeerIpFromContext(const grpc::ServerContext* context) {
   if (scheme_pos == std::string::npos || port_pos <= scheme_pos + 1) return "";
 
   std::string ip = peer.substr(scheme_pos + 1, port_pos - scheme_pos - 1);
-  if (ip.starts_with('[') && ip.ends_with(']'))
-    ip = ip.substr(1, ip.size() - 2);
+  if (ip.starts_with("%5B") && ip.ends_with("%5D"))
+    ip = ip.substr(3, ip.size() - 6);
   return ip;
 }
 
@@ -108,7 +109,21 @@ static grpc::Status AuthenticateFutureNode(
   return grpc::Status::OK;
 }
 
-// The caller holds the keeper lifecycle lock through the state update.
+// Static nodes have no session to protect, so only RPCs of FUTURE nodes are
+// serialized with node lifecycle changes.
+static std::unique_lock<std::recursive_mutex> LockFutureNodeLifecycle(
+    const CranedId& craned_id) {
+  bool is_future;
+  {
+    auto node = g_meta_container->GetCranedMetaPtr(craned_id);
+    is_future = node && node->static_meta.flags[NodeFlags::Future];
+  }
+  if (!is_future) return {};
+  return g_craned_keeper->GetLifecycleLock();
+}
+
+// For a FUTURE node, the caller holds the keeper lifecycle lock through the
+// state update.
 static grpc::Status AuthenticateCranedSession(
     const grpc::ServerContext* context, const CranedId& craned_id,
     const std::string& session_id, bool require_registered = true) {
@@ -135,7 +150,7 @@ grpc::Status CtldForInternalServiceImpl::StepStatusChange(
     return grpc::Status{grpc::StatusCode::UNAVAILABLE,
                         "CraneCtld Server is not ready"};
 
-  auto lifecycle_lock = g_craned_keeper->GetLifecycleLock();
+  auto lifecycle_lock = LockFutureNodeLifecycle(request->craned_id());
   auto authentication = AuthenticateCranedSession(context, request->craned_id(),
                                                   request->session_id());
   if (!authentication.ok()) return authentication;
@@ -269,7 +284,7 @@ grpc::Status CtldForInternalServiceImpl::CranedRegister(
 grpc::Status CtldForInternalServiceImpl::CranedPing(
     grpc::ServerContext* context, const crane::grpc::CranedPingRequest* request,
     crane::grpc::CranedPingReply* response) {
-  auto lifecycle_lock = g_craned_keeper->GetLifecycleLock();
+  auto lifecycle_lock = LockFutureNodeLifecycle(request->craned_id());
   auto authentication = AuthenticateCranedSession(context, request->craned_id(),
                                                   request->session_id());
   if (!authentication.ok()) return authentication;
@@ -298,7 +313,7 @@ grpc::Status CtldForInternalServiceImpl::UpdateNodeDrainState(
     grpc::ServerContext* context,
     const crane::grpc::UpdateNodeDrainStateRequest* request,
     crane::grpc::UpdateNodeDrainStateReply* response) {
-  auto lifecycle_lock = g_craned_keeper->GetLifecycleLock();
+  auto lifecycle_lock = LockFutureNodeLifecycle(request->craned_id());
   auto authentication = AuthenticateCranedSession(context, request->craned_id(),
                                                   request->session_id());
   if (!authentication.ok()) return authentication;
@@ -729,7 +744,7 @@ grpc::Status CtldForInternalServiceImpl::BroadcastPmixPort(
     return grpc::Status{grpc::StatusCode::UNAVAILABLE,
                         "CraneCtld Server is not ready"};
 
-  auto lifecycle_lock = g_craned_keeper->GetLifecycleLock();
+  auto lifecycle_lock = LockFutureNodeLifecycle(request->craned_id());
   auto authentication = AuthenticateCranedSession(context, request->craned_id(),
                                                   request->session_id());
   if (!authentication.ok()) return authentication;

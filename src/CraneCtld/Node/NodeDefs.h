@@ -77,7 +77,8 @@ struct CranedMeta {
   bool alive{false};
   bool has_registered{false};
   // For a FUTURE node, true once a craned has been mapped to it. An unmapped
-  // FUTURE node takes part in neither scheduling nor partition resources.
+  // FUTURE node is not schedulable and counts only towards the partition's
+  // res_total_inc_dead, so jobs waiting for it stay valid.
   bool future_mapped{false};
   crane::grpc::CranedPowerState power_state{
       crane::grpc::CranedPowerState::CRANE_POWER_IDLE};

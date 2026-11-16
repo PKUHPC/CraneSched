@@ -25,6 +25,27 @@
 
 namespace Ctld {
 
+namespace {
+
+void SetStepToDNodelist(const std::vector<CranedId>& craned_ids,
+                        crane::grpc::StepToD* step_to_d) {
+  auto nodes = g_meta_container->GetCranedMetaMapConstPtr();
+  for (const auto& craned_id : craned_ids) {
+    step_to_d->add_nodelist(craned_id);
+
+    auto node_it = nodes->find(craned_id);
+    if (node_it == nodes->end()) continue;
+    auto node = node_it->second.GetExclusivePtr();
+    if (!node->static_meta.flags[NodeFlags::Future]) continue;
+
+    auto& endpoint = (*step_to_d->mutable_future_node_endpoints())[craned_id];
+    endpoint.set_hostname(node->static_meta.node_hostname);
+    endpoint.set_addr(node->static_meta.node_addr);
+  }
+}
+
+}  // namespace
+
 PodMetaInJob::PodMetaInJob(const crane::grpc::PodJobAdditionalMeta& rhs)
     : name(rhs.name()),
       labels(rhs.labels().begin(), rhs.labels().end()),
@@ -629,8 +650,7 @@ crane::grpc::StepToD DaemonStepInCtld::GetStepToD(
   step_to_d.set_get_user_env(this->get_user_env);
   step_to_d.set_extra_attr(extra_attr);
 
-  for (const auto& hostname : this->m_craned_ids_)
-    step_to_d.mutable_nodelist()->Add()->assign(hostname);
+  SetStepToDNodelist(this->m_craned_ids_, &step_to_d);
 
   step_to_d.mutable_task_node_list()->CopyFrom(
       job->RuntimeAttr().task_node_list());
@@ -1340,8 +1360,7 @@ crane::grpc::StepToD CommonStepInCtld::GetStepToD(
 
   step_to_d.set_get_user_env(this->get_user_env);
 
-  for (const auto& hostname : this->m_craned_ids_)
-    step_to_d.mutable_nodelist()->Add()->assign(hostname);
+  SetStepToDNodelist(this->m_craned_ids_, &step_to_d);
 
   // Build task_node_list: task_node_list[task_id] = node_idx in nodelist.
   // This provides the authoritative task_id -> node mapping for PMIx.

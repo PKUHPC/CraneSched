@@ -386,6 +386,8 @@ void CranedMetaContainer::InitFromConfig(const Config& config) {
 
       part_meta.craned_ids.emplace(craned_name);
 
+      part_res += craned_meta.static_meta.res;
+
       if (craned_meta.static_meta.flags[NodeFlags::Future]) {
         CRANE_DEBUG(
             "FUTURE node {} is not added to partition [{}]'s global resource "
@@ -403,8 +405,6 @@ void CranedMetaContainer::InitFromConfig(const Config& config) {
           util::ReadableMemory(craned_meta.static_meta.res.GetMemoryBytes()),
           util::ReadableDresInNode(craned_meta.static_meta.res.GetGres()),
           part_name);
-
-      part_res += craned_meta.static_meta.res;
     }
 
     part_meta.partition_global_meta.name = part_name;
@@ -903,6 +903,7 @@ void CranedMetaContainer::InsertDynamicNode_(
   node.remote_meta.sys_rel_info.name = "unknown";
 
   const auto part_ids = meta.partition_ids;
+  const auto res = meta.res;
   craned_meta_map_.Emplace(definition.name(), std::move(node));
 
   auto partitions = partition_meta_map_.GetMapSharedPtr();
@@ -912,6 +913,7 @@ void CranedMetaContainer::InsertDynamicNode_(
   for (auto& partition : partition_locks) {
     partition->craned_ids.emplace(definition.name());
     auto& global = partition->partition_global_meta;
+    global.res_total_inc_dead += res;
     global.node_cnt = partition->craned_ids.size();
     global.nodelist_str = util::HostNameListToStr(partition->craned_ids);
   }
@@ -1132,6 +1134,8 @@ std::vector<std::string> CranedMetaContainer::DeleteOrResetNodes_(
         errors[i] = "Only FUTURE nodes can have their machine binding reset.";
       else if (!reset_to_future && !node->static_meta.flags[NodeFlags::Dynamic])
         errors[i] = "Only manually created nodes can be deleted.";
+      else if (node->alive)
+        errors[i] = "Node is online. Stop its craned first.";
       else if (!node->rn_job_res_map.empty())
         errors[i] = "Node has allocated or completing jobs.";
       else if (!node->resv_in_node_map.empty())
@@ -1176,13 +1180,9 @@ std::vector<std::string> CranedMetaContainer::DeleteOrResetNodes_(
       for (const auto& part_id : node.static_meta.partition_ids) {
         auto& partition = partition_locks.at(part_id);
         auto& global = partition->partition_global_meta;
-        if (node.future_mapped) {
-          global.res_total -= node.res_total;
-          if (node.alive) global.res_avail -= node.res_avail;
-          global.res_total_inc_dead -= node.static_meta.res;
-        }
-        if (node.alive) --global.alive_craned_cnt;
+        if (node.future_mapped) global.res_total -= node.res_total;
         if (!reset_to_future) {
+          global.res_total_inc_dead -= node.static_meta.res;
           partition->craned_ids.erase(id);
           global.node_cnt = partition->craned_ids.size();
           global.nodelist_str = util::HostNameListToStr(partition->craned_ids);
@@ -1198,8 +1198,6 @@ std::vector<std::string> CranedMetaContainer::DeleteOrResetNodes_(
         future_node.remote_meta.craned_version = "unknown";
         future_node.remote_meta.sys_rel_info.name = "unknown";
         node = std::move(future_node);
-      } else {
-        node.alive = false;
       }
     }
   }
@@ -1400,7 +1398,6 @@ void CranedMetaContainer::ClaimFutureNode_(const CranedId& craned_id,
     PartitionGlobalMeta& part_global_meta =
         partition_meta->partition_global_meta;
     part_global_meta.res_total += node_meta->static_meta.res;
-    part_global_meta.res_total_inc_dead += node_meta->static_meta.res;
   }
 }
 
