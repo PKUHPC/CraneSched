@@ -7408,6 +7408,14 @@ void JobScheduler::QueryQueueStateSummary(
   }
 }
 
+std::unordered_set<CranedId> JobScheduler::GetPendingJobIncludedNodes() {
+  LockGuard pending_guard(&m_pending_job_map_mtx_);
+  std::unordered_set<CranedId> nodes;
+  for (const auto& job : m_pending_job_map_ | std::views::values)
+    nodes.insert(job->included_nodes.begin(), job->included_nodes.end());
+  return nodes;
+}
+
 void JobScheduler::QueryRnJobOnCtldForNodeConfig(
     const CranedId& craned_id, crane::grpc::ConfigureCranedRequest* req) {
   LockGuard running_job_guard(&m_running_job_map_mtx_);

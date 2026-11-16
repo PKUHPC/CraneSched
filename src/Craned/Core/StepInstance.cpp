@@ -188,6 +188,15 @@ CraneErrCode StepInstance::SpawnSupervisor(const EnvMap& job_env_map) {
   using crane::grpc::supervisor::CanStartMessage;
   using crane::grpc::supervisor::ChildProcessReady;
 
+  const auto& node_endpoints = step_to_d.node_endpoints();
+  for (const auto& craned_id : step_to_d.nodelist()) {
+    if (node_endpoints.contains(craned_id)) continue;
+    CRANE_ERROR("[Step #{}.{}] Missing endpoint of node {}.", job_id, step_id,
+                craned_id);
+    spawn_span.SetStatus(crane::StatusCode::kError, "missing_node_endpoint");
+    return CraneErrCode::ERR_SYSTEM_ERR;
+  }
+
   std::array<int, 2> supervisor_craned_pipe{};
   std::array<int, 2> craned_supervisor_pipe{};
 
@@ -254,16 +263,10 @@ CraneErrCode StepInstance::SpawnSupervisor(const EnvMap& job_env_map) {
     init_req.set_crane_base_dir(g_config.CraneBaseDir);
     init_req.set_crane_script_dir(g_config.CranedScriptDir);
     init_req.mutable_step_spec()->CopyFrom(step_to_d);
-    const auto& future_endpoints = step_to_d.future_node_endpoints();
-    for (const auto& craned_id : step_to_d.nodelist()) {
-      auto endpoint_it = future_endpoints.find(craned_id);
-      const bool is_future = endpoint_it != future_endpoints.end();
+    for (const auto& [craned_id, endpoint] : node_endpoints) {
       (*init_req.mutable_craned_id_to_node_hostname())[craned_id] =
-          is_future ? endpoint_it->second.hostname()
-                    : g_config.CranedIdToNodeHostname.at(craned_id);
-      (*init_req.mutable_craned_id_to_node_addr())[craned_id] =
-          is_future ? endpoint_it->second.addr()
-                    : g_config.CranedIdToNodeAddr.at(craned_id);
+          endpoint.hostname();
+      (*init_req.mutable_craned_id_to_node_addr())[craned_id] = endpoint.addr();
     }
 #ifdef CRANE_ENABLE_BPF
     if (CgroupManager::IsCgV2()) {

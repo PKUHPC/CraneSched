@@ -20,6 +20,7 @@
 
 #include "crane/GrpcHelper.h"
 #include "crane/Logger.h"
+#include "crane/String.h"
 #include "grpcpp/support/channel_arguments.h"
 
 namespace pmix {
@@ -111,7 +112,10 @@ void PmixGrpcClient::EmplacePmixStub(const CranedId& craned_id,
   //   channel_args.SetCompressionAlgorithm(GRPC_COMPRESS_GZIP);
 
   if (m_config_.UseTls) {
-    SetTlsTargetNameOverride(&channel_args, hostname->second);
+    // Short hostnames are qualified in the same way as for node registration.
+    SetTlsTargetNameOverride(
+        &channel_args,
+        util::TlsHostname(hostname->second, m_config_.DomainSuffix));
     craned->m_channel_ = CreateTcpTlsCustomChannelByIp(
         address->second, port, m_config_.TlsCerts, channel_args);
   } else {

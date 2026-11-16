@@ -228,7 +228,9 @@ class CranedMetaContainer final {
   crane::grpc::DynamicNodeDefinition NodeDefinition_(const CranedMeta& node);
   std::string ValidateNodeDefinition_(
       const crane::grpc::DynamicNodeDefinition& definition);
+  // The caller refreshes the partition node lists after inserting a batch.
   void InsertDynamicNode_(const crane::grpc::DynamicNodeDefinition& definition);
+  void RefreshPartitionNodeLists_(const TreeSet<PartitionId>& part_ids);
   // The keeper lifecycle lock must be held throughout the batch operation.
   // Returns one error per id, empty on success.
   std::vector<std::string> DeleteOrResetNodes_(

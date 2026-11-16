@@ -35,6 +35,7 @@ namespace pmix {
 struct Config {
   bool UseTls{false};
   TlsCertificates TlsCerts;
+  std::string DomainSuffix;
   bool CompressedRpc;
   std::filesystem::path CraneBaseDir;
   std::filesystem::path CraneScriptDir;

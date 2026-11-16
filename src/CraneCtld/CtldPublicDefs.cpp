@@ -36,9 +36,8 @@ void SetStepToDNodelist(const std::vector<CranedId>& craned_ids,
     auto node_it = nodes->find(craned_id);
     if (node_it == nodes->end()) continue;
     auto node = node_it->second.GetExclusivePtr();
-    if (!node->static_meta.flags[NodeFlags::Future]) continue;
 
-    auto& endpoint = (*step_to_d->mutable_future_node_endpoints())[craned_id];
+    auto& endpoint = (*step_to_d->mutable_node_endpoints())[craned_id];
     endpoint.set_hostname(node->static_meta.node_hostname);
     endpoint.set_addr(node->static_meta.node_addr);
   }

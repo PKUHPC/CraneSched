@@ -25,6 +25,7 @@
 #include <filesystem>
 #include <fstream>
 
+#include "JobScheduler.h"
 #include "RpcService/CranedKeeper.h"
 #include "crane/PluginClient.h"
 #include "protos/PublicDefs.pb.h"
@@ -912,8 +913,16 @@ void CranedMetaContainer::InsertDynamicNode_(
     partition_locks.emplace_back(partitions->at(id).GetExclusivePtr());
   for (auto& partition : partition_locks) {
     partition->craned_ids.emplace(definition.name());
+    partition->partition_global_meta.res_total_inc_dead += res;
+  }
+}
+
+void CranedMetaContainer::RefreshPartitionNodeLists_(
+    const TreeSet<PartitionId>& part_ids) {
+  auto partitions = partition_meta_map_.GetMapSharedPtr();
+  for (const auto& part_id : part_ids) {
+    auto partition = partitions->at(part_id).GetExclusivePtr();
     auto& global = partition->partition_global_meta;
-    global.res_total_inc_dead += res;
     global.node_cnt = partition->craned_ids.size();
     global.nodelist_str = util::HostNameListToStr(partition->craned_ids);
   }
@@ -968,6 +977,7 @@ void CranedMetaContainer::RestoreNodeState_() {
     std::exit(1);
   }
   std::unordered_set<std::string> restored;
+  TreeSet<PartitionId> changed_part_ids;
   for (const auto& state : m_node_state_.nodes()) {
     const auto& definition = state.definition();
     std::string error;
@@ -1019,7 +1029,11 @@ void CranedMetaContainer::RestoreNodeState_() {
       CRANE_ERROR("Cannot restore node {}: {}", definition.name(), error);
       std::exit(1);
     }
-    if (state.dynamic()) InsertDynamicNode_(definition);
+    if (state.dynamic()) {
+      InsertDynamicNode_(definition);
+      changed_part_ids.insert(definition.partitions().begin(),
+                              definition.partitions().end());
+    }
     if (!state.node_hostname().empty() && !state.node_addr().empty()) {
       if (NodeHostnameConflicts_(definition.name(), state.node_hostname())) {
         CRANE_ERROR("Persisted hostname {} of node {} is used by another node.",
@@ -1034,6 +1048,7 @@ void CranedMetaContainer::RestoreNodeState_() {
       std::exit(1);
     }
   }
+  RefreshPartitionNodeLists_(changed_part_ids);
 }
 
 crane::grpc::CreateNodesReply CranedMetaContainer::CreateNodes(
@@ -1063,10 +1078,13 @@ crane::grpc::CreateNodesReply CranedMetaContainer::CreateNodes(
       for (auto& error : errors)
         if (error.empty()) error = "Failed to persist node definitions.";
   }
+  TreeSet<PartitionId> changed_part_ids;
   for (int i = 0; i < request.nodes_size(); ++i) {
     const auto& definition = request.nodes(i);
     if (errors[i].empty()) {
       InsertDynamicNode_(definition);
+      changed_part_ids.insert(definition.partitions().begin(),
+                              definition.partitions().end());
       reply.add_created_nodes(definition.name());
       CRANE_INFO("User {} created FUTURE node {}.", request.uid(),
                  definition.name());
@@ -1075,6 +1093,7 @@ crane::grpc::CreateNodesReply CranedMetaContainer::CreateNodes(
       reply.add_not_created_reasons(errors[i]);
     }
   }
+  RefreshPartitionNodeLists_(changed_part_ids);
   return reply;
 }
 
@@ -1111,8 +1130,14 @@ std::vector<std::string> CranedMetaContainer::DeleteOrResetNodes_(
       part_ids.emplace(part_id);
   }
 
+  // A pending job requiring a deleted node could never be scheduled.
+  std::unordered_set<CranedId> pending_nodes;
+  if (!reset_to_future)
+    pending_nodes = g_job_scheduler->GetPendingJobIncludedNodes();
+
   LockResReduceEvents();
   HashSet<CranedId> changed_ids;
+  TreeSet<PartitionId> changed_part_ids;
   {
     // Lock partitions and nodes in sorted order, then save one snapshot for
     // the whole batch.
@@ -1140,6 +1165,8 @@ std::vector<std::string> CranedMetaContainer::DeleteOrResetNodes_(
         errors[i] = "Node has allocated or completing jobs.";
       else if (!node->resv_in_node_map.empty())
         errors[i] = "Node belongs to a reservation.";
+      else if (pending_nodes.contains(ids[i]))
+        errors[i] = "Node is required by the nodelist of pending jobs.";
       else if (!reset_to_future || node->future_mapped)
         changed_ids.emplace(ids[i]);
     }
@@ -1184,8 +1211,7 @@ std::vector<std::string> CranedMetaContainer::DeleteOrResetNodes_(
         if (!reset_to_future) {
           global.res_total_inc_dead -= node.static_meta.res;
           partition->craned_ids.erase(id);
-          global.node_cnt = partition->craned_ids.size();
-          global.nodelist_str = util::HostNameListToStr(partition->craned_ids);
+          changed_part_ids.emplace(part_id);
         }
       }
       if (reset_to_future) {
@@ -1208,6 +1234,7 @@ std::vector<std::string> CranedMetaContainer::DeleteOrResetNodes_(
   // Erasing takes the node map write lock; release metadata locks first.
   if (!reset_to_future)
     for (const auto& id : changed_ids) craned_meta_map_.Erase(id);
+  RefreshPartitionNodeLists_(changed_part_ids);
   AddResReduceEventsAndUnlock({std::make_pair(
       absl::InfinitePast(),
       std::vector<CranedId>(changed_ids.begin(), changed_ids.end()))});
