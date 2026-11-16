@@ -57,10 +57,11 @@ cannot be uploaded accidentally. DEB publishing is deferred until a matching
 build target and installation validation are added; `cranedeb` is not used by
 this phase.
 The publish job serializes uploads to that shared package destination without
-cancelling an in-progress publish; integration remains independent. If the
-package server uses an internal-only hostname, the site's ARC job hook must
-supply its host mapping or internal DNS. The operator terminal's `/etc/hosts`
-entries are not automatically inherited by Kubernetes job pods.
+cancelling an in-progress publish; integration remains independent. Internal-only
+package hostnames are maintained in the site's cluster DNS, such as CoreDNS
+custom extensions. Job pods use that shared resolution instead of individual
+host aliases. The operator terminal's `/etc/hosts` entries are not automatically
+inherited by Kubernetes job pods.
 
 Repository variables:
 
