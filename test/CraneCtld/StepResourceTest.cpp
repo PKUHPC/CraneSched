@@ -4,6 +4,7 @@
 
 #include <gtest/gtest.h>
 
+#include <algorithm>
 #include <memory>
 #include <tuple>
 #include <utility>
@@ -31,7 +32,8 @@ class StepResourceTest : public ::testing::Test {
     g_config.Partitions = std::move(original_partitions_);
   }
 
-  void SetJobAllocation(uint32_t nodes) {
+  void SetJobAllocation(uint32_t nodes,
+                        uint64_t memory_per_node = kJobMemPerNode) {
     crane::grpc::JobToCtld request;
     request.set_type(crane::grpc::Batch);
     request.set_uid(1001);
@@ -42,11 +44,12 @@ class StepResourceTest : public ::testing::Test {
     request.set_ntasks_per_node(4);
     request.set_ntasks(4 * nodes);
     request.set_cpus_per_task(1);
-    request.set_mem_per_cpu(kMemPerCpu);
+    request.set_mem_per_node(memory_per_node);
     request.mutable_time_limit()->set_seconds(3600);
     job_.SetFieldsByJobToCtld(request);
     job_.SetJobId(42);
-    job_.SetReqTotalResView(job_.req_task_res_view * request.ntasks());
+    job_.SetReqTotalResView(job_.req_node_res_view * nodes +
+                            job_.req_task_res_view * request.ntasks());
 
     ResourceV3 allocation;
     std::vector<CranedId> craned_ids;
@@ -57,8 +60,8 @@ class StepResourceTest : public ::testing::Test {
       ResourceInNodeV3 resource;
       resource.GetCpuSet().cpu_count = cpu_t{4};
       resource.GetCpuSet().core_ids = {0, 1, 2, 3};
-      resource.SetMemoryBytes(kJobMemPerNode);
-      resource.SetMemorySwBytes(kJobMemPerNode);
+      resource.SetMemoryBytes(memory_per_node);
+      resource.SetMemorySwBytes(memory_per_node);
       allocation.AddResourceInNode(node, resource);
     }
     job_.SetCranedIds(std::move(craned_ids));
@@ -201,24 +204,162 @@ TEST_F(StepResourceTest, RejectsMemoryBeyondParentAllocationWithoutClamping) {
 }
 
 TEST_F(StepResourceTest, WaitsForMemoryHeldByAnotherStep) {
-  for (step_id_t id : {1U, 2U}) {
-    auto step = MakeStep(Request(), id);
-    ASSERT_TRUE(Admit(step.get()).has_value());
-    job_.AddStep(std::move(step));
-  }
+  auto first = MakeStep(Request(), 1);
+  ASSERT_TRUE(Admit(first.get()).has_value());
+  job_.AddStep(std::move(first));
   std::vector<Ctld::CommonStepInCtld*> scheduled;
   ASSERT_EQ(job_.SchedulePendingSteps(&scheduled), 1);
   ASSERT_EQ(scheduled.size(), 1);
   EXPECT_EQ(scheduled.front()->StepId(), 1);
-  EXPECT_EQ(job_.GetStep(2)->Status(), crane::grpc::Pending);
   EXPECT_EQ(job_.StepResAvail().At("node0").GetCpuSet().cpu_count, cpu_t{3});
   EXPECT_EQ(job_.StepResAvail().At("node0").GetMemoryBytes(), 0);
+
+  auto second = MakeStep(Request(), 2);
+  ASSERT_TRUE(Admit(second.get()).has_value());
+  job_.AddStep(std::move(second));
+  scheduled.clear();
+  EXPECT_EQ(job_.SchedulePendingSteps(&scheduled), 0);
+  EXPECT_TRUE(scheduled.empty());
+  EXPECT_EQ(job_.GetStep(2)->Status(), crane::grpc::Pending);
 
   auto finished = job_.EraseStep(1);
   scheduled.clear();
   ASSERT_EQ(job_.SchedulePendingSteps(&scheduled), 1);
   ASSERT_EQ(scheduled.size(), 1);
   EXPECT_EQ(scheduled.front()->StepId(), 2);
+}
+
+TEST_F(StepResourceTest, RejectsTasksThatCannotFitOnRequestedNodes) {
+  SetJobAllocation(2);
+  auto request = Request(3);
+  request.clear_mem_per_node();
+  request.set_mem_per_cpu(2 * kMemPerCpu);
+  auto step = MakeStep(request);
+  ASSERT_TRUE(
+      Ctld::JobScheduler::AcquireStepAttributes(step.get()).has_value());
+  ASSERT_TRUE(step->req_total_res_view <= job_.req_total_res_view);
+  const auto result = Ctld::JobScheduler::CheckStepValidity(step.get());
+  ASSERT_FALSE(result.has_value());
+  EXPECT_EQ(result.error(), CraneErrCode::ERR_NO_ENOUGH_NODE);
+}
+
+TEST_F(StepResourceTest, RejectsInsufficientCombinedCapacityOfRequestedNodes) {
+  SetJobAllocation(3);
+  auto request = Request(5, 2);
+  request.clear_mem_per_node();
+  request.set_mem_per_cpu(2 * kMemPerCpu);
+  auto step = MakeStep(request);
+  ASSERT_TRUE(
+      Ctld::JobScheduler::AcquireStepAttributes(step.get()).has_value());
+  ASSERT_TRUE(step->req_total_res_view <= job_.req_total_res_view);
+  const auto result = Ctld::JobScheduler::CheckStepValidity(step.get());
+  ASSERT_FALSE(result.has_value());
+  EXPECT_EQ(result.error(), CraneErrCode::ERR_NO_ENOUGH_NODE);
+}
+
+TEST_F(StepResourceTest, SelectsParentNodesWithEnoughCapacity) {
+  SetJobAllocation(3);
+  auto allocation = job_.AllocatedRes();
+  // The first parent node can hold one task; a later node can hold all three.
+  allocation.At("node0").SetMemoryBytes(kMemPerCpu);
+  allocation.At("node0").SetMemorySwBytes(kMemPerCpu);
+  job_.SetStepResAvail(allocation);
+  job_.SetAllocatedRes(std::move(allocation));
+  auto request = Request(3);
+  request.clear_mem_per_node();
+  request.set_mem_per_cpu(kMemPerCpu);
+  auto step = MakeStep(request);
+  ASSERT_TRUE(Admit(step.get()).has_value());
+  job_.AddStep(std::move(step));
+  std::vector<Ctld::CommonStepInCtld*> scheduled;
+  ASSERT_EQ(job_.SchedulePendingSteps(&scheduled), 1);
+  ASSERT_EQ(scheduled.size(), 1);
+  EXPECT_EQ(scheduled.front()->task_res_map.size(), 3);
+  ASSERT_EQ(scheduled.front()->CranedIds().size(), 1);
+  EXPECT_NE(scheduled.front()->CranedIds().front(), "node0");
+}
+
+TEST_F(StepResourceTest, SchedulesUnevenTasksAcrossThreeNodes) {
+  SetJobAllocation(3, 2 * kMemPerCpu);
+  g_config.Partitions.at(kPartition).max_mem_per_node = 2 * kMemPerCpu;
+  auto request = Request(5, 3);
+  request.clear_mem_per_node();
+  request.set_mem_per_cpu(kMemPerCpu);
+  auto step = MakeStep(request);
+  ASSERT_TRUE(Admit(step.get()).has_value());
+  job_.AddStep(std::move(step));
+  std::vector<Ctld::CommonStepInCtld*> scheduled;
+  ASSERT_EQ(job_.SchedulePendingSteps(&scheduled), 1);
+  ASSERT_EQ(scheduled.size(), 1);
+  EXPECT_EQ(scheduled.front()->task_res_map.size(), 5);
+  std::vector<size_t> tasks_per_node;
+  for (const auto& [node, tasks] : scheduled.front()->craned_task_map)
+    tasks_per_node.push_back(tasks.size());
+  std::ranges::sort(tasks_per_node);
+  EXPECT_EQ(tasks_per_node, (std::vector<size_t>{1, 2, 2}));
+}
+
+TEST_F(StepResourceTest, UsesLargestCapacitiesAcrossRequestedNodes) {
+  SetJobAllocation(3);
+  auto allocation = job_.AllocatedRes();
+  for (const auto* node : {"node0", "node1"}) {
+    allocation.At(node).SetMemoryBytes(3 * kMemPerCpu);
+    allocation.At(node).SetMemorySwBytes(3 * kMemPerCpu);
+  }
+  job_.SetStepResAvail(allocation);
+  job_.SetAllocatedRes(std::move(allocation));
+  auto request = Request(7, 2);
+  request.clear_mem_per_node();
+  request.set_mem_per_cpu(kMemPerCpu);
+  auto step = MakeStep(request);
+  ASSERT_TRUE(Admit(step.get()).has_value());
+  job_.AddStep(std::move(step));
+  std::vector<Ctld::CommonStepInCtld*> scheduled;
+  ASSERT_EQ(job_.SchedulePendingSteps(&scheduled), 1);
+  ASSERT_EQ(scheduled.size(), 1);
+  EXPECT_EQ(scheduled.front()->task_res_map.size(), 7);
+  EXPECT_EQ(scheduled.front()->craned_task_map.size(), 2);
+  EXPECT_EQ(scheduled.front()->craned_task_map.at("node2").size(), 4);
+}
+
+TEST_F(StepResourceTest, ChecksCapacityWithinNodeFilters) {
+  SetJobAllocation(2);
+  auto allocation = job_.AllocatedRes();
+  allocation.At("node0").SetMemoryBytes(kMemPerCpu);
+  allocation.At("node0").SetMemorySwBytes(kMemPerCpu);
+  job_.SetStepResAvail(allocation);
+  job_.SetAllocatedRes(std::move(allocation));
+  for (bool include : {false, true}) {
+    SCOPED_TRACE(include);
+    auto request = Request(2);
+    request.clear_mem_per_node();
+    request.set_mem_per_cpu(kMemPerCpu);
+    auto step = MakeStep(request);
+    ASSERT_TRUE(
+        Ctld::JobScheduler::AcquireStepAttributes(step.get()).has_value());
+    if (include)
+      step->included_nodes = {"node0"};
+    else
+      step->excluded_nodes = {"node1"};
+    const auto result = Ctld::JobScheduler::CheckStepValidity(step.get());
+    ASSERT_FALSE(result.has_value());
+    EXPECT_EQ(result.error(), CraneErrCode::ERR_NO_ENOUGH_NODE);
+  }
+}
+
+TEST_F(StepResourceTest, RejectsInfeasibleTaskCounts) {
+  for (const auto& [nodes, tasks, tasks_per_node] :
+       {std::tuple{0U, 1U, 4U}, std::tuple{1U, 0U, 4U}, std::tuple{3U, 2U, 4U},
+        std::tuple{3U, 7U, 2U}}) {
+    SCOPED_TRACE(::testing::Message()
+                 << nodes << "," << tasks << "," << tasks_per_node);
+    auto request = Request(tasks, nodes);
+    request.set_ntasks_per_node(tasks_per_node);
+    auto step = MakeStep(request);
+    const auto result = Ctld::JobScheduler::AcquireStepAttributes(step.get());
+    ASSERT_FALSE(result.has_value());
+    EXPECT_EQ(result.error(), CraneErrCode::ERR_INVALID_RESOURCE);
+  }
 }
 
 TEST_F(StepResourceTest, RejectsBothMemoryDimensions) {
