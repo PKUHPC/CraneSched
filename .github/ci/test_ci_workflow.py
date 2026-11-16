@@ -11,6 +11,30 @@ import yaml
 
 
 class CIResultTest(unittest.TestCase):
+    def test_cpack_collection_excludes_intermediate_rpms(self):
+        workflow = yaml.safe_load((Path(__file__).parents[1] / 'workflows/ci.yaml').read_text())
+        build = workflow['jobs']['build']['steps'][1]['run']
+        start = build.index('mapfile -t backend_rpms')
+        collection = build[start:build.index("GITHUB_TOKEN=", start)]
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            (root / 'packages/rpm').mkdir(parents=True)
+            cpack = root / 'cpack-backend'
+            intermediate = cpack / '_CPack_Packages/Linux/RPM/RPMS'
+            intermediate.mkdir(parents=True)
+            for name in ('craned.rpm', 'cranectld.rpm'):
+                (cpack / name).write_text(name)
+                (intermediate / name).write_text('temporary duplicate')
+            result = subprocess.run(
+                ['bash', '-euo', 'pipefail', '-c', collection],
+                env={**os.environ, 'artifact_dir': str(root)},
+                capture_output=True, text=True, timeout=10,
+            )
+            self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
+            files = list((root / 'packages/rpm').rglob('*'))
+            self.assertEqual({path.name for path in files}, {'craned.rpm', 'cranectld.rpm'})
+            self.assertTrue(all(path.read_text() == path.name for path in files))
+
     def test_real_summary_rejects_failed_cancelled_missing_or_partial_phases(self):
         workflow = yaml.safe_load((Path(__file__).parents[1] / 'workflows/ci.yaml').read_text())
         script = workflow['jobs']['summary']['steps'][0]['run']

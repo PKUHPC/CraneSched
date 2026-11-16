@@ -50,7 +50,17 @@ mismatch fail preparation instead of selecting an older cached suite.
 secrets are configured. A requested upload with missing secrets or a failed
 transfer fails the publish job and the summary without stopping integration.
 The existing uploader retains its authentication, path and retry behavior;
-this target uses RPM, distro `10` and architecture `x86_64`.
+this phase publishes only the five final RPMs to the `crane` repository, using
+distro `10` and architecture `x86_64`. The package directory contains only the
+final RPM files, so CPack's temporary staging tree and the retired `bin` path
+cannot be uploaded accidentally. DEB publishing is deferred until a matching
+build target and installation validation are added; `cranedeb` is not used by
+this phase.
+The publish job serializes uploads to that shared package destination without
+cancelling an in-progress publish; integration remains independent. If the
+package server uses an internal-only hostname, the site's ARC job hook must
+supply its host mapping or internal DNS. The operator terminal's `/etc/hosts`
+entries are not automatically inherited by Kubernetes job pods.
 
 Repository variables:
 
@@ -76,8 +86,10 @@ uses an independent runner work volume; cleaning it never removes the hot
 build tree. ccache is shared; Go caches are local to the build pod.
 
 Every run attempt owns `/ci/attempts/<run-id>-<attempt>/build`. It contains five
-RPMs and a manifest with source SHA, Base digest, target, preset, package
-identities and SHA-256 checksums. Actions passes the manifest checksum to both
+RPMs under `packages/rpm/` and a manifest with source SHA, Base digest, target,
+preset, package identities and SHA-256 checksums. CPack works in a separate
+`cpack-backend/` directory; only its two final RPMs are copied into that shared
+package directory alongside the three Go RPMs. Actions passes the manifest checksum to both
 consumers. Integration verifies it and assembles its image from the RPM payload;
 it does not rebuild product binaries. Publishing verifies the same output.
 

@@ -231,11 +231,16 @@ jobs:
           make -C go test
           cmake --build --preset ci-debug --parallel "${BUILD_JOBS:-6}"
           make -C go all tool PREFIX=/usr STRIP=true CHECK_GPU=0
-          mkdir -p "$artifact_dir/packages/backend" "$artifact_dir/packages/go"
-          (cd cmake-build-ci-debug && cpack -G RPM -B "$artifact_dir/packages/backend")
+          mkdir -p "$artifact_dir/packages/rpm" "$artifact_dir/cpack-backend"
+          (cd cmake-build-ci-debug && cpack -G RPM -B "$artifact_dir/cpack-backend")
+          mapfile -t backend_rpms < <(
+            find "$artifact_dir/cpack-backend" -maxdepth 1 -type f -name '*.rpm' -print
+          )
+          [[ "${#backend_rpms[@]}" == 2 ]]
+          cp "${backend_rpms[@]}" "$artifact_dir/packages/rpm/"
           GITHUB_TOKEN='${{ github.token }}' make -C go package SKIP_REBUILD=true CHECK_GPU=0 \
             GORELEASER_SNAPSHOT=false GORELEASER_RELEASE_ARGS=--skip=publish,validate
-          cp go/build/dist/*.rpm "$artifact_dir/packages/go/"
+          cp go/build/dist/*.rpm "$artifact_dir/packages/rpm/"
           python3 - <<'PY'
           import hashlib
           import json
@@ -247,7 +252,7 @@ jobs:
           expected = {'cranesched-cranectld', 'cranesched-craned', 'cranesched-client',
                       'cranesched-plugin', 'cranesched-slurm-compat'}
           packages = []
-          for path in sorted((root / 'packages').glob('*/*.rpm')):
+          for path in sorted((root / 'packages/rpm').glob('*.rpm')):
               name, version, architecture = subprocess.check_output(
                   ['rpm', '-qp', '--qf', '%{NAME}\t%{VERSION}\t%{ARCH}', str(path)], text=True
               ).split('\t')
@@ -308,6 +313,10 @@ jobs:
     name: Publish this build's RPMs
     needs: build
     if: ${{ inputs.publish_packages }}
+    concurrency:
+      group: crane-ci-publish-master-rhel10-amd64
+      cancel-in-progress: false
+      queue: max
     runs-on: crane-ci
     timeout-minutes: 20
     container:
@@ -357,7 +366,7 @@ jobs:
               if hashlib.file_digest(path.open('rb'), 'sha256').hexdigest() != package['sha256']:
                   raise SystemExit('RPM checksum mismatch')
           PY
-          export PACKAGE_DIR="$CI_ARTIFACT_DIR/packages"
+          export PACKAGE_DIR="$CI_ARTIFACT_DIR/packages/rpm"
           bash .github/ci/upload-packages.sh
 
   summary:
