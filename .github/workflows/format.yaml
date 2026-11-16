@@ -30,7 +30,7 @@ concurrency:
 jobs:
   format:
     if: github.event_name == 'pull_request' && github.event.pull_request.draft == false
-    runs-on: ubuntu-24.04
+    runs-on: ubuntu-latest
 
     steps:
       - name: Checkout pull request head
@@ -41,14 +41,13 @@ jobs:
           fetch-depth: 1
           persist-credentials: false
 
-      - name: Install latest Clang-Format
+      - name: Install Clang-Format 20
         run: |
           set -euo pipefail
-          sudo apt-get install -y wget lsb-release
-          sudo wget -O /tmp/llvm.sh https://apt.llvm.org/llvm.sh
-          sudo bash /tmp/llvm.sh 20
-          sudo apt update
-          sudo apt-get install clang-format-20
+          python3 -m venv "$RUNNER_TEMP/clang-format"
+          "$RUNNER_TEMP/clang-format/bin/python" -m pip install --only-binary=:all: clang-format==20.1.8
+          ln -s clang-format "$RUNNER_TEMP/clang-format/bin/clang-format-20"
+          echo "$RUNNER_TEMP/clang-format/bin" >> "$GITHUB_PATH"
 
       - name: Check clang-format and prepare patch
         id: format
