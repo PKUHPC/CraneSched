@@ -179,6 +179,17 @@ void AccountMetaContainer::MallocMetaResourceToRecoveredRunningJob(
 
 std::expected<void, std::string>
 AccountMetaContainer::CheckAndMallocMetaResource(const PdJobInScheduler& job) {
+  return CheckMetaResource_(job, job.allocated_res.View(), true);
+}
+
+std::expected<void, std::string> AccountMetaContainer::CheckMetaResource(
+    const PdJobInScheduler& job) {
+  return CheckMetaResource_(job, job.req_total_res_view, false);
+}
+
+std::expected<void, std::string> AccountMetaContainer::CheckMetaResource_(
+    const PdJobInScheduler& job, const ResourceView& resource,
+    bool should_malloc) {
   CRANE_TRACE("Check meta resource for job {} of user {} and account {}.",
               job.job_id, job.username, job.account);
 
@@ -206,8 +217,8 @@ AccountMetaContainer::CheckAndMallocMetaResource(const PdJobInScheduler& job) {
   auto account_locks = LockAccountStripes_(job.account_chain);
   std::scoped_lock qos_lock(m_qos_stripes_[StripeForKey_(job.qos)]);
 
-  auto result = CheckRunLimits_(job, *user, *account_map, *qos);
-  if (!result) return result;
+  auto result = CheckRunLimits_(job, *user, *account_map, *qos, resource);
+  if (!result || !should_malloc) return result;
 
   CRANE_DEBUG("Malloc meta resource for job {} of user {} and account {}.",
               job.job_id, job.username, job.account);
@@ -890,7 +901,8 @@ CraneErrCode AccountMetaContainer::CheckSubmitLimits_(
 
 std::expected<void, std::string> AccountMetaContainer::CheckRunLimits_(
     const PdJobInScheduler& job, const User& user,
-    const AccountRawMap& account_map, const Qos& qos) {
+    const AccountRawMap& account_map, const Qos& qos,
+    const ResourceView& resource) {
   // Verify that all required entries exist before checking limits.
   if (!m_user_meta_map_.contains(job.username)) {
     CRANE_ERROR("[job #{}]: User '{}' not found in m_user_meta_map_.",
@@ -912,7 +924,6 @@ std::expected<void, std::string> AccountMetaContainer::CheckRunLimits_(
     return std::unexpected("QosMetaNotFound");
   }
 
-  const ResourceView allocated_res = job.allocated_res.View();
   std::expected<void, std::string> result;
 
   // ---- User entity ----
@@ -936,15 +947,15 @@ std::expected<void, std::string> AccountMetaContainer::CheckRunLimits_(
         [&](std::pair<const std::string, MetaResourceStat>& pair) {
           result = CheckEntityRunLimits_(
               pair.second, job.account, job.qos, qos, job.partition_id,
-              user_part_limit, /*is_user=*/true, allocated_res, job.time_limit);
+              user_part_limit, /*is_user=*/true, resource, job.time_limit);
         });
     if (!result) {
       CRANE_TRACE(
           "[job #{}]: user run limit check failed: user='{}', account='{}', "
-          "partition='{}', qos='{}', allocated='{}', time_limit={}s, "
+          "partition='{}', qos='{}', resource='{}', time_limit={}s, "
           "reason='{}'.",
           job.job_id, job.username, job.account, job.partition_id, job.qos,
-          util::ReadableResourceView(allocated_res),
+          util::ReadableResourceView(resource),
           absl::ToInt64Seconds(job.time_limit), result.error());
       return result;
     }
@@ -971,16 +982,16 @@ std::expected<void, std::string> AccountMetaContainer::CheckRunLimits_(
         [&](std::pair<const std::string, MetaResourceStat>& pair) {
           result = CheckEntityRunLimits_(pair.second, job.account, job.qos, qos,
                                          job.partition_id, acct_part_limit,
-                                         /*is_user=*/false, allocated_res,
+                                         /*is_user=*/false, resource,
                                          job.time_limit);
         });
     if (!result) {
       CRANE_TRACE(
           "[job #{}]: account run limit check failed: user='{}', "
           "job_account='{}', checked_account='{}', partition='{}', qos='{}', "
-          "allocated='{}', time_limit={}s, reason='{}'.",
+          "resource='{}', time_limit={}s, reason='{}'.",
           job.job_id, job.username, job.account, account_name, job.partition_id,
-          job.qos, util::ReadableResourceView(allocated_res),
+          job.qos, util::ReadableResourceView(resource),
           absl::ToInt64Seconds(job.time_limit), result.error());
       return result;
     }
@@ -990,7 +1001,7 @@ std::expected<void, std::string> AccountMetaContainer::CheckRunLimits_(
   m_qos_meta_map_.if_contains(
       job.qos, [&](std::pair<const std::string, MetaResource>& pair) {
         const MetaResource& val = pair.second;
-        ResourceView resource_use{allocated_res};
+        ResourceView resource_use{resource};
         resource_use += val.resource;
 
         if (val.jobs_count + 1 > qos.max_jobs) {

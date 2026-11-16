@@ -147,8 +147,6 @@ struct PdJobInScheduler {
   std::string username;
   std::list<std::string> account_chain;
 
-  bool is_scheduled() const { return reason.empty(); }
-
   // True iff this candidate represents an array parent template. On successful
   // allocation the scheduler asks ArrayManager to materialize a child
   // inheriting this allocation, rather than running the parent itself.
@@ -265,8 +263,7 @@ class SchedulerAlgo {
    * handled.
    * @param[in,out] running_jobs Const reference to the vector of running
    jobs.
-   * @param[in,out] pending_jobs Const reference to the vector of pending
-   jobs,
+   * @param[in,out] pending_jobs Const reference to the vector of pending jobs;
    * results of scheduling are stored in JobInScheduler.
    */
   void NodeSelect(
@@ -303,11 +300,13 @@ class SchedulerAlgo {
 
     const CranedId craned_id;
     const ResourceView res_total;
+    const bool available;
     ResourceView res_avail;
     ResourceInNodeV3 res_avail_v3;
     std::vector<AllocatedRes> allocated_res;
     std::vector<ReservedRes> reserved_res;
     std::vector<INodeSelector*> selectors;
+    absl::Time earliest_reservation_start{absl::InfiniteFuture()};
 
     TimeAvailResMap time_avail_res_map;
 
@@ -316,9 +315,11 @@ class SchedulerAlgo {
         absl::flat_hash_set<std::variant<PdJobInScheduler*, RnJobInScheduler*>>>
         qos_job_map;
 
-    NodeState(const CranedId& craned_id, const ResourceInNodeV3& res_total)
+    NodeState(const CranedId& craned_id, const ResourceInNodeV3& res_total,
+              bool available)
         : craned_id(craned_id),
           res_total(res_total.ToResourceView()),
+          available(available),
           res_avail(res_total.ToResourceView()),
           res_avail_v3(res_total) {}
 
@@ -659,6 +660,8 @@ class SchedulerAlgo {
     using LockGuard = absl::MutexLock;
     using TimeAvailResMap = std::map<absl::Time, ResourceView>;
 
+    bool has_blocked_job{false};
+
     template <typename Policy, typename... Args>
     void InitializeNodeSelector(const absl::Time& now,
                                 const std::vector<NodeState*>& node_info_vec,
@@ -699,12 +702,10 @@ class SchedulerAlgo {
       m_node_selector_->AllocateResource(
           job->start_time, job->end_time, job->planned_res,
           job->start_time == now ? &job->allocated_res : nullptr);
-      if (job->is_scheduled()) {
-        for (const CranedId& craned_id : job->craned_ids) {
-          m_node_selector_->GetNodeState(craned_id)
-              ->qos_job_map[job->qos]
-              .emplace(job);
-        }
+      for (const CranedId& craned_id : job->craned_ids) {
+        m_node_selector_->GetNodeState(craned_id)
+            ->qos_job_map[job->qos]
+            .emplace(job);
       }
     }
 
@@ -731,12 +732,10 @@ class SchedulerAlgo {
         m_node_selector_->ReleaseResourceIfPresent(
             pd->start_time, pd->end_time, pd->planned_res,
             pd->start_time == now ? &pd->allocated_res : nullptr);
-        if (pd->is_scheduled()) {
-          for (const CranedId& craned_id : pd->craned_ids) {
-            auto* node_state = m_node_selector_->GetNodeStateOrNull(craned_id);
-            if (!node_state) continue;
-            node_state->qos_job_map[pd->qos].erase(pd);
-          }
+        for (const CranedId& craned_id : pd->craned_ids) {
+          auto* node_state = m_node_selector_->GetNodeStateOrNull(craned_id);
+          if (!node_state) continue;
+          node_state->qos_job_map[pd->qos].erase(pd);
         }
       }
     }
