@@ -541,6 +541,7 @@ ccontrol --json show job 12345
 | 操作 | 所需权限 |
 |------|---------|
 | Show 命令 | 用户可查看自己的作业；管理员可查看所有 |
+| Show reservation | 所有用户，包括尚未注册为 Crane 用户的系统用户 |
 | Update node | 仅管理员 |
 | Update partition | 仅管理员 |
 | Update job | 作业所有者或管理员 |
