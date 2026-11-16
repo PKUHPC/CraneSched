@@ -37,24 +37,24 @@ class CranedForPamServiceImpl : public crane::grpc::CranedForPam::Service {
   CranedForPamServiceImpl() = default;
 
   grpc::Status QueryStepFromPortForward(
-      grpc::ServerContext* context,
-      const crane::grpc::QueryStepFromPortForwardRequest* request,
-      crane::grpc::QueryStepFromPortForwardReply* response) override;
+      grpc::ServerContext *context,
+      const crane::grpc::QueryStepFromPortForwardRequest *request,
+      crane::grpc::QueryStepFromPortForwardReply *response) override;
 
   grpc::Status MigrateSshProcToCgroup(
-      grpc::ServerContext* context,
-      const crane::grpc::MigrateSshProcToCgroupRequest* request,
-      crane::grpc::MigrateSshProcToCgroupReply* response) override;
+      grpc::ServerContext *context,
+      const crane::grpc::MigrateSshProcToCgroupRequest *request,
+      crane::grpc::MigrateSshProcToCgroupReply *response) override;
 
   grpc::Status QuerySshStepEnvVariablesForward(
-      grpc::ServerContext* context,
-      const ::crane::grpc::QuerySshStepEnvVariablesForwardRequest* request,
-      crane::grpc::QuerySshStepEnvVariablesForwardReply* response) override;
+      grpc::ServerContext *context,
+      const ::crane::grpc::QuerySshStepEnvVariablesForwardRequest *request,
+      crane::grpc::QuerySshStepEnvVariablesForwardReply *response) override;
 };
 
 class CranedForPamServer {
  public:
-  explicit CranedForPamServer(const Config::CranedListenConf& listen_conf);
+  explicit CranedForPamServer(const Config::CranedListenConf &listen_conf);
 
   void Shutdown() {
     m_server_->Shutdown(std::chrono::system_clock::now() +

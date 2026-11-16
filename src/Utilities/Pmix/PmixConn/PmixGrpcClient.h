@@ -39,32 +39,32 @@ class PmixGrpcClient;
 
 class PmixGrpcStub : public PmixStub {
  public:
-  explicit PmixGrpcStub(PmixGrpcClient* pmix_client);
+  explicit PmixGrpcStub(PmixGrpcClient *pmix_client);
 
   ~PmixGrpcStub() override = default;
 
   void SendPmixRingMsgNoBlock(
-      const crane::grpc::pmix::SendPmixRingMsgReq& request,
+      const crane::grpc::pmix::SendPmixRingMsgReq &request,
       AsyncCallback callback) override;
 
   void PmixTreeUpwardForwardNoBlock(
-      const crane::grpc::pmix::PmixTreeUpwardForwardReq& request,
+      const crane::grpc::pmix::PmixTreeUpwardForwardReq &request,
       AsyncCallback callback) override;
 
   void PmixTreeDownwardForwardNoBlock(
-      const crane::grpc::pmix::PmixTreeDownwardForwardReq& request,
+      const crane::grpc::pmix::PmixTreeDownwardForwardReq &request,
       AsyncCallback callback) override;
 
   void PmixDModexRequestNoBlock(
-      const crane::grpc::pmix::PmixDModexRequestReq& request,
+      const crane::grpc::pmix::PmixDModexRequestReq &request,
       AsyncCallback callback) override;
 
   void PmixDModexResponseNoBlock(
-      const crane::grpc::pmix::PmixDModexResponseReq& request,
+      const crane::grpc::pmix::PmixDModexResponseReq &request,
       AsyncCallback callback) override;
 
  private:
-  PmixGrpcClient* m_pmix_client_;
+  PmixGrpcClient *m_pmix_client_;
 
   std::shared_ptr<grpc::Channel> m_channel_;
 
@@ -77,15 +77,15 @@ class PmixGrpcStub : public PmixStub {
 
 class PmixGrpcClient : public PmixClient {
  public:
-  explicit PmixGrpcClient(int node_num, const Config& config)
+  explicit PmixGrpcClient(int node_num, const Config &config)
       : m_node_num_(node_num), m_config_(config) {}
 
   ~PmixGrpcClient() override = default;
 
-  void EmplacePmixStub(const CranedId& craned_id,
-                       const std::string& port) override;
+  void EmplacePmixStub(const CranedId &craned_id,
+                       const std::string &port) override;
 
-  std::shared_ptr<PmixStub> GetPmixStub(const CranedId& craned_id) override;
+  std::shared_ptr<PmixStub> GetPmixStub(const CranedId &craned_id) override;
 
   uint64_t GetChannelCount() const override { return m_channel_count_.load(); }
 

@@ -38,7 +38,7 @@ struct {
 } craned_dev_map SEC(".maps");
 
 SEC("cgroup/dev")
-int craned_device_access(struct bpf_cgroup_dev_ctx* ctx) {
+int craned_device_access(struct bpf_cgroup_dev_ctx *ctx) {
   // Using CO-RE to read ctx fields
   __u32 major = BPF_CORE_READ(ctx, major);
   __u32 minor = BPF_CORE_READ(ctx, minor);
@@ -47,10 +47,10 @@ int craned_device_access(struct bpf_cgroup_dev_ctx* ctx) {
   struct BpfKey key = {bpf_get_current_cgroup_id(), major, minor};
   // value.major in map(0,0,0) contains log level
   struct BpfKey log_key = {(__u64)0, (__u32)0, (__u32)0};
-  struct BpfDeviceMeta* log_level_meta;
+  struct BpfDeviceMeta *log_level_meta;
 
   log_level_meta =
-      (struct BpfDeviceMeta*)bpf_map_lookup_elem(&craned_dev_map, &log_key);
+      (struct BpfDeviceMeta *)bpf_map_lookup_elem(&craned_dev_map, &log_key);
   int enable_logging;
   if (!log_level_meta) {
     enable_logging = 0;
@@ -59,9 +59,9 @@ int craned_device_access(struct bpf_cgroup_dev_ctx* ctx) {
   }
 
   if (enable_logging) bpf_printk("ctx cgroup ID : %lu\n", key.cgroup_id);
-  struct BpfDeviceMeta* meta;
+  struct BpfDeviceMeta *meta;
 
-  meta = (struct BpfDeviceMeta*)bpf_map_lookup_elem(&craned_dev_map, &key);
+  meta = (struct BpfDeviceMeta *)bpf_map_lookup_elem(&craned_dev_map, &key);
   if (!meta) {
     if (enable_logging) {
       bpf_printk("BpfDeviceMeta not found for key cgroup ID: %llu,\n",

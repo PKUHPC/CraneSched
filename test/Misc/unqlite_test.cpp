@@ -23,10 +23,10 @@
 
 constexpr char kDbFile[] = ":mem:";
 
-void PrintErrorAndRollback(unqlite* pDb, int rc) {
+void PrintErrorAndRollback(unqlite *pDb, int rc) {
   if (rc != UNQLITE_OK) {
     // Insertion fail, Handle error
-    const char* zBuf;
+    const char *zBuf;
     int iLen;
     /* Something goes wrong, extract the database error log */
     unqlite_config(pDb, UNQLITE_CONFIG_ERR_LOG, &zBuf, &iLen);
@@ -42,7 +42,7 @@ void PrintErrorAndRollback(unqlite* pDb, int rc) {
 
 TEST(Unqlite, Simple) {
   int i, rc;
-  unqlite* pDb;
+  unqlite *pDb;
 
   // Open our database;
   rc = unqlite_open(&pDb, kDbFile, UNQLITE_OPEN_CREATE);
@@ -103,7 +103,7 @@ TEST(Unqlite, Simple) {
 
 TEST(Unqlite, Transaction) {
   int rc;
-  unqlite* pDb;
+  unqlite *pDb;
   unqlite_int64 nBytes;
   std::string r_buf;
 
@@ -164,7 +164,7 @@ FailTransaction:
 
 TEST(Unqlite, Protobuf) {
   int rc;
-  unqlite* pDb;
+  unqlite *pDb;
 
   using google::protobuf::Timestamp;
   using google::protobuf::io::CodedOutputStream;
@@ -253,7 +253,7 @@ TEST(Unqlite, Protobuf) {
   CodedInputStream codedInputStream(&arrayInputStream);
   uint32_t usz;
   int sz;
-  const void* p;
+  const void *p;
 
   GTEST_LOG_(INFO) << "Current Pos: " << codedInputStream.CurrentPosition();
   codedInputStream.ReadLittleEndian32(&usz);
@@ -313,18 +313,18 @@ class Jx9Test : public testing::Test {
     GTEST_LOG_(INFO) << "[JX9] " << output;
   }
 
-  static int Jx9OutputCallback(const void* pOutput, unsigned int nLen,
-                               void* pThisVoid) {
-    auto* pThis = reinterpret_cast<Jx9Test*>(pThisVoid);
+  static int Jx9OutputCallback(const void *pOutput, unsigned int nLen,
+                               void *pThisVoid) {
+    auto *pThis = reinterpret_cast<Jx9Test *>(pThisVoid);
 
-    std::string_view output(reinterpret_cast<const char*>(pOutput), nLen);
+    std::string_view output(reinterpret_cast<const char *>(pOutput), nLen);
     pThis->Jx9Print(output);
     return UNQLITE_OK;
   }
 
   std::string GetJx9CompileErrorString(int rc) {
     if (rc == UNQLITE_COMPILE_ERR) {
-      const char* zBuf;
+      const char *zBuf;
       int iLen;
 
       /* Compile-time error, extract the compiler error log */
@@ -337,7 +337,7 @@ class Jx9Test : public testing::Test {
     return {};
   }
 
-  unqlite* pDb;
+  unqlite *pDb;
 
   std::string m_jx9_store_src_{
       R"(
@@ -371,7 +371,7 @@ TEST_F(Jx9Test, StoreAndFetch) {
   std::string collection_name{"test"};
 
   int rc;
-  unqlite_vm* pVm;
+  unqlite_vm *pVm;
   rc = unqlite_compile(pDb, m_jx9_store_src_.c_str(), m_jx9_store_src_.size(),
                        &pVm);
   if (rc != UNQLITE_OK) {
@@ -396,10 +396,10 @@ TEST_F(Jx9Test, StoreAndFetch) {
       {"k2", "v2"},
   };
 
-  unqlite_value* kv_list = unqlite_vm_new_array(pVm);
-  unqlite_value* pValueStr = unqlite_vm_new_scalar(pVm);
+  unqlite_value *kv_list = unqlite_vm_new_array(pVm);
+  unqlite_value *pValueStr = unqlite_vm_new_scalar(pVm);
 
-  for (const auto& [k, v] : kv_vec) {
+  for (const auto &[k, v] : kv_vec) {
     unqlite_value_string(pValueStr, v.c_str(), v.size());
     unqlite_array_add_strkey_elem(kv_list, k.c_str(), pValueStr);
     unqlite_value_reset_string_cursor(pValueStr);
@@ -421,7 +421,7 @@ TEST_F(Jx9Test, StoreAndFetch) {
     GTEST_FAIL() << "Failed to execute jx9 vm";
   }
 
-  unqlite_value* result = unqlite_vm_extract_variable(pVm, "result");
+  unqlite_value *result = unqlite_vm_extract_variable(pVm, "result");
   if (result == nullptr) {
     GTEST_FAIL() << "Failed to extract jx9 vm result";
   }

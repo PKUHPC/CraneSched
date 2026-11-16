@@ -28,14 +28,14 @@
 static std::once_flag g_init_flag;
 static bool g_module_initialized{false};
 
-void clean_up_cb(pam_handle_t* pamh, void* data, int error_status) {
+void clean_up_cb(pam_handle_t *pamh, void *data, int error_status) {
   free(data);
 };
 
 extern "C" {
 
-[[maybe_unused]] int pam_sm_acct_mgmt(pam_handle_t* pamh, int flags, int argc,
-                                      const char** argv) {
+[[maybe_unused]] int pam_sm_acct_mgmt(pam_handle_t *pamh, int flags, int argc,
+                                      const char **argv) {
   std::call_once(g_init_flag, LoadCraneConfig, pamh, argc, argv,
                  &g_module_initialized);
 
@@ -89,15 +89,15 @@ extern "C" {
     pam_syslog(pamh, LOG_ERR,
                "[Crane] Accepted ssh connection with remote port %hu ", port);
 
-    char* auth_result = strdup(PAM_STR_TRUE);
-    char* job_id_str = strdup(std::to_string(job_id).c_str());
+    char *auth_result = strdup(PAM_STR_TRUE);
+    char *job_id_str = strdup(std::to_string(job_id).c_str());
 
     pam_set_data(pamh, PAM_ITEM_AUTH_RESULT, auth_result, clean_up_cb);
     pam_set_data(pamh, PAM_ITEM_JOB_ID, job_id_str, clean_up_cb);
 
     return PAM_SUCCESS;
   } else {
-    char* auth_result = strdup(PAM_STR_FALSE);
+    char *auth_result = strdup(PAM_STR_FALSE);
     pam_set_data(pamh, PAM_ITEM_AUTH_RESULT, auth_result, clean_up_cb);
 
     pam_syslog(pamh, LOG_ERR,
@@ -109,11 +109,11 @@ extern "C" {
   }
 }
 
-[[maybe_unused]] int pam_sm_open_session(pam_handle_t* pamh, int flags,
-                                         int argc, const char** argv) {
+[[maybe_unused]] int pam_sm_open_session(pam_handle_t *pamh, int flags,
+                                         int argc, const char **argv) {
   int job_id;
-  char* auth_result;
-  char* job_id_str;
+  char *auth_result;
+  char *job_id_str;
 
   bool ok;
   std::string username;
@@ -139,9 +139,9 @@ extern "C" {
     return PAM_SESSION_ERR;
   }
 
-  pam_get_data(pamh, PAM_ITEM_AUTH_RESULT, (const void**)&auth_result);
+  pam_get_data(pamh, PAM_ITEM_AUTH_RESULT, (const void **)&auth_result);
   if (strcmp(auth_result, PAM_STR_TRUE) == 0) {
-    pam_get_data(pamh, PAM_ITEM_JOB_ID, (const void**)&job_id_str);
+    pam_get_data(pamh, PAM_ITEM_JOB_ID, (const void **)&job_id_str);
 
     pam_syslog(
         pamh, LOG_ERR,
@@ -167,8 +167,8 @@ extern "C" {
 }
 
 // This function is required once pam_sm_open_session is written.
-[[maybe_unused]] int pam_sm_close_session(pam_handle_t* pamh, int flags,
-                                          int argc, const char** argv) {
+[[maybe_unused]] int pam_sm_close_session(pam_handle_t *pamh, int flags,
+                                          int argc, const char **argv) {
   return PAM_IGNORE;
 }
 }

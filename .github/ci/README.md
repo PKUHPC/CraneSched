@@ -28,6 +28,11 @@ no packages. It checks `src/`, `test/` and shared `.proto` files, and uploads
 `format-diff` when corrections are needed. Its resolved product SHA is the input
 to the build job, so the checked and built revisions cannot diverge.
 
+`.clang-format` explicitly enables `DerivePointerAlignment` to retain the
+existing per-file pointer/reference style. Google changed that default in
+clang-format 21; upgrading the Dev formatter must not silently change the
+repository's formatting policy.
+
 Inside the persistent Base container, `gofmt -l go` reports unformatted source
 without rewriting it. The workflow generates shared protocols with the existing
 `make -C go protos` target, then runs `go vet -mod=readonly ./...` in the Go module,
