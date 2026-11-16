@@ -85,8 +85,10 @@ COMMANDS:
 
   update nodeName=<nodename> state=<state> [reason=<reason>]
     Update attributes of a node.
-    state: Valid states are 'drain' or 'resume'
+    state: Valid states are 'drain', 'resume', 'future', 'on', 'off', 'sleep' or 'wake'
     reason: Required when setting state to 'drain'
+    future: Release a FUTURE node's machine binding while preserving its definition.
+            Stop its craned first; jobs and reservations must have finished.
 
   update jobid=<jobid> [priority=<priority>] [timelimit=<timelimit>] [comment=<comment>] [mailuser=<mailuser>] [mailtype=<mailtype>] [deadline=<deadline>]
     Update attributes of a job.
@@ -118,6 +120,15 @@ COMMANDS:
 
   resume <jobid>
     Resume previously suspended job(s).
+
+  create node NodeName=<hostlist> State=FUTURE CPUs=<count> RealMemory=<size>
+              Partition=<partition-list> [Sockets=<count>] [Features=<feature-list>]
+    Create FUTURE placeholders in existing partitions. RealMemory defaults to MiB;
+    suffixes B, K, M and G are supported. Sockets defaults to 1.
+
+  delete node NodeName=<hostlist>
+    Delete nodes created at runtime.
+    Nodes must have no allocated or completing jobs or reservations.
 
   create reservation <name> [startTime=<time>] [duration=<duration>] [partition=<partition>]
                     [nodes=<nodelist>] [account=<account>] [user=<username>]

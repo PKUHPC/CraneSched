@@ -314,7 +314,7 @@ func executeUpdateCommand(command *CControlCommand) error {
 func executeUpdateNodeCommand(command *CControlCommand) error {
 	kvParams := command.GetKVMaps()
 
-	if err := checkEmptyKVParams(kvParams, []string{"state", "reason"}); err != nil {
+	if err := checkEmptyKVParams(kvParams, []string{"state"}); err != nil {
 		return err
 	}
 
@@ -586,6 +586,8 @@ func executeResumeCommand(command *CControlCommand) error {
 func executeCreateCommand(command *CControlCommand) error {
 	entity := command.GetEntity()
 	switch entity {
+	case "node":
+		return executeCreateNodeCommand(command)
 	case "reservation":
 		return executeCreateReservationCommand(command)
 	default:
@@ -640,6 +642,8 @@ func executeCreateReservationCommand(command *CControlCommand) error {
 func executeDeleteCommand(command *CControlCommand) error {
 	entity := command.GetEntity()
 	switch entity {
+	case "node":
+		return executeDeleteNodeCommand(command)
 	case "reservation":
 		return executeDeleteReservationCommand(command)
 	default:
@@ -648,6 +652,9 @@ func executeDeleteCommand(command *CControlCommand) error {
 }
 
 func executeDeleteReservationCommand(command *CControlCommand) error {
+	if len(command.Command.(DeleteCommand).KeyValueParam) != 0 {
+		return util.NewCraneErr(util.ErrorCmdArg, "Unexpected attributes for delete reservation.")
+	}
 	name := command.GetID()
 	if len(name) == 0 {
 		return util.NewCraneErr(util.ErrorCmdArg, fmt.Sprintln("no reservation name specified"))

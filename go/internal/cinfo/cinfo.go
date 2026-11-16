@@ -33,10 +33,11 @@ import (
 
 var (
 	resourceStateMap = map[string]protos.CranedResourceState{
-		"idle":  protos.CranedResourceState_CRANE_IDLE,
-		"mix":   protos.CranedResourceState_CRANE_MIX,
-		"alloc": protos.CranedResourceState_CRANE_ALLOC,
-		"down":  protos.CranedResourceState_CRANE_DOWN,
+		"idle":   protos.CranedResourceState_CRANE_IDLE,
+		"mix":    protos.CranedResourceState_CRANE_MIX,
+		"alloc":  protos.CranedResourceState_CRANE_ALLOC,
+		"down":   protos.CranedResourceState_CRANE_DOWN,
+		"future": protos.CranedResourceState_CRANE_FUTURE,
 	}
 
 	controlStateMap = map[string]protos.CranedControlState{
@@ -109,6 +110,7 @@ func ApplyResourceStateDefaults(states []protos.CranedResourceState) []protos.Cr
 		protos.CranedResourceState_CRANE_MIX,
 		protos.CranedResourceState_CRANE_ALLOC,
 		protos.CranedResourceState_CRANE_DOWN,
+		protos.CranedResourceState_CRANE_FUTURE,
 	}
 }
 func ApplyControlStateDefaults(states []protos.CranedControlState) []protos.CranedControlState {

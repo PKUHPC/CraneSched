@@ -526,6 +526,8 @@ func ChangeNodeState(nodeRegex string, state string, reason string) error {
 		req.Reason = reason
 	case "resume":
 		req.NewState = protos.CranedControlState_CRANE_NONE
+	case "future":
+		req.NewState = protos.CranedControlState_CRANE_RESET_TO_FUTURE
 	case "on":
 		req.NewState = protos.CranedControlState_CRANE_POWERON
 	case "off":
@@ -535,7 +537,7 @@ func ChangeNodeState(nodeRegex string, state string, reason string) error {
 	case "wake":
 		req.NewState = protos.CranedControlState_CRANE_WAKE
 	default:
-		p := []string{"drain", "resume", "on", "off", "sleep", "wake"}
+		p := []string{"drain", "resume", "future", "on", "off", "sleep", "wake"}
 		return util.NewCraneErr(util.ErrorCmdArg, fmt.Sprintf("Invalid state given: %s. Valid states are: %s.", state, strings.Join(p, ", ")))
 	}
 

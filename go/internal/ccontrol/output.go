@@ -254,11 +254,17 @@ func printNodeDetails(node *protos.CranedInfo) {
 	memInfo := formatMemInfo(node)
 	gresInfo := formatGresInfo(node)
 
+	featuresInfo := ""
+	if len(node.Features) > 0 {
+		featuresInfo = fmt.Sprintf("\tFeatures=%s\n", strings.Join(node.Features, ","))
+	}
+
 	fmt.Printf(
 		"NodeName=%v State=%v %s\n"+
 			"\tNodeAddr=%s NodeHostName=%s\n"+
 			"\t%s\n"+
 			"\t%s\n"+
+			"%s"+
 			"\tSockets=%d\n"+
 			"\tPartition=%s RunningJob=%d Version=%s\n"+
 			"\tOs=%s\n"+
@@ -268,6 +274,7 @@ func printNodeDetails(node *protos.CranedInfo) {
 		node.NodeAddr, node.NodeHostname,
 		memInfo,
 		gresInfo,
+		featuresInfo,
 		node.GetNodeTopoInfo().GetSockets(),
 		strings.Join(node.PartitionNames, ","), node.RunningJobNum, cranedVersion,
 		cranedOs,
@@ -297,13 +304,24 @@ func formatNodeTimes(node *protos.CranedInfo) nodeTimes {
 
 func formatNodeState(node *protos.CranedInfo) string {
 	if util.IsSlurmOutputMode() {
-		return util.FormatSlurmNodeState(node.ResourceState, node.ControlState, node.PowerState)
+		state := util.FormatSlurmNodeState(node.ResourceState, node.ControlState, node.PowerState)
+		if node.DynamicMapped {
+			state += "+dynamic_future"
+		}
+		return state
+	}
+	if node.ResourceState == protos.CranedResourceState_CRANE_FUTURE {
+		// An unmapped FUTURE node has no craned attached, so no power state.
+		return "future"
 	}
 	stateStr := strings.ToLower(node.ResourceState.String()[6:])
 	if node.ControlState != protos.CranedControlState_CRANE_NONE {
 		stateStr += "(" + strings.ToLower(node.ControlState.String()[6:]) + ")"
 	}
 	stateStr += "[" + strings.ToLower(node.PowerState.String()[6:]) + "]"
+	if node.DynamicMapped {
+		stateStr += "+dynamic_future"
+	}
 	return stateStr
 }
 
