@@ -1,14 +1,12 @@
 from __future__ import annotations
 
 import json
-import hashlib
-import io
 import os
 from pathlib import Path
 import subprocess
+import sys
 import tempfile
 import unittest
-from unittest.mock import patch
 
 import yaml
 
@@ -16,10 +14,7 @@ import yaml
 class CIResultTest(unittest.TestCase):
     def test_go_rebuild_clears_removed_package_inputs_and_preserves_caches(self):
         product = Path(__file__).resolve().parents[2]
-        workflow = yaml.safe_load((product / '.github/workflows/ci.yaml').read_text())
-        script = next(step['run'] for step in workflow['jobs']['build']['steps'] if step.get('id') == 'build')
-        cleanup = script.split('cmake --build --preset ci-debug --parallel "${BUILD_JOBS:-6}"\n', 1)[1]
-        cleanup = cleanup.split('make -C go all tool', 1)[0]
+        cleanup = product / '.github/ci/prepare-go-package-inputs.sh'
         package = yaml.safe_load((product / 'go/.goreleaser.yaml').read_text())
         self.assertTrue(any(item.get('src') == 'build/plugin/mail.so'
                             for archive in package['nfpms'] for item in archive['contents']))
@@ -50,7 +45,7 @@ class CIResultTest(unittest.TestCase):
             self.assertFalse((go / 'plugin/mail').exists())
             self.assertEqual((go / 'build/plugin/mail.so').read_text(), 'previous revision')
             environment = {key: value for key, value in os.environ.items() if key != 'BASH_ENV'}
-            subprocess.run(['bash', '-ec', cleanup], cwd=root, env=environment, check=True, timeout=10)
+            subprocess.run([str(cleanup), str(root)], cwd=root, env=environment, check=True, timeout=10)
             build()
             self.assertFalse((go / 'build/plugin/mail.so').exists())
             self.assertFalse((go / 'build/bin/removed').exists())
@@ -58,59 +53,8 @@ class CIResultTest(unittest.TestCase):
             self.assertEqual((go / 'build/plugin/dummy.so').read_text(), 'current revision')
             self.assertTrue(all(path.read_text() == 'persistent cache' for path in sentinels))
 
-    def test_reuse_gate_requires_a_successful_attempt_and_unchanged_selected_rpms(self):
-        workflow = yaml.safe_load((Path(__file__).parents[1] / 'workflows/ci.yaml').read_text())
-        script = next(step['run'] for step in workflow['jobs']['build']['steps'] if step.get('id') == 'reuse')
-        script = script.split("python3 - <<'PY'\n", 1)[1].rsplit('\nPY', 1)[0]
-        names = ('cranesched-cranectld', 'cranesched-craned', 'cranesched-client',
-                 'cranesched-plugin', 'cranesched-slurm-compat')
-        with tempfile.TemporaryDirectory() as directory:
-            root = Path(directory)
-            build = root / 'attempts/123-1/build'
-            packages = build / 'packages/rpm'
-            packages.mkdir(parents=True)
-            records = []
-            for name in names:
-                path = packages / (name + '.rpm')
-                path.write_text(name)
-                records.append({'name': name, 'path': str(path.relative_to(build)),
-                                'architecture': 'x86_64', 'sha256': hashlib.sha256(path.read_bytes()).hexdigest()})
-            manifest = {'schema': 1, 'sourceRevision': 'a' * 40, 'nativeTestsPassed': True,
-                        'baseImage': 'pinned-base', 'target': 'rhel10-amd64', 'preset': 'ci-debug',
-                        'packages': records}
-            (build / 'manifest.json').write_text(json.dumps(manifest))
-            self.assertEqual(script.count("Path('/ci/attempts')"), 1)
-            script = script.replace("Path('/ci/attempts')", f'Path({str(root / "attempts")!r})')
-            environment = {'REUSE_BUILD': '123/1', 'SOURCE_REF': '', 'BASE_IMAGE': 'pinned-base',
-                           'GITHUB_API_URL': 'https://api.github.invalid', 'GITHUB_REPOSITORY': 'example/product',
-                           'GH_TOKEN': 'unit-test-token', 'GITHUB_OUTPUT': str(root / 'outputs')}
-            def run(status='success', **changes):
-                response = io.BytesIO(json.dumps({'status': 'completed', 'conclusion': status}).encode())
-                with patch.dict(os.environ, {**environment, **changes}, clear=True), \
-                     patch('urllib.request.urlopen', return_value=response) as api:
-                    exec(compile(script, '<reuse workflow>', 'exec'), {})
-                    return api
-            api = run()
-            self.assertEqual(api.call_args.args[0].full_url,
-                             'https://api.github.invalid/repos/example/product/actions/runs/123/attempts/1')
-            outputs = (root / 'outputs').read_text()
-            self.assertIn('source_sha=' + 'a' * 40, outputs)
-            for status in ('failure', 'cancelled', 'skipped'):
-                with self.subTest(status=status), self.assertRaises(SystemExit):
-                    run(status)
-            with self.assertRaises(SystemExit):
-                run(REUSE_BUILD='../123/1')
-            with self.assertRaises(SystemExit):
-                run(SOURCE_REF='different-source')
-            (packages / (names[0] + '.rpm')).write_text('changed after acceptance')
-            with self.assertRaisesRegex(SystemExit, 'changed'):
-                run()
-
     def test_cpack_collection_excludes_intermediate_rpms(self):
-        workflow = yaml.safe_load((Path(__file__).parents[1] / 'workflows/ci.yaml').read_text())
-        build = workflow['jobs']['build']['steps'][1]['run']
-        start = build.index('mapfile -t backend_rpms')
-        collection = build[start:build.index("GITHUB_TOKEN=", start)]
+        collector = Path(__file__).resolve().parents[2] / '.github/ci/collect-rpm-packages.sh'
         with tempfile.TemporaryDirectory() as directory:
             root = Path(directory)
             (root / 'packages/rpm').mkdir(parents=True)
@@ -121,8 +65,8 @@ class CIResultTest(unittest.TestCase):
                 (cpack / name).write_text(name)
                 (intermediate / name).write_text('temporary duplicate')
             result = subprocess.run(
-                ['bash', '-euo', 'pipefail', '-c', collection],
-                env={**os.environ, 'artifact_dir': str(root)},
+                [str(collector)],
+                env={**os.environ, 'ARTIFACT_DIR': str(root)},
                 capture_output=True, text=True, timeout=10,
             )
             self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
@@ -131,17 +75,14 @@ class CIResultTest(unittest.TestCase):
             self.assertTrue(all(path.read_text() == path.name for path in files))
 
     def test_real_summary_rejects_failed_cancelled_missing_or_partial_phases(self):
-        workflow = yaml.safe_load((Path(__file__).parents[1] / 'workflows/ci.yaml').read_text())
-        script = workflow['jobs']['summary']['steps'][0]['run']
+        script = Path(__file__).with_name('report-result.py')
         cases = [
             ({}, True),
             ({'publish': 'success', 'upload': True}, True),
             ({'format': 'failure'}, False),
             ({'format': 'cancelled'}, False),
             ({'format': 'skipped'}, False),
-            ({'format': 'skipped', 'reused': True}, True),
-            ({'format': 'skipped', 'reused': True, 'build': 'failure'}, False),
-            ({'format': 'skipped', 'reused': True, 'complete': 'false'}, False),
+            ({'format': None}, False),
             ({'build': 'failure'}, False),
             ({'integration': 'cancelled'}, False),
             ({'integration': 'skipped'}, False),
@@ -155,15 +96,16 @@ class CIResultTest(unittest.TestCase):
             for changes, success in cases:
                 with self.subTest(changes=changes):
                     values = dict(format='success', build='success', integration='success', publish='skipped',
-                                  upload=False, reused=False, complete='true', expected='5', passed='5')
+                                  upload=False, complete='true', expected='5', passed='5')
                     values.update(changes)
                     needs = {name: {'result': values[name]} for name in ('format', 'build', 'integration', 'publish')}
+                    if values['format'] is None:
+                        del needs['format']
                     needs['integration']['outputs'] = {name: values[name] for name in ('complete', 'expected', 'passed')}
                     result = subprocess.run(
-                        ['bash', '-c', script], capture_output=True, text=True, timeout=10,
+                        [sys.executable, str(script)], capture_output=True, text=True, timeout=10,
                         env={**os.environ, 'JOB_RESULTS': json.dumps(needs),
                              'PUBLISH_REQUESTED': str(values['upload']).lower(),
-                             'BUILD_REUSED': str(values['reused']).lower(),
                              'GITHUB_STEP_SUMMARY': str(Path(directory) / 'summary')},
                     )
                     self.assertEqual(result.returncode == 0, success, result.stdout + result.stderr)

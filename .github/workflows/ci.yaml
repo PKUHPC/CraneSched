@@ -16,20 +16,11 @@ on:
         required: false
         default: false
         type: boolean
-      reuse_build:
-        description: Successful workflow run ID/attempt whose checked RPMs should be reused (blank builds anew)
-        required: false
-        type: string
       integration_shards:
         description: Independent integration environments
         type: choice
         default: '4'
         options: ['1', '4']
-      integration_tests:
-        description: Integration selection
-        type: choice
-        default: representative
-        options: [representative, full]
 
 permissions:
   contents: read
@@ -41,7 +32,6 @@ defaults:
 jobs:
   format:
     name: C++ Clang Format
-    if: ${{ inputs.reuse_build == '' }}
     timeout-minutes: 15
     outputs:
       source_sha: ${{ steps.source.outputs.source_sha }}
@@ -57,6 +47,14 @@ jobs:
           fetch-depth: 1
           persist-credentials: false
 
+      - name: Checkout CI scripts from the workflow revision
+        uses: actions/checkout@93cb6efe18208431cddfb8368fd83d5badbf9bfd # v5
+        with:
+          ref: ${{ github.sha }}
+          path: .ci-tools
+          sparse-checkout: .github/ci
+          persist-credentials: false
+
       - name: Record the selected product revision
         id: source
         run: echo "source_sha=$(git rev-parse HEAD)" >> "$GITHUB_OUTPUT"
@@ -68,87 +66,7 @@ jobs:
         id: format
         continue-on-error: true
         shell: bash
-        run: |
-          set -euo pipefail
-
-          mapfile -d '' -t cpp_files < <(
-            find src test -type f \( -name '*.c' -o -name '*.cc' -o -name '*.cpp' -o -name '*.cxx' \
-              -o -name '*.h' -o -name '*.hh' -o -name '*.hpp' -o -name '*.hxx' \) -print0
-          )
-          mapfile -d '' -t proto_files < <(
-            find protos -type f -name '*.proto' -print0
-          )
-
-          cpp_check_status=0
-          proto_check_status=0
-          if ((${#cpp_files[@]})); then
-            if clang-format --dry-run --Werror --style=file "${cpp_files[@]}"; then
-              cpp_check_status=0
-            else
-              cpp_check_status=$?
-            fi
-          fi
-          if ((${#proto_files[@]})); then
-            if clang-format --dry-run --Werror --style=file:.clang-format-proto \
-              "${proto_files[@]}"; then
-              proto_check_status=0
-            else
-              proto_check_status=$?
-            fi
-          fi
-
-          if ((cpp_check_status == 0 && proto_check_status == 0)); then
-            echo 'changed=false' >> "$GITHUB_OUTPUT"
-            echo 'All files are formatted.'
-            exit 0
-          fi
-
-          cpp_format_status=0
-          proto_format_status=0
-          if ((cpp_check_status != 0 && ${#cpp_files[@]})); then
-            if clang-format -i --style=file "${cpp_files[@]}"; then
-              cpp_format_status=0
-            else
-              cpp_format_status=$?
-            fi
-          fi
-          if ((proto_check_status != 0 && ${#proto_files[@]})); then
-            if clang-format -i --style=file:.clang-format-proto "${proto_files[@]}"; then
-              proto_format_status=0
-            else
-              proto_format_status=$?
-            fi
-          fi
-
-          if ((cpp_format_status != 0 || proto_format_status != 0)); then
-            echo 'changed=false' >> "$GITHUB_OUTPUT"
-            echo '::error::clang-format could not produce a formatting patch.'
-            exit 1
-          fi
-
-          if git diff --quiet -- src test protos; then
-            echo 'changed=false' >> "$GITHUB_OUTPUT"
-            echo '::error::clang-format reported an error without changing source files.'
-            exit 1
-          fi
-
-          git diff --binary -- src test protos > format.patch
-          if [[ ! -s format.patch ]]; then
-            echo 'changed=false' >> "$GITHUB_OUTPUT"
-            echo '::error::clang-format produced an empty patch.'
-            exit 1
-          fi
-
-          echo 'changed=true' >> "$GITHUB_OUTPUT"
-          {
-            echo '### Clang format check failed'
-            echo
-            echo 'The checkout was not modified remotely. Download `format-diff` and run:'
-            echo
-            echo '```bash'
-            echo 'git apply format.patch'
-            echo '```'
-          } >> "$GITHUB_STEP_SUMMARY"
+        run: python3 .ci-tools/.github/ci/check-format.py
 
       - name: Upload format patch
         if: always() && steps.format.outputs.changed == 'true'
@@ -160,49 +78,48 @@ jobs:
           retention-days: 3
 
       - name: Fail when formatting is required
-        if: always() && (steps.format.outputs.changed == 'true' || steps.format.outcome == 'failure')
-        env:
-          FORMAT_CHANGED: ${{ steps.format.outputs.changed }}
-          FORMAT_OUTCOME: ${{ steps.format.outcome }}
+        id: format_gate
+        if: always() && steps.format.outcome == 'failure'
         run: |
-          if [[ "$FORMAT_CHANGED" == 'true' ]]; then
-            echo 'Formatting changes are required; see the format-diff artifact.'
-          else
-            echo "clang-format check failed before a patch could be prepared (outcome: $FORMAT_OUTCOME)."
-          fi
+          echo 'Clang-format failed; a format-diff artifact is available when a patch could be prepared.'
           exit 1
 
   build:
     name: Go checks, tests and RPM build
     needs: format
-    if: ${{ !cancelled() && (needs.format.result == 'success' || inputs.reuse_build != '') }}
+    if: ${{ !cancelled() && needs.format.result == 'success' }}
     permissions:
       contents: read
-      actions: read
     runs-on: crane-build
     timeout-minutes: 120
     container:
       image: ${{ vars.CRANE_CI_BASE_IMAGE }}
     outputs:
-      source_sha: ${{ steps.build.outputs.source_sha || steps.reuse.outputs.source_sha }}
-      artifact_dir: ${{ steps.build.outputs.artifact_dir || steps.reuse.outputs.artifact_dir }}
-      manifest_sha256: ${{ steps.build.outputs.manifest_sha256 || steps.reuse.outputs.manifest_sha256 }}
+      source_sha: ${{ steps.build.outputs.source_sha }}
+      artifact_dir: ${{ steps.build.outputs.artifact_dir }}
+      manifest_sha256: ${{ steps.build.outputs.manifest_sha256 }}
     env:
       BASE_IMAGE: ${{ vars.CRANE_CI_BASE_IMAGE }}
       GOPROXY: ${{ vars.CRANE_CI_GOPROXY || 'https://goproxy.cn,direct' }}
       GOWORK: 'off'
     steps:
       - name: Checkout the selected product source
-        if: ${{ inputs.reuse_build == '' }}
         uses: actions/checkout@93cb6efe18208431cddfb8368fd83d5badbf9bfd # v5
         with:
           ref: ${{ needs.format.outputs.source_sha }}
           fetch-depth: 1
           persist-credentials: false
 
+      - name: Checkout CI scripts from the workflow revision
+        uses: actions/checkout@93cb6efe18208431cddfb8368fd83d5badbf9bfd # v5
+        with:
+          ref: ${{ github.sha }}
+          path: .ci-tools
+          sparse-checkout: .github/ci
+          persist-credentials: false
+
       - name: Test and package with a persistent build tree
         id: build
-        if: ${{ inputs.reuse_build == '' }}
         run: |
           set -euo pipefail
           unset HTTP_PROXY HTTPS_PROXY ALL_PROXY http_proxy https_proxy all_proxy
@@ -212,6 +129,7 @@ jobs:
           getent group 1001 >/dev/null
           source_sha="$(git rev-parse HEAD)"
           source_checkout="$PWD"
+          ci_scripts="$source_checkout/.ci-tools/.github/ci"
           state="/ci/workspaces/native-rhel10-amd64/${BASE_IMAGE##*@sha256:}/ci-debug"
           artifact_dir="/ci/attempts/${GITHUB_RUN_ID}-${GITHUB_RUN_ATTEMPT}/build"
           mkdir -p "$state" "$(dirname "$artifact_dir")"
@@ -246,15 +164,11 @@ jobs:
           make -C go test
           cmake --build --preset ci-debug --parallel "${BUILD_JOBS:-6}"
           # Package inputs must all come from this source revision.
-          rm -rf go/build/bin go/build/plugin go/build/tool
+          bash "$ci_scripts/prepare-go-package-inputs.sh"
           make -C go all tool PREFIX=/usr STRIP=true CHECK_GPU=0
           mkdir -p "$artifact_dir/packages/rpm" "$artifact_dir/cpack-backend"
           (cd cmake-build-ci-debug && cpack -G RPM -B "$artifact_dir/cpack-backend")
-          mapfile -t backend_rpms < <(
-            find "$artifact_dir/cpack-backend" -maxdepth 1 -type f -name '*.rpm' -print
-          )
-          [[ "${#backend_rpms[@]}" == 2 ]]
-          cp "${backend_rpms[@]}" "$artifact_dir/packages/rpm/"
+          ARTIFACT_DIR="$artifact_dir" bash "$ci_scripts/collect-rpm-packages.sh"
           GITHUB_TOKEN='${{ github.token }}' make -C go package SKIP_REBUILD=true CHECK_GPU=0 \
             GORELEASER_SNAPSHOT=false GORELEASER_RELEASE_ARGS=--skip=publish,validate
           cp go/build/dist/*.rpm "$artifact_dir/packages/rpm/"
@@ -293,62 +207,6 @@ jobs:
           print('Tests and the five RPMs completed successfully.')
           PY
 
-      - name: Verify and reuse an already successful build
-        if: ${{ inputs.reuse_build != '' }}
-        id: reuse
-        env:
-          REUSE_BUILD: ${{ inputs.reuse_build }}
-          SOURCE_REF: ${{ inputs.source_ref }}
-          GH_TOKEN: ${{ github.token }}
-        run: |
-          python3 - <<'PY'
-          import hashlib
-          import json
-          import os
-          from pathlib import Path
-          import re
-          import urllib.request
-
-          if os.environ['SOURCE_REF']:
-              raise SystemExit('source_ref must be blank when reusing a build.')
-          identity = os.environ['REUSE_BUILD']
-          if not re.fullmatch(r'[1-9][0-9]*/[1-9][0-9]*', identity):
-              raise SystemExit('reuse_build must be a workflow run ID/attempt.')
-          run_id, attempt = identity.split('/')
-          request = urllib.request.Request(
-              f"{os.environ['GITHUB_API_URL']}/repos/{os.environ['GITHUB_REPOSITORY']}/actions/runs/{run_id}/attempts/{attempt}",
-              headers={'Authorization': 'Bearer ' + os.environ['GH_TOKEN'],
-                       'Accept': 'application/vnd.github+json'})
-          with urllib.request.urlopen(request, timeout=30) as response:
-              run = json.load(response)
-          if run['status'] != 'completed' or run['conclusion'] != 'success':
-              raise SystemExit('Only a successful completed workflow attempt can be reused.')
-          root = Path('/ci/attempts') / f'{run_id}-{attempt}' / 'build'
-          data = (root / 'manifest.json').read_bytes()
-          manifest = json.loads(data)
-          if (manifest.get('schema') != 1 or manifest.get('nativeTestsPassed') is not True
-                  or manifest.get('baseImage') != os.environ['BASE_IMAGE']
-                  or manifest.get('target') != 'rhel10-amd64' or manifest.get('preset') != 'ci-debug'
-                  or not re.fullmatch('[a-f0-9]{40}', manifest.get('sourceRevision', ''))):
-              raise SystemExit('The accepted build has incompatible provenance.')
-          expected = {'cranesched-cranectld', 'cranesched-craned', 'cranesched-client',
-                      'cranesched-plugin', 'cranesched-slurm-compat'}
-          packages = manifest.get('packages', [])
-          if len(packages) != 5 or {package['name'] for package in packages} != expected:
-              raise SystemExit('Expected exactly the five final RPMs.')
-          for package in packages:
-              path = (root / package['path']).resolve()
-              if not path.is_relative_to(root.resolve() / 'packages') or package['architecture'] != 'x86_64':
-                  raise SystemExit('Invalid accepted RPM path or architecture.')
-              with path.open('rb') as stream:
-                  if hashlib.file_digest(stream, 'sha256').hexdigest() != package['sha256']:
-                      raise SystemExit('An accepted RPM changed after its original build.')
-          with Path(os.environ['GITHUB_OUTPUT']).open('a') as output:
-              output.write(f"source_sha={manifest['sourceRevision']}\nartifact_dir={root}\n")
-              output.write(f"manifest_sha256={hashlib.sha256(data).hexdigest()}\n")
-          print(f"Reusing successful build {identity}, source {manifest['sourceRevision']}; no rebuild performed.")
-          PY
-
   integration:
     name: Assemble and test the same RPMs
     needs: build
@@ -373,7 +231,6 @@ jobs:
       CI_ENTRYPOINT: ${{ vars.CRANE_CI_INTEGRATION_ENTRYPOINT }}
       CI_ENTRYPOINT_SHA256: ${{ vars.CRANE_CI_INTEGRATION_SHA256 }}
       CI_SHARD_COUNT: ${{ inputs.integration_shards }}
-      CI_TEST_MODE: ${{ inputs.integration_tests }}
     steps:
       - name: Prepare the test inputs, run tests and reclaim their environments
         id: integration
@@ -460,35 +317,14 @@ jobs:
     env:
       JOB_RESULTS: ${{ toJSON(needs) }}
       PUBLISH_REQUESTED: ${{ inputs.publish_packages }}
-      BUILD_REUSED: ${{ inputs.reuse_build != '' }}
     steps:
-      - name: Report and enforce the required results
-        run: |
-          python3 - <<'PY'
-          import json
-          import os
-          from pathlib import Path
+      - name: Checkout CI scripts from the workflow revision
+        uses: actions/checkout@93cb6efe18208431cddfb8368fd83d5badbf9bfd # v5
+        with:
+          ref: ${{ github.sha }}
+          path: .ci-tools
+          sparse-checkout: .github/ci
+          persist-credentials: false
 
-          jobs = json.loads(os.environ['JOB_RESULTS'])
-          integration = jobs['integration'].get('outputs', {})
-          upload = os.environ['PUBLISH_REQUESTED'] == 'true'
-          reused = os.environ.get('BUILD_REUSED') == 'true'
-          complete = integration.get('complete') == 'true'
-          expected = int(integration.get('expected') or '0')
-          passed = int(integration.get('passed') or '0')
-          success = (jobs['format']['result'] == ('skipped' if reused else 'success')
-                     and jobs['build']['result'] == 'success'
-                     and jobs['integration']['result'] == 'success'
-                     and complete and expected > 0 and passed == expected
-                     and jobs['publish']['result'] == ('success' if upload else 'skipped'))
-          lines = ['### Build, Test and Publish', '',
-                   f"- C++ formatting: {jobs['format']['result']} (reused checked build: {str(reused).lower()})",
-                   f"- Build: {jobs['build']['result']}",
-                   f"- Integration: {jobs['integration']['result']} ({passed}/{expected})",
-                   f"- Package upload: {jobs['publish']['result']} (requested: {str(upload).lower()})"]
-          with Path(os.environ['GITHUB_STEP_SUMMARY']).open('a') as summary:
-              summary.write('\n'.join(lines) + '\n')
-          if not success:
-              raise SystemExit('A required phase failed, was cancelled, skipped or incomplete.')
-          print('All requested CI phases completed successfully.')
-          PY
+      - name: Report and enforce the required results
+        run: python3 .ci-tools/.github/ci/report-result.py
