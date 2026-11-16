@@ -10,13 +10,16 @@ import unittest
 import yaml
 
 
-class NativeResultTest(unittest.TestCase):
+class CIResultTest(unittest.TestCase):
     def test_real_summary_rejects_failed_cancelled_missing_or_partial_phases(self):
-        workflow = yaml.safe_load((Path(__file__).parents[1] / 'workflows/build.yaml').read_text())
+        workflow = yaml.safe_load((Path(__file__).parents[1] / 'workflows/ci.yaml').read_text())
         script = workflow['jobs']['summary']['steps'][0]['run']
         cases = [
             ({}, True),
             ({'publish': 'success', 'upload': True}, True),
+            ({'format': 'failure'}, False),
+            ({'format': 'cancelled'}, False),
+            ({'format': 'skipped'}, False),
             ({'build': 'failure'}, False),
             ({'integration': 'cancelled'}, False),
             ({'integration': 'skipped'}, False),
@@ -29,10 +32,10 @@ class NativeResultTest(unittest.TestCase):
         with tempfile.TemporaryDirectory() as directory:
             for changes, success in cases:
                 with self.subTest(changes=changes):
-                    values = dict(build='success', integration='success', publish='skipped',
+                    values = dict(format='success', build='success', integration='success', publish='skipped',
                                   upload=False, complete='true', expected='5', passed='5')
                     values.update(changes)
-                    needs = {name: {'result': values[name]} for name in ('build', 'integration', 'publish')}
+                    needs = {name: {'result': values[name]} for name in ('format', 'build', 'integration', 'publish')}
                     needs['integration']['outputs'] = {name: values[name] for name in ('complete', 'expected', 'passed')}
                     result = subprocess.run(
                         ['bash', '-c', script], capture_output=True, text=True, timeout=10,

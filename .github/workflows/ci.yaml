@@ -1,4 +1,4 @@
-name: Native CI
+name: Build, Test and Publish
 
 on:
   workflow_dispatch:
@@ -25,8 +25,147 @@ defaults:
     shell: bash
 
 jobs:
+  format:
+    name: C++ Clang Format
+    timeout-minutes: 15
+    outputs:
+      source_sha: ${{ steps.source.outputs.source_sha }}
+    # LLVM 20 apt packages are available for Noble, not Ubuntu 26.04.
+    runs-on: ubuntu-24.04
+
+    steps:
+      - name: Checkout the selected product source
+        uses: actions/checkout@93cb6efe18208431cddfb8368fd83d5badbf9bfd # v5
+        with:
+          ref: ${{ inputs.source_ref || github.sha }}
+          fetch-depth: 1
+          persist-credentials: false
+
+      - name: Record the selected product revision
+        id: source
+        run: echo "source_sha=$(git rev-parse HEAD)" >> "$GITHUB_OUTPUT"
+
+      - name: Install Clang-Format 20
+        run: |
+          set -euo pipefail
+          sudo apt-get install -y wget lsb-release
+          sudo wget -O /tmp/llvm.sh https://apt.llvm.org/llvm.sh
+          sudo bash /tmp/llvm.sh 20
+          sudo apt update
+          sudo apt-get install -y clang-format-20
+          clang-format-20 --version
+
+      - name: Check clang-format and prepare patch
+        id: format
+        continue-on-error: true
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          mapfile -d '' -t cpp_files < <(
+            find src test -type f \( -name '*.c' -o -name '*.cc' -o -name '*.cpp' -o -name '*.cxx' \
+              -o -name '*.h' -o -name '*.hh' -o -name '*.hpp' -o -name '*.hxx' \) -print0
+          )
+          mapfile -d '' -t proto_files < <(
+            find protos -type f -name '*.proto' -print0
+          )
+
+          cpp_check_status=0
+          proto_check_status=0
+          if ((${#cpp_files[@]})); then
+            if clang-format-20 --dry-run --Werror --style=file "${cpp_files[@]}"; then
+              cpp_check_status=0
+            else
+              cpp_check_status=$?
+            fi
+          fi
+          if ((${#proto_files[@]})); then
+            if clang-format-20 --dry-run --Werror --style=file:.clang-format-proto \
+              "${proto_files[@]}"; then
+              proto_check_status=0
+            else
+              proto_check_status=$?
+            fi
+          fi
+
+          if ((cpp_check_status == 0 && proto_check_status == 0)); then
+            echo 'changed=false' >> "$GITHUB_OUTPUT"
+            echo 'All files are formatted.'
+            exit 0
+          fi
+
+          cpp_format_status=0
+          proto_format_status=0
+          if ((cpp_check_status != 0 && ${#cpp_files[@]})); then
+            if clang-format-20 -i --style=file "${cpp_files[@]}"; then
+              cpp_format_status=0
+            else
+              cpp_format_status=$?
+            fi
+          fi
+          if ((proto_check_status != 0 && ${#proto_files[@]})); then
+            if clang-format-20 -i --style=file:.clang-format-proto "${proto_files[@]}"; then
+              proto_format_status=0
+            else
+              proto_format_status=$?
+            fi
+          fi
+
+          if ((cpp_format_status != 0 || proto_format_status != 0)); then
+            echo 'changed=false' >> "$GITHUB_OUTPUT"
+            echo '::error::clang-format could not produce a formatting patch.'
+            exit 1
+          fi
+
+          if git diff --quiet -- src test protos; then
+            echo 'changed=false' >> "$GITHUB_OUTPUT"
+            echo '::error::clang-format reported an error without changing source files.'
+            exit 1
+          fi
+
+          git diff --binary -- src test protos > format.patch
+          if [[ ! -s format.patch ]]; then
+            echo 'changed=false' >> "$GITHUB_OUTPUT"
+            echo '::error::clang-format produced an empty patch.'
+            exit 1
+          fi
+
+          echo 'changed=true' >> "$GITHUB_OUTPUT"
+          {
+            echo '### Clang format check failed'
+            echo
+            echo 'The checkout was not modified remotely. Download `format-diff` and run:'
+            echo
+            echo '```bash'
+            echo 'git apply format.patch'
+            echo '```'
+          } >> "$GITHUB_STEP_SUMMARY"
+
+      - name: Upload format patch
+        if: always() && steps.format.outputs.changed == 'true'
+        uses: actions/upload-artifact@b7c566a772e6b6bfb58ed0dc250532a479d7789f # v6
+        with:
+          name: format-diff
+          path: format.patch
+          if-no-files-found: error
+          retention-days: 3
+
+      - name: Fail when formatting is required
+        if: always() && (steps.format.outputs.changed == 'true' || steps.format.outcome == 'failure')
+        env:
+          FORMAT_CHANGED: ${{ steps.format.outputs.changed }}
+          FORMAT_OUTCOME: ${{ steps.format.outcome }}
+        run: |
+          if [[ "$FORMAT_CHANGED" == 'true' ]]; then
+            echo 'Formatting changes are required; see the format-diff artifact.'
+          else
+            echo "clang-format check failed before a patch could be prepared (outcome: $FORMAT_OUTCOME)."
+          fi
+          exit 1
+
   build:
-    name: Native tests and RPM build
+    name: Go checks, tests and RPM build
+    needs: format
     runs-on: crane-build
     timeout-minutes: 120
     container:
@@ -43,7 +182,7 @@ jobs:
       - name: Checkout the selected product source
         uses: actions/checkout@93cb6efe18208431cddfb8368fd83d5badbf9bfd # v5
         with:
-          ref: ${{ inputs.source_ref || github.sha }}
+          ref: ${{ needs.format.outputs.source_sha }}
           fetch-depth: 1
           persist-credentials: false
 
@@ -77,6 +216,15 @@ jobs:
           export SOURCE_DATE_EPOCH="$(git log -1 --format=%ct)"
           export CPM_SOURCE_CACHE=/ci/cache/cpm
           mkdir -p "$CPM_SOURCE_CACHE" "$CCACHE_DIR" "$CCACHE_TEMPDIR"
+          # Check Go sources before tests or packaging.
+          unformatted="$(gofmt -l go)"
+          if [[ -n "$unformatted" ]]; then
+            printf '%s\n' "$unformatted"
+            echo '::error::Run gofmt on the listed files.'
+            exit 1
+          fi
+          make -C go protos
+          (cd go && go vet -mod=readonly ./...)
           cmake --preset ci-debug
           cmake --build --preset ci-debug --target crane_unit_tests --parallel "${BUILD_JOBS:-6}"
           ctest --test-dir cmake-build-ci-debug --output-on-failure
@@ -120,7 +268,7 @@ jobs:
           with Path(os.environ['GITHUB_OUTPUT']).open('a') as output:
               output.write(f"source_sha={manifest['sourceRevision']}\nartifact_dir={root}\n")
               output.write(f"manifest_sha256={hashlib.sha256(data).hexdigest()}\n")
-          print('Native tests and the five RPMs completed successfully.')
+          print('Tests and the five RPMs completed successfully.')
           PY
 
   integration:
@@ -214,7 +362,7 @@ jobs:
 
   summary:
     name: CI result
-    needs: [build, integration, publish]
+    needs: [format, build, integration, publish]
     if: ${{ always() }}
     runs-on: crane-ci
     timeout-minutes: 5
@@ -237,11 +385,13 @@ jobs:
           complete = integration.get('complete') == 'true'
           expected = int(integration.get('expected') or '0')
           passed = int(integration.get('passed') or '0')
-          success = (jobs['build']['result'] == 'success'
+          success = (jobs['format']['result'] == 'success'
+                     and jobs['build']['result'] == 'success'
                      and jobs['integration']['result'] == 'success'
                      and complete and expected > 0 and passed == expected
                      and jobs['publish']['result'] == ('success' if upload else 'skipped'))
-          lines = ['### Native CI', '',
+          lines = ['### Build, Test and Publish', '',
+                   f"- C++ formatting: {jobs['format']['result']}",
                    f"- Build: {jobs['build']['result']}",
                    f"- Integration: {jobs['integration']['result']} ({passed}/{expected})",
                    f"- Package upload: {jobs['publish']['result']} (requested: {str(upload).lower()})"]

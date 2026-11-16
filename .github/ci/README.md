@@ -1,21 +1,41 @@
-# Native CI
+# Build, Test and Publish
 
-`build.yaml` runs four jobs through repository-scoped ARC scale sets. Every job
-has an explicit digest-pinned container image. The runner image receives work;
+`ci.yaml` starts with a C++ Clang Format job on GitHub-hosted Ubuntu, followed
+by four jobs through repository-scoped ARC scale sets. Each ARC job has an
+explicit digest-pinned container image. The runner image receives work;
 the job container provides the product toolchain or execution tools.
 
 | Job | Runner | Responsibility |
 | --- | --- | --- |
-| `build` | `crane-build` | Run native C++/Go tests, then build and package the same product commit |
+| `format` | `ubuntu-24.04` | Check C/C++ sources and tests with Clang-Format 20, plus shared protocols with their separate style |
+| `build` | `crane-build` | Check Go formatting and run vet, then C++/Go tests, build and package the same checked product commit |
 | `integration` | `crane-ci` | Assemble a test image from those RPMs, prepare versioned test inputs, run the selected tests, collect internal evidence and reclaim environments |
 | `publish` | `crane-ci` | Upload those RPMs immediately after a successful build, independently of integration |
-| `summary` | `crane-ci` | Fail if any requested phase failed, was cancelled, skipped or incomplete |
+| `summary` | `crane-ci` | Fail if formatting or any requested phase failed, was cancelled, skipped or incomplete |
 
 The initial workflow supports manual dispatch. Automatic PR, push and scheduled
 execution is enabled only after concurrency, failure handling and full-suite
 acceptance. GitHub's repository permissions govern manual dispatch. The retired
 root runner, external FrontEnd checkout, release validators and PR dispatcher
 are no longer part of this workflow.
+
+## Formatting and Go vet
+
+Formatting is the first stage of this workflow; there is no separate formatting
+workflow. The C++ job pins Ubuntu 24.04 and Clang-Format 20 because the floating
+`ubuntu-latest` image moved to Ubuntu 26.04 before LLVM 20 apt packages supported
+that release. It checks `src/`, `test/` and shared `.proto` files, and uploads
+`format-diff` when corrections are needed. Its resolved product SHA is the input
+to the build job, so the checked and built revisions cannot diverge.
+
+Inside the persistent Base container, `gofmt -l go` reports unformatted source
+without rewriting it. The workflow generates shared protocols with the existing
+`make -C go protos` target, then runs `go vet -mod=readonly ./...` in the Go module,
+including test packages with the default build tags. Both checks precede product
+compilation and reuse the build job's caches. These commands also work when
+`source_ref` selects a revision without new CI helper targets. They do not run
+`go mod tidy`. A failure stops packaging and is reflected in the workflow summary. Like the rest of the pipeline, these checks currently run on
+manual dispatch; automatic PR execution is deferred until the planned acceptance.
 
 ## Inputs and site configuration
 

@@ -5,32 +5,27 @@ import unittest
 from pathlib import Path
 
 
-WORKFLOW = Path(__file__).parents[1] / "workflows" / "format.yaml"
+WORKFLOW = Path(__file__).parents[1] / "workflows" / "ci.yaml"
 
 
 class FormatWorkflowContractTest(unittest.TestCase):
     @classmethod
     def setUpClass(cls) -> None:
-        cls.workflow = WORKFLOW.read_text(encoding="utf-8")
+        cls.document = WORKFLOW.read_text(encoding="utf-8")
+        cls.workflow = cls.document.split("  format:\n", 1)[1].split("  build:\n", 1)[0]
 
-    def test_keeps_pull_request_triggers_and_paths(self) -> None:
-        for event_type in ("opened", "synchronize", "reopened", "ready_for_review"):
-            self.assertRegex(self.workflow, rf"(?m)^      - {event_type}$")
-        for path in (
-            "'.clang-format*'",
-            "'.github/workflows/**'",
-            "'dependencies/**'",
-            "'CMakeModule/**'",
-            "'protos/**'",
-            "'src/**'",
-            "'test/**'",
-            "'CMakeLists.txt'",
-            "'VERSION'",
-        ):
-            self.assertIn(f"      - {path}", self.workflow)
+    def test_build_uses_the_revision_checked_by_formatting(self) -> None:
+        import yaml
+
+        workflow = yaml.safe_load(self.document)
+        jobs = workflow['jobs']
+        self.assertEqual(jobs['build']['needs'], 'format')
+        checkout = jobs['build']['steps'][0]['with']
+        self.assertEqual(checkout['ref'], '${{ needs.format.outputs.source_sha }}')
+        self.assertIn('format', jobs['summary']['needs'])
 
     def test_uses_read_only_permissions_and_no_git_write_path(self) -> None:
-        self.assertRegex(self.workflow, r"(?m)^permissions:\n  contents: read$")
+        self.assertRegex(self.document, r"(?m)^permissions:\n  contents: read$")
         self.assertNotIn("contents: write", self.workflow)
         self.assertNotIn("secrets.", self.workflow)
         self.assertNotIn("GITHUB_TOKEN", self.workflow)
@@ -38,16 +33,14 @@ class FormatWorkflowContractTest(unittest.TestCase):
         for command in ("git add", "git commit", "git config", "git push", "git checkout"):
             self.assertNotIn(command, self.workflow)
 
-    def test_checks_exact_pull_request_head_without_persisting_credentials(self) -> None:
-        checkout = self._step("Checkout pull request head")
+    def test_checks_selected_revision_without_persisting_credentials(self) -> None:
+        checkout = self._step("Checkout the selected product source")
         self.assertIn(
             "uses: actions/checkout@93cb6efe18208431cddfb8368fd83d5badbf9bfd # v5",
             checkout,
         )
-        self.assertIn(
-            "repository: ${{ github.event.pull_request.head.repo.full_name }}", checkout
-        )
-        self.assertIn("ref: ${{ github.event.pull_request.head.sha }}", checkout)
+        self.assertIn("ref: ${{ inputs.source_ref || github.sha }}", checkout)
+        self.assertIn("git rev-parse HEAD", self.workflow)
         self.assertIn("fetch-depth: 1", checkout)
         self.assertIn("persist-credentials: false", checkout)
 
@@ -55,9 +48,10 @@ class FormatWorkflowContractTest(unittest.TestCase):
         step = self._step("Check clang-format and prepare patch")
         self.assertIn("continue-on-error: true", step)
         self.assertIn("--dry-run --Werror", step)
+        self.assertIn("find src test -type f", step)
         self.assertIn("-print0", step)
         self.assertIn("clang-format-20 -i", step)
-        self.assertIn("git diff --binary -- src protos > format.patch", step)
+        self.assertIn("git diff --binary -- src test protos > format.patch", step)
         self.assertIn("changed=true", step)
 
     def test_uploads_patch_for_both_repository_origins(self) -> None:
@@ -80,11 +74,10 @@ class FormatWorkflowContractTest(unittest.TestCase):
         self.assertIn("steps.format.outcome == 'failure'", gate)
         self.assertRegex(gate, r"(?m)^          exit 1$")
 
-    def test_keeps_required_check_identity_and_serializes_pr_runs(self) -> None:
-        self.assertIn("name: Clang Format Check", self.workflow)
-        self.assertRegex(self.workflow, r"(?m)^  format:\s*$")
-        self.assertIn("group: clang-format-pr-${{ github.event.pull_request.number }}", self.workflow)
-        self.assertIn("cancel-in-progress: true", self.workflow)
+    def test_pins_the_formatter_environment(self) -> None:
+        self.assertIn("runs-on: ubuntu-24.04", self.workflow)
+        self.assertIn("clang-format-20 --version", self.workflow)
+        self.assertNotIn("ubuntu-latest", self.workflow)
 
     def _step(self, name: str) -> str:
         match = re.search(
