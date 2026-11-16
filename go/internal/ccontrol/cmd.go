@@ -31,8 +31,6 @@ import (
 
 var (
 	FlagNodeName        string
-	FlagState           string
-	FlagReason          string
 	FlagPowerEnable     string
 	FlagPartitionName   string
 	FlagAllowedAccounts string
@@ -314,7 +312,7 @@ func executeUpdateCommand(command *CControlCommand) error {
 func executeUpdateNodeCommand(command *CControlCommand) error {
 	kvParams := command.GetKVMaps()
 
-	if err := checkEmptyKVParams(kvParams, []string{"state", "reason"}); err != nil {
+	if err := checkEmptyKVParams(kvParams, []string{"state"}); err != nil {
 		return err
 	}
 
@@ -322,19 +320,20 @@ func executeUpdateNodeCommand(command *CControlCommand) error {
 		return util.NewCraneErr(util.ErrorCmdArg, fmt.Sprintln("node name not specified"))
 	}
 
+	var state, reason string
 	for key, value := range kvParams {
 		switch strings.ToLower(key) {
 		case "state":
-			FlagState = value
+			state = value
 		case "reason":
-			FlagReason = value
+			reason = value
 		case "nodename", "node":
 			continue
 		default:
 			return util.NewCraneErr(util.ErrorCmdArg, fmt.Sprintf("unknown attribute to modify: %s\n", key))
 		}
 	}
-	err := ChangeNodeState(FlagNodeName, FlagState, FlagReason)
+	err := ChangeNodeState(FlagNodeName, state, reason)
 	if err != nil {
 		return util.WrapCraneErr(util.ErrorCmdArg, "change node state failed: %s\n", err)
 	}

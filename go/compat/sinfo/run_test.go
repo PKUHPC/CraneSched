@@ -9,9 +9,13 @@ import (
 	"context"
 	"errors"
 	"io"
+	"os"
 	"strings"
 	"testing"
 	"time"
+
+	"github.com/pkg/term/termios"
+	"golang.org/x/sys/unix"
 )
 
 type memorySource struct {
@@ -70,6 +74,7 @@ func TestRunEmptyPartitionFields(t *testing.T) {
 	}{
 		{"filtered_state", []string{"-t", "down"}, "compute|N/A|root|root(0)\n"},
 		{"filtered_nodes", []string{"-n", "n[98-99]"}, "compute|N/A|root|root(0)\n"},
+		{"missing_single_node", []string{"-n", "missing"}, "compute|N/A|root|root(0)\n"},
 		{"node_mode", []string{"-N", "-t", "down"}, ""},
 		{"live_node_without_reason", []string{"-n", "n01"}, "compute|Crane-test|Unknown|Unknown\n"},
 	} {
@@ -100,6 +105,30 @@ func TestRunEmptyPartitionFields(t *testing.T) {
 	}
 }
 
+func TestRunNodeSelection(t *testing.T) {
+	for _, tc := range []struct {
+		name, nodes string
+		flags       []string
+		want        string
+	}{
+		{"missing", "missing", nil, ""},
+		{"missing_node_view", "missing", []string{"-N"}, ""},
+		{"missing_with_state", "missing", []string{"-t", "idle"}, ""},
+		{"existing_filtered", "n01", []string{"-t", "down"}, ""},
+		{"mixed_names", "missing,n01", nil, "1\n"},
+		{"existing", "n01", nil, "1\n"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			source := &memorySource{load: func(context.Context, query) (*snapshot, error) { return testSnapshot(), nil }}
+			args := append([]string{"sinfo", "-h", "-p", "compute", "-o", "%D", "-n", tc.nodes}, tc.flags...)
+			var out, diagnostic bytes.Buffer
+			if code := testRunner(source).run(t.Context(), args, nil, &out, &diagnostic); code != 0 || out.String() != tc.want || diagnostic.Len() != 0 || !source.closed {
+				t.Fatalf("code=%d stdout=%q stderr=%q closed=%t; want stdout=%q", code, &out, &diagnostic, source.closed, tc.want)
+			}
+		})
+	}
+}
+
 func TestRunActionsAndCapabilityPrecedence(t *testing.T) {
 	cases := []struct {
 		args     []string
@@ -112,6 +141,7 @@ func TestRunActionsAndCapabilityPrecedence(t *testing.T) {
 		{[]string{"--json", "--version"}, map[string]string{"SLURM_JSON": "unknown"}, 1, "", "Unable to parse serializer"},
 		{[]string{"--version", "--json"}, map[string]string{"SLURM_JSON": "unknown"}, 0, "slurm 26.05.4\n", ""},
 		{[]string{"--future"}, nil, 1, "", "current Crane version does not support"},
+		{[]string{"--forma"}, nil, 1, "", "sinfo: option '--format' requires an argument\nTry \"sinfo --help\" for more information\n"},
 		{[]string{"-O", "Features"}, nil, 1, "", "field Features"},
 		{[]string{"-S", "f"}, nil, 1, "", "sort key f"},
 		{[]string{"-t", "!cloud"}, nil, 1, "", "state cloud"},
@@ -206,6 +236,96 @@ func TestRunIterationKeepsFailureAndClosesSource(t *testing.T) {
 	code := r.run(ctx, []string{"sinfo", "-h", "-i", "2junk", "-p", "compute", "-o", "%D|%N"}, nil, &out, &err)
 	if code != 1 || loads != 2 || !source.closed || out.String() != "\n3|n[01-03]\n\n" || !strings.Contains(err.String(), "temporary query failure") {
 		t.Fatalf("code=%d loads=%d closed=%t out=%q err=%q", code, loads, source.closed, &out, &err)
+	}
+}
+
+func TestRunOutputBuffering(t *testing.T) {
+	for _, tc := range []struct {
+		name, format, frame string
+		terminal            bool
+		visible             []int
+	}{
+		{"pipe", "%a|%D|%t", "up|3|idle\n\n", false, []int{0, 0, 0}},
+		{"terminal", "%a|%D|%t", "up|3|idle\n\n", true, []int{11, 11, 11}},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			var reader, writer *os.File
+			var err error
+			if tc.terminal {
+				reader, writer, err = termios.Pty()
+			} else {
+				reader, writer, err = os.Pipe()
+			}
+			if err != nil {
+				t.Fatal(err)
+			}
+			t.Cleanup(func() { reader.Close(); writer.Close() })
+			if tc.terminal {
+				attrs, err := unix.IoctlGetTermios(int(writer.Fd()), unix.TCGETS)
+				if err != nil {
+					t.Fatal(err)
+				}
+				attrs.Oflag &^= unix.OPOST
+				if err := unix.IoctlSetTermios(int(writer.Fd()), unix.TCSETS, attrs); err != nil {
+					t.Fatal(err)
+				}
+			}
+			var out, diagnostic bytes.Buffer
+			readVisible := func(want int) {
+				t.Helper()
+				poll := []unix.PollFd{{Fd: int32(reader.Fd()), Events: unix.POLLIN}}
+				if want > 0 {
+					if n, err := unix.Poll(poll, 1000); err != nil || n != 1 {
+						t.Fatalf("output not readable: n=%d err=%v", n, err)
+					}
+				}
+				pending, err := unix.IoctlGetInt(int(reader.Fd()), unix.TIOCINQ)
+				if err != nil || pending != want {
+					t.Fatalf("readable=%d want=%d err=%v", pending, want, err)
+				}
+				if _, err := io.CopyN(&out, reader, int64(pending)); err != nil {
+					t.Fatal(err)
+				}
+			}
+			iterations := 0
+			source := &memorySource{load: func(context.Context, query) (*snapshot, error) { return testSnapshot(), nil }}
+			r := testRunner(source)
+			r.wait = func(context.Context, time.Duration) error {
+				readVisible(tc.visible[iterations])
+				iterations++
+				if iterations == len(tc.visible) {
+					return io.EOF
+				}
+				return nil
+			}
+			code := r.run(t.Context(), []string{"sinfo", "-h", "-p", "compute", "-o", tc.format, "-i", "1"}, nil, writer, &diagnostic)
+			readVisible(len(tc.frame)*iterations - out.Len())
+			if want := strings.Repeat(tc.frame, iterations); code != 0 || out.String() != want || diagnostic.Len() != 0 || !source.closed {
+				t.Fatalf("code=%d output bytes=%d want=%d stderr=%q closed=%t", code, out.Len(), len(want), &diagnostic, source.closed)
+			}
+		})
+	}
+}
+
+func TestRunOutputFlushFailure(t *testing.T) {
+	for _, tc := range []struct{ name, format string }{
+		{"final_flush", "%D"},
+		{"during_write", "%D" + strings.Repeat("x", 5000)},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			reader, writer, err := os.Pipe()
+			if err != nil {
+				t.Fatal(err)
+			}
+			reader.Close()
+			t.Cleanup(func() { writer.Close() })
+			source := &memorySource{load: func(context.Context, query) (*snapshot, error) { return testSnapshot(), nil }}
+			var diagnostic bytes.Buffer
+			code := testRunner(source).run(t.Context(), []string{"sinfo", "-h", "-p", "compute", "-o", tc.format}, nil, writer, &diagnostic)
+			if code != 1 || strings.Count(diagnostic.String(), "broken pipe") != 1 || !source.closed {
+				t.Fatalf("code=%d stderr=%q closed=%t", code, &diagnostic, source.closed)
+			}
+		})
 	}
 }
 
