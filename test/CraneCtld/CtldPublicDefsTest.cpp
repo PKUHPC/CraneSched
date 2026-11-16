@@ -27,9 +27,22 @@
 
 #include "CtldPublicDefs.h"
 #include "Database/EmbeddedDbClient.h"
+#include "Node/CranedMetaContainer.h"
 #include "crane/PrologEpilogExecutor.h"
 
 namespace {
+
+// GetStepToD() looks up the endpoints of the allocated nodes.
+class NodeContainerEnvironment : public ::testing::Environment {
+ public:
+  void SetUp() override {
+    g_meta_container = std::make_unique<Ctld::CranedMetaContainer>();
+  }
+  void TearDown() override { g_meta_container.reset(); }
+};
+
+const auto* const kNodeContainerEnvironment =
+    ::testing::AddGlobalTestEnvironment(new NodeContainerEnvironment);
 
 class ControllerHookTest : public ::testing::Test {
  protected:

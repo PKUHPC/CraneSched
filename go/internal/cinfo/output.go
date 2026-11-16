@@ -243,6 +243,10 @@ func BuildStateString(cranedList FlattenedData) string {
 			cranedList.ResourceState, cranedList.ControlState, cranedList.PowerState)
 	}
 	stateStr := strings.ToLower(strings.TrimPrefix(cranedList.ResourceState.String(), "CRANE_"))
+	if cranedList.ResourceState == protos.CranedResourceState_CRANE_FUTURE {
+		// An unmapped FUTURE node has no craned attached, so no power state.
+		return stateStr
+	}
 
 	if cranedList.ControlState != protos.CranedControlState_CRANE_NONE {
 		controlState := strings.ToLower(strings.TrimPrefix(cranedList.ControlState.String(), "CRANE_"))
@@ -307,6 +311,8 @@ func GetFoundedNodes(reply *protos.QueryClusterInfoReply) map[string]bool {
 	found := make(map[string]bool, len(reply.Nodes))
 	for _, node := range reply.Nodes {
 		found[node.Hostname] = true
+		// A hostname bound at runtime is unknown to the client configuration.
+		found[node.NodeHostname] = true
 	}
 	return found
 }

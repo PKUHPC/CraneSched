@@ -24,6 +24,8 @@
 #include <limits>
 #include <memory>
 
+#include "Node/NodeDefs.h"
+#include "crane/Lock.h"
 #include "crane/TracerManager.h"
 #include "crane/Tracing.h"
 #include "protos/PublicDefs.pb.h"
@@ -149,6 +151,9 @@ struct Config {
     std::vector<GresResource> gres_order;
 
     NodeTopoInfo node_topo_info;
+
+    FlagSet<NodeFlags> flags;
+    std::vector<std::string> features;
   };
 
   struct Partition {
@@ -290,7 +295,8 @@ struct Config {
 
   std::vector<std::string> GresOrder;
   // Maps NodeName and NodeHostname to the canonical CranedId used by the
-  // scheduler.
+  // scheduler. NodeHostnames of FUTURE nodes are added when mapped, so
+  // accesses after startup must hold g_craned_id_by_alias_mtx.
   std::unordered_map<std::string, CranedId> CranedIdByAlias;
   std::unordered_map<std::string, Partition> Partitions;
   std::vector<std::string> PartitionOrder;
@@ -353,11 +359,15 @@ inline constexpr array_task_id_t kNoArrayTaskId =
 
 inline Ctld::Config g_config{};
 
+// Kept out of Config so that Config stays movable.
+inline util::rw_mutex g_craned_id_by_alias_mtx;
+
 inline Ctld::RunTimeStatus g_runtime_status{};
 
 namespace Ctld {
 
 inline CranedId ResolveCranedIdAlias(const std::string& node) {
+  util::read_lock_guard lock(g_craned_id_by_alias_mtx);
   auto it = g_config.CranedIdByAlias.find(node);
   return it == g_config.CranedIdByAlias.end() ? node : it->second;
 }

@@ -19,6 +19,7 @@
 #include "CtldGrpcServer.h"
 
 #include <grpcpp/support/status.h>
+#include <openssl/x509v3.h>
 
 #include "Account/AccountManager.h"
 #include "Accounting/AccountMetaContainer.h"
@@ -38,6 +39,109 @@
 
 namespace Ctld {
 
+// Extract the IP part from a grpc peer string like "ipv4:1.2.3.4:port" or
+// "ipv6:%5B::1%5D:port" (grpc percent-encodes the brackets). Returns an empty
+// string on failure.
+static std::string PeerIpFromContext(const grpc::ServerContext* context) {
+  std::string peer = context->peer();
+  size_t scheme_pos = peer.find(':');
+  size_t port_pos = peer.rfind(':');
+  if (scheme_pos == std::string::npos || port_pos <= scheme_pos + 1) return "";
+
+  std::string ip = peer.substr(scheme_pos + 1, port_pos - scheme_pos - 1);
+  if (ip.starts_with("%5B") && ip.ends_with("%5D"))
+    ip = ip.substr(3, ip.size() - 6);
+  return ip;
+}
+
+// Verify the mapped address and, when enabled, the TLS certificate identity.
+static grpc::Status AuthenticateFutureNode(
+    const grpc::ServerContext* context, const std::string& hostname,
+    const std::string& craned_addr = {}) {
+  if (!craned_addr.empty() && craned_addr != PeerIpFromContext(context))
+    return {grpc::StatusCode::FAILED_PRECONDITION,
+            "Connection does not match the FUTURE node mapping"};
+
+  const auto& tls = g_config.ListenConf.TlsConfig;
+  if (!tls.Enabled) return grpc::Status::OK;
+
+  const auto auth = context->auth_context();
+  if (!auth || !auth->IsPeerAuthenticated())
+    return {grpc::StatusCode::UNAUTHENTICATED,
+            "FUTURE nodes require an authenticated TLS client certificate"};
+
+  const auto certs = auth->FindPropertyValues("x509_pem_cert");
+  if (certs.size() != 1 || hostname.empty())
+    return {grpc::StatusCode::UNAUTHENTICATED,
+            "FUTURE nodes require a machine certificate and hostname"};
+  const auto parse_certificate = [](std::string_view pem) {
+    std::unique_ptr<BIO, decltype(&BIO_free)> bio(
+        BIO_new_mem_buf(pem.data(), static_cast<int>(pem.size())), &BIO_free);
+    return std::unique_ptr<X509, decltype(&X509_free)>(
+        bio ? PEM_read_bio_X509(bio.get(), nullptr, nullptr, nullptr) : nullptr,
+        &X509_free);
+  };
+  const auto cert =
+      parse_certificate({certs.front().data(), certs.front().size()});
+  static const auto shared_cert =
+      parse_certificate(tls.InternalCerts.CertContent);
+  const auto tls_hostname = util::TlsHostname(hostname, tls.DomainSuffix);
+  const auto names = auth->FindPropertyValues("x509_common_name");
+  const std::string_view common_name =
+      names.size() == 1
+          ? std::string_view(names.front().data(), names.front().size())
+          : std::string_view{};
+  const auto cn_hostname = common_name.substr(0, common_name.find('.'));
+  // Numeric CN host labels are reserved for user certificate UIDs.
+  const bool matches_hostname =
+      cn_hostname.find_first_not_of("0123456789") != std::string_view::npos &&
+      (common_name == hostname || common_name == tls_hostname);
+  // User certificates also have wildcard SANs. Only the configured internal
+  // certificate may use a shared identity instead of a machine-specific CN.
+  if (!cert ||
+      (!matches_hostname &&
+       (!shared_cert || X509_cmp(cert.get(), shared_cert.get()) != 0)) ||
+      X509_check_host(cert.get(), tls_hostname.data(), tls_hostname.size(),
+                      X509_CHECK_FLAG_NO_PARTIAL_WILDCARDS, nullptr) != 1)
+    return {grpc::StatusCode::UNAUTHENTICATED,
+            "FUTURE nodes require a matching machine or shared internal "
+            "certificate"};
+  return grpc::Status::OK;
+}
+
+// Static nodes have no session to protect, so only RPCs of FUTURE nodes are
+// serialized with node lifecycle changes.
+static std::unique_lock<std::recursive_mutex> LockFutureNodeLifecycle(
+    const CranedId& craned_id) {
+  bool is_future;
+  {
+    auto node = g_meta_container->GetCranedMetaPtr(craned_id);
+    is_future = node && node->static_meta.flags[NodeFlags::Future];
+  }
+  if (!is_future) return {};
+  return g_craned_keeper->GetLifecycleLock();
+}
+
+// For a FUTURE node, the caller holds the keeper lifecycle lock through the
+// state update.
+static grpc::Status AuthenticateCranedSession(
+    const grpc::ServerContext* context, const CranedId& craned_id,
+    const std::string& session_id, bool require_registered = true) {
+  auto node = g_meta_container->GetCranedMetaPtr(craned_id);
+  if (!node) return {grpc::StatusCode::FAILED_PRECONDITION, "Unknown craned"};
+  if (!node->static_meta.flags[NodeFlags::Future]) return grpc::Status::OK;
+
+  auto authentication = AuthenticateFutureNode(
+      context, node->static_meta.node_hostname, node->static_meta.node_addr);
+  if (!authentication.ok()) return authentication;
+  auto stub = g_craned_keeper->GetCranedStub(craned_id);
+  if (!node->future_mapped || !stub || !stub->CheckSession(session_id) ||
+      (require_registered && stub->Invalid()))
+    return {grpc::StatusCode::FAILED_PRECONDITION,
+            "Stale or unregistered FUTURE node session"};
+  return grpc::Status::OK;
+}
+
 grpc::Status CtldForInternalServiceImpl::StepStatusChange(
     grpc::ServerContext* context,
     const crane::grpc::StepStatusChangeRequest* request,
@@ -45,6 +149,11 @@ grpc::Status CtldForInternalServiceImpl::StepStatusChange(
   if (!g_runtime_status.srv_ready.load(std::memory_order_acquire))
     return grpc::Status{grpc::StatusCode::UNAVAILABLE,
                         "CraneCtld Server is not ready"};
+
+  auto lifecycle_lock = LockFutureNodeLifecycle(request->craned_id());
+  auto authentication = AuthenticateCranedSession(context, request->craned_id(),
+                                                  request->session_id());
+  if (!authentication.ok()) return authentication;
 
   g_job_scheduler->StepStatusChangeAsync(
       request->job_id(), request->step_id(), request->craned_id(),
@@ -58,35 +167,33 @@ grpc::Status CtldForInternalServiceImpl::CranedTriggerReverseConn(
     grpc::ServerContext* context,
     const crane::grpc::CranedTriggerReverseConnRequest* request,
     google::protobuf::Empty* response) {
-  const auto& craned_id = request->craned_id();
-  CRANE_TRACE("Craned {} requires Ctld to connect.", craned_id);
-  if (!g_meta_container->CheckCranedAllowed(request->craned_id())) {
-    CRANE_WARN("Reject register request from unknown node {}",
-               request->craned_id());
-    return grpc::Status::OK;
-  }
+  if (!g_runtime_status.srv_ready.load(std::memory_order_acquire))
+    return {grpc::StatusCode::UNAVAILABLE, "CraneCtld Server is not ready"};
+  if (!request->has_token())
+    return {grpc::StatusCode::INVALID_ARGUMENT, "Missing craned token"};
 
-  if (!g_craned_keeper->IsCranedConnected(craned_id)) {
-    g_craned_keeper->PutNodeIntoUnavailSet(craned_id, request->token());
+  auto lifecycle_lock = g_craned_keeper->GetLifecycleLock();
+  CranedId craned_id = request->craned_id();
+  if (request->has_candidate()) {
+    auto authentication =
+        AuthenticateFutureNode(context, request->candidate().hostname());
+    if (!authentication.ok()) return authentication;
+    auto mapping = g_meta_container->MatchFutureNode(
+        request->candidate(), PeerIpFromContext(context));
+    if (!mapping)
+      return {grpc::StatusCode::FAILED_PRECONDITION, mapping.error()};
+    craned_id = std::move(mapping.value());
   } else {
-    // Before configure, craned should be connected but not online
-    if (g_meta_container->CheckCranedOnline(craned_id)) {
-      CRANE_TRACE(
-          "Already online craned {} notify craned connected, consider it down.",
-          craned_id);
-      g_meta_container->CranedDown(craned_id);
-    }
-    auto stub = g_craned_keeper->GetCranedStub(craned_id);
-    if (stub != nullptr) {
-      stub->SetRegToken(request->token());
-      g_thread_pool->detach_task([stub, token = request->token(), craned_id] {
-        stub->ConfigureCraned(craned_id, token);
-      });
-    } else {
-      g_craned_keeper->PutNodeIntoUnavailSet(craned_id, request->token());
-    }
+    auto node = g_meta_container->GetCranedMetaPtr(craned_id);
+    if (!node || node->static_meta.flags[NodeFlags::Future])
+      return {grpc::StatusCode::FAILED_PRECONDITION,
+              "FUTURE nodes must provide a machine candidate"};
   }
 
+  CRANE_TRACE("Craned {} requires Ctld to connect.", craned_id);
+  if (!g_craned_keeper->PutNodeIntoUnavailSet(craned_id, request->token()))
+    return {grpc::StatusCode::UNAVAILABLE,
+            "Failed to establish craned session"};
   return grpc::Status::OK;
 }
 
@@ -94,7 +201,15 @@ grpc::Status CtldForInternalServiceImpl::CranedRegister(
     grpc::ServerContext* context,
     const crane::grpc::CranedRegisterRequest* request,
     crane::grpc::CranedRegisterReply* response) {
-  CRANE_ASSERT(g_meta_container->CheckCranedAllowed(request->craned_id()));
+  auto lifecycle_lock = g_craned_keeper->GetLifecycleLock();
+  auto authentication = AuthenticateCranedSession(context, request->craned_id(),
+                                                  request->session_id(), false);
+  if (!authentication.ok()) return authentication;
+
+  if (!g_meta_container->CheckCranedAllowed(request->craned_id())) {
+    response->set_ok(false);
+    return grpc::Status::OK;
+  }
 
   if (g_meta_container->CheckCranedOnline(request->craned_id())) {
     CRANE_WARN("Reject register request from already online node {}",
@@ -169,6 +284,11 @@ grpc::Status CtldForInternalServiceImpl::CranedRegister(
 grpc::Status CtldForInternalServiceImpl::CranedPing(
     grpc::ServerContext* context, const crane::grpc::CranedPingRequest* request,
     crane::grpc::CranedPingReply* response) {
+  auto lifecycle_lock = LockFutureNodeLifecycle(request->craned_id());
+  auto authentication = AuthenticateCranedSession(context, request->craned_id(),
+                                                  request->session_id());
+  if (!authentication.ok()) return authentication;
+
   if (!g_meta_container->CheckCranedOnline(request->craned_id())) {
     CRANE_WARN("Reject ping from offline node {}", request->craned_id());
     response->set_ok(false);
@@ -193,6 +313,11 @@ grpc::Status CtldForInternalServiceImpl::UpdateNodeDrainState(
     grpc::ServerContext* context,
     const crane::grpc::UpdateNodeDrainStateRequest* request,
     crane::grpc::UpdateNodeDrainStateReply* response) {
+  auto lifecycle_lock = LockFutureNodeLifecycle(request->craned_id());
+  auto authentication = AuthenticateCranedSession(context, request->craned_id(),
+                                                  request->session_id());
+  if (!authentication.ok()) return authentication;
+
   bool result = g_meta_container->UpdateNodeDrainState(
       request->craned_id(), request->drain(), request->reason());
 
@@ -618,6 +743,11 @@ grpc::Status CtldForInternalServiceImpl::BroadcastPmixPort(
   if (!g_runtime_status.srv_ready.load(std::memory_order_acquire))
     return grpc::Status{grpc::StatusCode::UNAVAILABLE,
                         "CraneCtld Server is not ready"};
+
+  auto lifecycle_lock = LockFutureNodeLifecycle(request->craned_id());
+  auto authentication = AuthenticateCranedSession(context, request->craned_id(),
+                                                  request->session_id());
+  if (!authentication.ok()) return authentication;
 
   auto& pmix_ports_map = g_job_scheduler->GetPmixPortsMetaMap();
 
@@ -1337,6 +1467,50 @@ grpc::Status CraneCtldServiceImpl::ModifyJobsExtraAttrs(
   return grpc::Status::OK;
 }
 
+grpc::Status CraneCtldServiceImpl::CreateNodes(
+    grpc::ServerContext* context,
+    const crane::grpc::CreateNodesRequest* request,
+    crane::grpc::CreateNodesReply* response) {
+  if (auto msg = CheckCertAndUIDAllowed_(context, request->uid()); msg)
+    return {grpc::StatusCode::UNAUTHENTICATED, msg.value()};
+  if (!g_runtime_status.srv_ready.load(std::memory_order_acquire))
+    return {grpc::StatusCode::UNAVAILABLE, "CraneCtld Server is not ready"};
+
+  if (auto result = g_account_manager->CheckUidIsAdmin(request->uid());
+      !result) {
+    for (const auto& node : request->nodes()) {
+      response->add_not_created_nodes(node.name());
+      response->add_not_created_reasons(CraneErrStr(result.error()));
+    }
+    return grpc::Status::OK;
+  }
+
+  *response = g_meta_container->CreateNodes(*request);
+  return grpc::Status::OK;
+}
+
+grpc::Status CraneCtldServiceImpl::DeleteNodes(
+    grpc::ServerContext* context,
+    const crane::grpc::DeleteNodesRequest* request,
+    crane::grpc::DeleteNodesReply* response) {
+  if (auto msg = CheckCertAndUIDAllowed_(context, request->uid()); msg)
+    return {grpc::StatusCode::UNAUTHENTICATED, msg.value()};
+  if (!g_runtime_status.srv_ready.load(std::memory_order_acquire))
+    return {grpc::StatusCode::UNAVAILABLE, "CraneCtld Server is not ready"};
+
+  if (auto result = g_account_manager->CheckUidIsAdmin(request->uid());
+      !result) {
+    for (const auto& name : request->node_names()) {
+      response->add_not_deleted_nodes(name);
+      response->add_not_deleted_reasons(CraneErrStr(result.error()));
+    }
+    return grpc::Status::OK;
+  }
+
+  *response = g_meta_container->DeleteNodes(*request);
+  return grpc::Status::OK;
+}
+
 grpc::Status CraneCtldServiceImpl::ModifyNode(
     grpc::ServerContext* context,
     const crane::grpc::ModifyCranedStateRequest* request,
@@ -1575,8 +1749,14 @@ grpc::Status CraneCtldServiceImpl::SetTraceConfig(
   const bool propagate =
       !request->has_propagate_to_craned() || request->propagate_to_craned();
   if (propagate && g_craned_keeper) {
-    for (const auto& [craned_id, node] : g_config.Nodes) {
-      (void)node;
+    std::vector<CranedId> craned_ids;
+    {
+      auto nodes = g_meta_container->GetCranedMetaMapConstPtr();
+      craned_ids.reserve(nodes->size());
+      for (const auto& [craned_id, node] : *nodes)
+        craned_ids.emplace_back(craned_id);
+    }
+    for (const auto& craned_id : craned_ids) {
       auto stub = g_craned_keeper->GetCranedStub(craned_id);
       if (!stub || stub->Invalid()) continue;
       auto err = stub->UpdateTraceConfig(response->config());
@@ -1792,6 +1972,19 @@ crane::grpc::QueryJobsInfoReply BuildJobQueryReply(
   response.set_ok(true);
   return response;
 }
+
+// A node filter matches the logical NodeName itself and, if it is a
+// NodeHostname, the node currently using it. Keeping the original name lets
+// history recorded under a deleted NodeName stay queryable after the name is
+// reused as another node's NodeHostname.
+void AddCranedIdsOfAliases(
+    google::protobuf::RepeatedPtrField<std::string>* nodes) {
+  const int size = nodes->size();
+  for (int i = 0; i < size; ++i) {
+    auto craned_id = ResolveCranedIdAlias(nodes->Get(i));
+    if (craned_id != nodes->Get(i)) nodes->Add(std::move(craned_id));
+  }
+}
 }  // namespace
 
 grpc::Status CraneCtldServiceImpl::QueryJobsInfo(
@@ -1824,11 +2017,8 @@ grpc::Status CraneCtldServiceImpl::QueryJobsInfo(
                                  ? num_limit
                                  : num_limit + 1;
 
-  crane::grpc::QueryJobsInfoRequest normalized_request = *request;
-  for (int i = 0; i < normalized_request.filter_nodename_list_size(); ++i) {
-    normalized_request.set_filter_nodename_list(
-        i, ResolveCranedIdAlias(normalized_request.filter_nodename_list(i)));
-  }
+  auto normalized_request = *request;
+  AddCranedIdsOfAliases(normalized_request.mutable_filter_nodename_list());
   request = &normalized_request;
 
   std::unordered_map<job_id_t, crane::grpc::JobInfo> job_info_map;
@@ -3347,10 +3537,7 @@ grpc::Status CraneCtldServiceImpl::QueryJobSizeSummary(
     return {grpc::StatusCode::UNAVAILABLE, "CraneCtld Server is not ready"};
 
   crane::grpc::QueryJobSizeSummaryRequest normalized_request = *request;
-  for (int i = 0; i < normalized_request.filter_nodename_list_size(); ++i) {
-    normalized_request.set_filter_nodename_list(
-        i, ResolveCranedIdAlias(normalized_request.filter_nodename_list(i)));
-  }
+  AddCranedIdsOfAliases(normalized_request.mutable_filter_nodename_list());
 
   bool ok = g_db_client->QueryJobSizeSummary(&normalized_request, writer);
   if (!ok) {
