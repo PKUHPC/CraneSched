@@ -243,6 +243,10 @@ func BuildStateString(cranedList FlattenedData) string {
 			cranedList.ResourceState, cranedList.ControlState, cranedList.PowerState)
 	}
 	stateStr := strings.ToLower(strings.TrimPrefix(cranedList.ResourceState.String(), "CRANE_"))
+	if cranedList.ResourceState == protos.CranedResourceState_CRANE_FUTURE {
+		// An unmapped FUTURE node has no craned attached, so no power state.
+		return stateStr
+	}
 
 	if cranedList.ControlState != protos.CranedControlState_CRANE_NONE {
 		controlState := strings.ToLower(strings.TrimPrefix(cranedList.ControlState.String(), "CRANE_"))
