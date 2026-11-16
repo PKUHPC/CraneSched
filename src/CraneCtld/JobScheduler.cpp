@@ -9329,8 +9329,8 @@ CraneExpected<void> JobScheduler::AcquireStepAttributes(StepInCtld* step) {
       return std::unexpected(CraneErrCode::ERR_INVALID_EX_NODE_LIST);
     }
 
-    bool user_set_mem_per_cpu = step->StepToCtld().has_mem_per_cpu();
-    bool user_set_mem_per_node = step->StepToCtld().has_mem_per_node();
+    const bool user_set_mem_per_cpu = step->StepToCtld().has_mem_per_cpu();
+    const bool user_set_mem_per_node = step->StepToCtld().has_mem_per_node();
 
     if (user_set_mem_per_cpu && user_set_mem_per_node) {
       CRANE_ERROR(
@@ -9348,7 +9348,6 @@ CraneExpected<void> JobScheduler::AcquireStepAttributes(StepInCtld* step) {
         step->req_node_res_view.SetMemoryBytes(part_meta.default_mem_per_node);
         step->req_node_res_view.SetMemorySwBytes(
             part_meta.default_mem_per_node);
-        user_set_mem_per_node = true;
       } else if (part_meta.default_mem_per_cpu != 0) {
         auto mem_per_cpu = part_meta.default_mem_per_cpu;
         step->req_task_res_view.SetMemoryBytes(
@@ -9357,7 +9356,6 @@ CraneExpected<void> JobScheduler::AcquireStepAttributes(StepInCtld* step) {
         step->req_task_res_view.SetMemorySwBytes(
             static_cast<double>(step->req_task_res_view.GetCpuCount()) *
             mem_per_cpu);
-        user_set_mem_per_cpu = true;
       } else {
         CRANE_ERROR(
             "Step #{}.{}: neither mem_per_cpu nor mem_per_node is "
@@ -9367,46 +9365,10 @@ CraneExpected<void> JobScheduler::AcquireStepAttributes(StepInCtld* step) {
       }
     }
 
-    if (part_meta.max_mem_per_cpu != 0) {
-      if (user_set_mem_per_cpu) {
-        auto max_job_mem =
-            static_cast<double>(step->req_task_res_view.CpuCountDouble()) *
-            part_meta.max_mem_per_cpu;
-        if (step->req_task_res_view.GetMemoryBytes() > max_job_mem) {
-          step->req_task_res_view.SetMemoryBytes(max_job_mem);
-          step->req_task_res_view.SetMemorySwBytes(max_job_mem);
-        }
-      } else if (user_set_mem_per_node) {
-        double cpus_per_task = step->req_task_res_view.CpuCountDouble();
-        if (cpus_per_task > 0) {
-          auto required_min = static_cast<uint32_t>(std::ceil(
-              static_cast<double>(step->req_node_res_view.GetMemoryBytes()) /
-              (part_meta.max_mem_per_cpu * cpus_per_task)));
-          step->ntasks_per_node_min =
-              std::max(step->ntasks_per_node_min, required_min);
-        }
-      }
-    }
-
-    if (part_meta.max_mem_per_node != 0) {
-      if (user_set_mem_per_node) {
-        if (step->req_node_res_view.GetMemoryBytes() >
-            part_meta.max_mem_per_node) {
-          step->req_node_res_view.SetMemoryBytes(part_meta.max_mem_per_node);
-          step->req_node_res_view.SetMemorySwBytes(part_meta.max_mem_per_node);
-        }
-      } else if (user_set_mem_per_cpu) {
-        auto job_mem = step->req_task_res_view.GetMemoryBytes();
-        if (job_mem > 0) {
-          auto required_max = static_cast<uint32_t>(
-              static_cast<double>(part_meta.max_mem_per_node) / job_mem);
-          if (step->ntasks_per_node_max == 0 ||
-              step->ntasks_per_node_max > required_max) {
-            step->ntasks_per_node_max = required_max;
-          }
-        }
-      }
-    }
+    // Partition memory limits apply when allocating the parent job. A step
+    // may use that allocation with fewer CPUs without changing its task count
+    // or truncating its memory request. CheckStepValidity checks the job's
+    // resource bounds; SchedulePendingSteps accounts for other steps' usage.
   }
 
   {
