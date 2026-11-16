@@ -247,9 +247,6 @@ func TestRunOutputBuffering(t *testing.T) {
 	}{
 		{"pipe", "%a|%D|%t", "up|3|idle\n\n", false, []int{0, 0, 0}},
 		{"terminal", "%a|%D|%t", "up|3|idle\n\n", true, []int{11, 11, 11}},
-		{"full_pipe_block", "%D" + strings.Repeat("x", 2047), "3" + strings.Repeat("x", 2047) + "\n\n", false, []int{0, 4096, 0}},
-		// A single large frame must not publish its final partial block.
-		{"large_frame", "%D" + strings.Repeat("x", 5000), "3" + strings.Repeat("x", 5000) + "\n\n", false, []int{4096}},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			var reader, writer *os.File

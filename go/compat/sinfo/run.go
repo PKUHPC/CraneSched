@@ -16,7 +16,6 @@ import (
 	"time"
 
 	"github.com/PKUHPC/CraneSched/go/compat/utils"
-	"golang.org/x/sys/unix"
 	"golang.org/x/term"
 )
 
@@ -63,40 +62,11 @@ func reportError(w io.Writer, err error) {
 	}
 }
 
-// stdoutBuffer keeps the final partial block private, even when a complete
-// report is larger than the buffer. bufio.Writer alone bypasses buffering for
-// large writes, publishing that partial block before the reference would.
-type stdoutBuffer struct{ buffer *bufio.Writer }
-
-func (w stdoutBuffer) Write(p []byte) (int, error) {
-	written := 0
-	for len(p) != 0 {
-		if w.buffer.Available() == 0 {
-			if err := w.buffer.Flush(); err != nil {
-				return written, err
-			}
-		}
-		n, err := w.buffer.Write(p[:min(len(p), w.buffer.Available())])
-		written += n
-		if err != nil {
-			return written, err
-		}
-		p = p[n:]
-	}
-	return written, nil
-}
-
 func (r runner) run(ctx context.Context, argv []string, env map[string]string, stdout, stderr io.Writer) (rc int) {
 	if file, ok := stdout.(*os.File); ok && !term.IsTerminal(int(file.Fd())) {
-		// Match Linux stdio's full buffering for files and pipes. Terminal
-		// reports already end in newlines and remain visible on each iteration.
-		size := 8192
-		var stat unix.Stat_t
-		if unix.Fstat(int(file.Fd()), &stat) == nil && stat.Blksize > 0 && stat.Blksize < int64(size) {
-			size = int(stat.Blksize)
-		}
-		buffer := bufio.NewWriterSize(stdout, size)
-		stdout = stdoutBuffer{buffer}
+		// Buffer redirected output; terminal reports stay visible each iteration.
+		buffer := bufio.NewWriter(stdout)
+		stdout = buffer
 		defer func() {
 			if err := buffer.Flush(); err != nil && rc == 0 {
 				reportError(stderr, err)
