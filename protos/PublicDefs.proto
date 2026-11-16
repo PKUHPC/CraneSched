@@ -491,6 +491,15 @@ message StepToD {
 
   optional ArrayTaskIdentity array_task = 39;
   bool external_launcher = 40;
+
+  // Current endpoints of the FUTURE nodes in nodelist, keyed by craned id.
+  // They are bound at runtime and unknown to the craned-side configuration.
+  map<string, NodeEndpoint> future_node_endpoints = 41;
+}
+
+message NodeEndpoint {
+  string hostname = 1;
+  string addr = 2;
 }
 
 message JobStepsToD {

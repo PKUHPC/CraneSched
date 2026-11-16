@@ -254,11 +254,16 @@ CraneErrCode StepInstance::SpawnSupervisor(const EnvMap& job_env_map) {
     init_req.set_crane_base_dir(g_config.CraneBaseDir);
     init_req.set_crane_script_dir(g_config.CranedScriptDir);
     init_req.mutable_step_spec()->CopyFrom(step_to_d);
+    const auto& future_endpoints = step_to_d.future_node_endpoints();
     for (const auto& craned_id : step_to_d.nodelist()) {
+      auto endpoint_it = future_endpoints.find(craned_id);
+      const bool is_future = endpoint_it != future_endpoints.end();
       (*init_req.mutable_craned_id_to_node_hostname())[craned_id] =
-          g_config.CranedIdToNodeHostname.at(craned_id);
+          is_future ? endpoint_it->second.hostname()
+                    : g_config.CranedIdToNodeHostname.at(craned_id);
       (*init_req.mutable_craned_id_to_node_addr())[craned_id] =
-          g_config.CranedIdToNodeAddr.at(craned_id);
+          is_future ? endpoint_it->second.addr()
+                    : g_config.CranedIdToNodeAddr.at(craned_id);
     }
 #ifdef CRANE_ENABLE_BPF
     if (CgroupManager::IsCgV2()) {

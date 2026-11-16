@@ -128,7 +128,7 @@ Nodes:
 - **memory**：总内存，必须大于 0（支持 K、M、G、T 后缀）
 - **sockets**：CPU 插槽数，默认为 `1`，必须大于 0 且能整除 `cpu`。静态节点和 FUTURE 节点配置了非法 CPU、内存或插槽数时均会启动失败。
 - **gres**：通用资源，如 GPU（可选）
-- **state**：可选，目前仅支持 `FUTURE`，表示占位节点：启动时没有绑定实机，`craned -F [feature]` 启动的机器会被映射到一个硬件规格满足要求（实测 CPU 数、内存不低于配置值，且携带指定 feature）的空闲 FUTURE 节点上。FUTURE 节点必须归属某个分区，且不应配置 `NodeHostname`/`NodeAddr`（映射时以实机地址覆盖）。未映射的 FUTURE 节点不参与调度，也不计入分区资源总量。
+- **state**：可选，目前仅支持 `FUTURE`，表示占位节点：启动时没有绑定实机，`craned -F [feature]` 启动的机器会被映射到一个硬件规格满足要求（实测 CPU 数、内存不低于配置值，且携带指定 feature）的空闲 FUTURE 节点上。FUTURE 节点必须归属某个分区，且不应配置 `NodeHostname`/`NodeAddr`（映射时以实机地址覆盖）。未映射的 FUTURE 节点不参与调度，也不计入分区资源总量；但其定义的资源计入作业提交时的容量上限校验，依赖这部分资源的作业会排队等待节点映射。
 - **features**：可选，字符串列表形式的节点标签，目前用于 `craned -F <feature>` 的映射过滤
 
 FUTURE 映射同时支持 `TLS.Enabled=true` 和 `TLS.Enabled=false`，控制器和计算节点须使用相同设置。首次反向连接请求中，`cranectld` 获取机器上报的 `gethostname()` 和连接来源地址。两种模式下，注册、心跳和状态更新均校验映射地址及当前会话。无需维护机器 hostname 白名单或重启控制器。`TLS.AllowedNodes` 用于前端证书签发，与 FUTURE 映射相互独立。

@@ -518,8 +518,9 @@ returns to `State=future`, retaining its CPU, memory, sockets, features and
 partition membership. The old machine mapping and session are removed, and
 the node stops contributing to partition resources until it is mapped again.
 Binding removal is persisted across controller restarts. Job allocations,
-including completing jobs, and reservations prevent reset. Stop the old
-craned before resetting so it cannot reclaim the placeholder.
+including completing jobs, and reservations prevent reset. Reset is also
+refused while the old craned is online; stop it first so it cannot reclaim
+the placeholder.
 
 ```bash
 # Drain the node and wait for jobs and reservations to finish
@@ -527,10 +528,10 @@ ccontrol update NodeName=future01 State=DRAIN Reason="scale-in"
 ccontrol delete node NodeName=future[01-02]
 ```
 
-Only nodes created at runtime can be deleted. Job allocations and reservations prevent deletion.
+Only nodes created at runtime can be deleted. Job allocations and reservations prevent deletion, and so does an online craned: stop it first.
 Batch operations return success or a failure reason for each node. Successful deletion removes the node from queries and partition membership and updates resource totals.
 Nodes defined in the configuration file cannot be deleted with this command.
-Stop the deleted node's craned process; to reconnect it, create a placeholder and restart craned with `-F`.
+To reconnect the machine, create a placeholder and restart craned with `-F`.
 
 #### Create Reservation
 
