@@ -16,6 +16,20 @@ on:
         required: false
         default: false
         type: boolean
+      reuse_build:
+        description: Successful workflow run ID/attempt whose checked RPMs should be reused (blank builds anew)
+        required: false
+        type: string
+      integration_shards:
+        description: Independent integration environments
+        type: choice
+        default: '4'
+        options: ['1', '4']
+      integration_tests:
+        description: Integration selection
+        type: choice
+        default: representative
+        options: [representative, full]
 
 permissions:
   contents: read
@@ -27,6 +41,7 @@ defaults:
 jobs:
   format:
     name: C++ Clang Format
+    if: ${{ inputs.reuse_build == '' }}
     timeout-minutes: 15
     outputs:
       source_sha: ${{ steps.source.outputs.source_sha }}
@@ -166,20 +181,25 @@ jobs:
   build:
     name: Go checks, tests and RPM build
     needs: format
+    if: ${{ !cancelled() && (needs.format.result == 'success' || inputs.reuse_build != '') }}
+    permissions:
+      contents: read
+      actions: read
     runs-on: crane-build
     timeout-minutes: 120
     container:
       image: ${{ vars.CRANE_CI_BASE_IMAGE }}
     outputs:
-      source_sha: ${{ steps.build.outputs.source_sha }}
-      artifact_dir: ${{ steps.build.outputs.artifact_dir }}
-      manifest_sha256: ${{ steps.build.outputs.manifest_sha256 }}
+      source_sha: ${{ steps.build.outputs.source_sha || steps.reuse.outputs.source_sha }}
+      artifact_dir: ${{ steps.build.outputs.artifact_dir || steps.reuse.outputs.artifact_dir }}
+      manifest_sha256: ${{ steps.build.outputs.manifest_sha256 || steps.reuse.outputs.manifest_sha256 }}
     env:
       BASE_IMAGE: ${{ vars.CRANE_CI_BASE_IMAGE }}
       GOPROXY: ${{ vars.CRANE_CI_GOPROXY || 'https://goproxy.cn,direct' }}
       GOWORK: 'off'
     steps:
       - name: Checkout the selected product source
+        if: ${{ inputs.reuse_build == '' }}
         uses: actions/checkout@93cb6efe18208431cddfb8368fd83d5badbf9bfd # v5
         with:
           ref: ${{ needs.format.outputs.source_sha }}
@@ -188,6 +208,7 @@ jobs:
 
       - name: Test and package with a persistent build tree
         id: build
+        if: ${{ inputs.reuse_build == '' }}
         run: |
           set -euo pipefail
           unset HTTP_PROXY HTTPS_PROXY ALL_PROXY http_proxy https_proxy all_proxy
@@ -276,9 +297,66 @@ jobs:
           print('Tests and the five RPMs completed successfully.')
           PY
 
+      - name: Verify and reuse an already successful build
+        if: ${{ inputs.reuse_build != '' }}
+        id: reuse
+        env:
+          REUSE_BUILD: ${{ inputs.reuse_build }}
+          SOURCE_REF: ${{ inputs.source_ref }}
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          python3 - <<'PY'
+          import hashlib
+          import json
+          import os
+          from pathlib import Path
+          import re
+          import urllib.request
+
+          if os.environ['SOURCE_REF']:
+              raise SystemExit('source_ref must be blank when reusing a build.')
+          identity = os.environ['REUSE_BUILD']
+          if not re.fullmatch(r'[1-9][0-9]*/[1-9][0-9]*', identity):
+              raise SystemExit('reuse_build must be a workflow run ID/attempt.')
+          run_id, attempt = identity.split('/')
+          request = urllib.request.Request(
+              f"{os.environ['GITHUB_API_URL']}/repos/{os.environ['GITHUB_REPOSITORY']}/actions/runs/{run_id}/attempts/{attempt}",
+              headers={'Authorization': 'Bearer ' + os.environ['GH_TOKEN'],
+                       'Accept': 'application/vnd.github+json'})
+          with urllib.request.urlopen(request, timeout=30) as response:
+              run = json.load(response)
+          if run['status'] != 'completed' or run['conclusion'] != 'success':
+              raise SystemExit('Only a successful completed workflow attempt can be reused.')
+          root = Path('/ci/attempts') / f'{run_id}-{attempt}' / 'build'
+          data = (root / 'manifest.json').read_bytes()
+          manifest = json.loads(data)
+          if (manifest.get('schema') != 1 or manifest.get('nativeTestsPassed') is not True
+                  or manifest.get('baseImage') != os.environ['BASE_IMAGE']
+                  or manifest.get('target') != 'rhel10-amd64' or manifest.get('preset') != 'ci-debug'
+                  or not re.fullmatch('[a-f0-9]{40}', manifest.get('sourceRevision', ''))):
+              raise SystemExit('The accepted build has incompatible provenance.')
+          expected = {'cranesched-cranectld', 'cranesched-craned', 'cranesched-client',
+                      'cranesched-plugin', 'cranesched-slurm-compat'}
+          packages = manifest.get('packages', [])
+          if len(packages) != 5 or {package['name'] for package in packages} != expected:
+              raise SystemExit('Expected exactly the five final RPMs.')
+          for package in packages:
+              path = (root / package['path']).resolve()
+              if not path.is_relative_to(root.resolve() / 'packages') or package['architecture'] != 'x86_64':
+                  raise SystemExit('Invalid accepted RPM path or architecture.')
+              with path.open('rb') as stream:
+                  if hashlib.file_digest(stream, 'sha256').hexdigest() != package['sha256']:
+                      raise SystemExit('An accepted RPM changed after its original build.')
+          with Path(os.environ['GITHUB_OUTPUT']).open('a') as output:
+              output.write(f"source_sha={manifest['sourceRevision']}\nartifact_dir={root}\n")
+              output.write(f"manifest_sha256={hashlib.sha256(data).hexdigest()}\n")
+          print(f"Reusing successful build {identity}, source {manifest['sourceRevision']}; no rebuild performed.")
+          PY
+
   integration:
     name: Assemble and test the same RPMs
     needs: build
+    if: ${{ !cancelled() && needs.build.result == 'success' }}
     runs-on: crane-ci
     timeout-minutes: 180
     concurrency:
@@ -298,6 +376,8 @@ jobs:
       CI_TEST_REF: ${{ inputs.harness_ref || 'master' }}
       CI_ENTRYPOINT: ${{ vars.CRANE_CI_INTEGRATION_ENTRYPOINT }}
       CI_ENTRYPOINT_SHA256: ${{ vars.CRANE_CI_INTEGRATION_SHA256 }}
+      CI_SHARD_COUNT: ${{ inputs.integration_shards }}
+      CI_TEST_MODE: ${{ inputs.integration_tests }}
     steps:
       - name: Prepare the test inputs, run tests and reclaim their environments
         id: integration
@@ -312,7 +392,7 @@ jobs:
   publish:
     name: Publish this build's RPMs
     needs: build
-    if: ${{ inputs.publish_packages }}
+    if: ${{ !cancelled() && needs.build.result == 'success' && inputs.publish_packages }}
     concurrency:
       group: crane-ci-publish-master-rhel10-amd64
       cancel-in-progress: false
@@ -346,10 +426,12 @@ jobs:
           set -euo pipefail
           unset HTTP_PROXY HTTPS_PROXY ALL_PROXY http_proxy https_proxy all_proxy
           [[ -n "$NEXUS_URL" && -n "$NEXUS_USERNAME" && -n "$NEXUS_PASSWORD" ]]
+          export PACKAGE_DIR="/ci/attempts/${GITHUB_RUN_ID}-${GITHUB_RUN_ATTEMPT}/publish-rpm"
           python3 - <<'PY'
           import hashlib
           import json
           import os
+          import shutil
           from pathlib import Path
 
           root = Path(os.environ['CI_ARTIFACT_DIR'])
@@ -359,14 +441,16 @@ jobs:
           manifest = json.loads(data)
           if not manifest.get('nativeTestsPassed') or len(manifest['packages']) != 5:
               raise SystemExit('Build output is incomplete')
+          selected = Path(os.environ['PACKAGE_DIR'])
+          selected.mkdir(parents=True, exist_ok=False)
           for package in manifest['packages']:
               path = (root / package['path']).resolve()
               if not path.is_relative_to(root.resolve() / 'packages'):
                   raise SystemExit('RPM path is outside this build output')
               if hashlib.file_digest(path.open('rb'), 'sha256').hexdigest() != package['sha256']:
                   raise SystemExit('RPM checksum mismatch')
+              shutil.copyfile(path, selected / path.name)
           PY
-          export PACKAGE_DIR="$CI_ARTIFACT_DIR/packages/rpm"
           bash .github/ci/upload-packages.sh
 
   summary:
@@ -380,6 +464,7 @@ jobs:
     env:
       JOB_RESULTS: ${{ toJSON(needs) }}
       PUBLISH_REQUESTED: ${{ inputs.publish_packages }}
+      BUILD_REUSED: ${{ inputs.reuse_build != '' }}
     steps:
       - name: Report and enforce the required results
         run: |
@@ -391,16 +476,17 @@ jobs:
           jobs = json.loads(os.environ['JOB_RESULTS'])
           integration = jobs['integration'].get('outputs', {})
           upload = os.environ['PUBLISH_REQUESTED'] == 'true'
+          reused = os.environ.get('BUILD_REUSED') == 'true'
           complete = integration.get('complete') == 'true'
           expected = int(integration.get('expected') or '0')
           passed = int(integration.get('passed') or '0')
-          success = (jobs['format']['result'] == 'success'
+          success = (jobs['format']['result'] == ('skipped' if reused else 'success')
                      and jobs['build']['result'] == 'success'
                      and jobs['integration']['result'] == 'success'
                      and complete and expected > 0 and passed == expected
                      and jobs['publish']['result'] == ('success' if upload else 'skipped'))
           lines = ['### Build, Test and Publish', '',
-                   f"- C++ formatting: {jobs['format']['result']}",
+                   f"- C++ formatting: {jobs['format']['result']} (reused checked build: {str(reused).lower()})",
                    f"- Build: {jobs['build']['result']}",
                    f"- Integration: {jobs['integration']['result']} ({passed}/{expected})",
                    f"- Package upload: {jobs['publish']['result']} (requested: {str(upload).lower()})"]

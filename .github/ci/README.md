@@ -46,6 +46,23 @@ integration suite's branch, tag or commit, defaulting to `master`. The site
 entry point resolves it once and records the SHA. Missing inputs or a version
 mismatch fail preparation instead of selecting an older cached suite.
 
+`integration_tests` selects the site's representative or full case list;
+`integration_shards` selects one or four independent environments. Cases run
+serially within each environment. Each case has a timeout, and the site enforces
+an overall execution deadline. Panic, timeout or execution abort stops that
+environment while the other shards finish; all results are collected before
+reclamation. Automatic triggers remain disabled during acceptance.
+
+`reuse_build` optionally names a successful workflow run as `run-id/attempt`.
+Leave `source_ref` blank in this mode. The workflow checks the prior attempt's
+success through the GitHub API and validates its stored build provenance and
+five RPMs, then feeds those exact outputs to integration and publish. It does
+not rebuild or repeat product native tests. Formatting is recorded as skipped
+for this explicit reuse path; summary still requires the reuse gate and every
+requested downstream phase to succeed. This supports comparing serial and
+four-shard integration against the same build without claiming validation of
+the current workflow branch's product code.
+
 `publish_packages` defaults to false. Enable it only when the existing `CCREPO_*`
 secrets are configured. A requested upload with missing secrets or a failed
 transfer fails the publish job and the summary without stopping integration.
@@ -56,6 +73,9 @@ final RPM files, so CPack's temporary staging tree and the retired `bin` path
 cannot be uploaded accidentally. DEB publishing is deferred until a matching
 build target and installation validation are added; `cranedeb` is not used by
 this phase.
+Publish copies only the five manifest-selected final packages into the current
+attempt's upload directory, including when reusing a prior build with an older
+directory layout.
 The publish job serializes uploads to that shared package destination without
 cancelling an in-progress publish; integration remains independent. Internal-only
 package hostnames are maintained in the site's cluster DNS, such as CoreDNS

@@ -44,6 +44,9 @@ class CIResultTest(unittest.TestCase):
             ({'format': 'failure'}, False),
             ({'format': 'cancelled'}, False),
             ({'format': 'skipped'}, False),
+            ({'format': 'skipped', 'reused': True}, True),
+            ({'format': 'skipped', 'reused': True, 'build': 'failure'}, False),
+            ({'format': 'skipped', 'reused': True, 'complete': 'false'}, False),
             ({'build': 'failure'}, False),
             ({'integration': 'cancelled'}, False),
             ({'integration': 'skipped'}, False),
@@ -57,7 +60,7 @@ class CIResultTest(unittest.TestCase):
             for changes, success in cases:
                 with self.subTest(changes=changes):
                     values = dict(format='success', build='success', integration='success', publish='skipped',
-                                  upload=False, complete='true', expected='5', passed='5')
+                                  upload=False, reused=False, complete='true', expected='5', passed='5')
                     values.update(changes)
                     needs = {name: {'result': values[name]} for name in ('format', 'build', 'integration', 'publish')}
                     needs['integration']['outputs'] = {name: values[name] for name in ('complete', 'expected', 'passed')}
@@ -65,6 +68,7 @@ class CIResultTest(unittest.TestCase):
                         ['bash', '-c', script], capture_output=True, text=True, timeout=10,
                         env={**os.environ, 'JOB_RESULTS': json.dumps(needs),
                              'PUBLISH_REQUESTED': str(values['upload']).lower(),
+                             'BUILD_REUSED': str(values['reused']).lower(),
                              'GITHUB_STEP_SUMMARY': str(Path(directory) / 'summary')},
                     )
                     self.assertEqual(result.returncode == 0, success, result.stdout + result.stderr)
