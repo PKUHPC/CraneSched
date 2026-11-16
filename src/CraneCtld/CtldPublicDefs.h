@@ -296,9 +296,8 @@ struct Config {
   std::vector<std::string> GresOrder;
   // Maps NodeName and NodeHostname to the canonical CranedId used by the
   // scheduler. NodeHostnames of FUTURE nodes are added when mapped, so
-  // accesses after startup must hold CranedIdByAliasMtx.
+  // accesses after startup must hold g_craned_id_by_alias_mtx.
   std::unordered_map<std::string, CranedId> CranedIdByAlias;
-  util::rw_mutex CranedIdByAliasMtx;
   std::unordered_map<std::string, Partition> Partitions;
   std::vector<std::string> PartitionOrder;
   std::string DefaultPartition;
@@ -360,12 +359,15 @@ inline constexpr array_task_id_t kNoArrayTaskId =
 
 inline Ctld::Config g_config{};
 
+// Kept out of Config so that Config stays movable.
+inline util::rw_mutex g_craned_id_by_alias_mtx;
+
 inline Ctld::RunTimeStatus g_runtime_status{};
 
 namespace Ctld {
 
 inline CranedId ResolveCranedIdAlias(const std::string& node) {
-  util::read_lock_guard lock(g_config.CranedIdByAliasMtx);
+  util::read_lock_guard lock(g_craned_id_by_alias_mtx);
   auto it = g_config.CranedIdByAlias.find(node);
   return it == g_config.CranedIdByAlias.end() ? node : it->second;
 }

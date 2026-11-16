@@ -25,4 +25,11 @@ namespace Ctld {
 // null. The inline global unique_ptr still requires the destructor symbol.
 JobScheduler::~JobScheduler() = default;
 
+// CranedMetaContainer.cpp is not linked either. GetStepToD() only reads the
+// node map of the container.
+CranedMetaContainer::CranedMetaMapConstPtr
+CranedMetaContainer::GetCranedMetaMapConstPtr() {
+  return craned_meta_map_.GetMapConstSharedPtr();
+}
+
 }  // namespace Ctld

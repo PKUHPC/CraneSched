@@ -13,7 +13,8 @@ list(TRANSFORM job_query_sources PREPEND "${PROJECT_SOURCE_DIR}/src/CraneCtld/")
 get_target_property(job_query_libraries cranectld LINK_LIBRARIES)
 get_target_property(job_query_definitions cranectld COMPILE_DEFINITIONS)
 get_target_property(job_query_includes cranectld INCLUDE_DIRECTORIES)
-add_executable(job_query_test JobQueryTest.cpp ${job_query_sources})
+add_executable(job_query_test JobQueryTest.cpp FutureNodeTest.cpp
+        ${job_query_sources})
 target_link_libraries(job_query_test PRIVATE
         GTest::gtest GTest::gtest_main ${job_query_libraries})
 target_compile_definitions(job_query_test PRIVATE ${job_query_definitions})

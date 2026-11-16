@@ -311,6 +311,8 @@ func GetFoundedNodes(reply *protos.QueryClusterInfoReply) map[string]bool {
 	found := make(map[string]bool, len(reply.Nodes))
 	for _, node := range reply.Nodes {
 		found[node.Hostname] = true
+		// A hostname bound at runtime is unknown to the client configuration.
+		found[node.NodeHostname] = true
 	}
 	return found
 }

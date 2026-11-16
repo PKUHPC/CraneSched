@@ -47,6 +47,14 @@ TEST(String, ShortHostnameKeepsTheFirstDnsLabel) {
   EXPECT_EQ(util::ShortHostname("node01"), "node01");
 }
 
+TEST(String, TlsHostnameQualifiesOnlyShortNames) {
+  EXPECT_EQ(util::TlsHostname("node01", "crane.local"), "node01.crane.local");
+  EXPECT_EQ(util::TlsHostname("node01.pku.edu.cn", "crane.local"),
+            "node01.pku.edu.cn");
+  EXPECT_EQ(util::TlsHostname("node01", ""), "node01");
+  EXPECT_EQ(util::TlsHostname("", "crane.local"), "");
+}
+
 TEST(String, ParseHostListKeepsDeterministicOrder) {
   using util::ParseHostList;
 
