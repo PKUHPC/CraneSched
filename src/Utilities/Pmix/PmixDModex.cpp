@@ -32,8 +32,8 @@ namespace pmix {
 
 namespace {
 
-void DModexOpCb(pmix_status_t status, char *data, size_t sz, void *cbdata) {
-  auto *dmo_modex_cb_data = reinterpret_cast<DModexCbData *>(cbdata);
+void DModexOpCb(pmix_status_t status, char* data, size_t sz, void* cbdata) {
+  auto* dmo_modex_cb_data = reinterpret_cast<DModexCbData*>(cbdata);
 
   CRANE_DEBUG("DModexOpCb: seq_num={}, craned_id={}",
               dmo_modex_cb_data->seq_num, dmo_modex_cb_data->craned_id);
@@ -77,9 +77,9 @@ void DModexOpCb(pmix_status_t status, char *data, size_t sz, void *cbdata) {
 
 }  // namespace
 
-bool PmixDModexReqManager::PmixDModexGet(const std::string &pmix_namespace,
+bool PmixDModexReqManager::PmixDModexGet(const std::string& pmix_namespace,
                                          int rank, pmix_modex_cbfunc_t cbfunc,
-                                         void *cbdata) {
+                                         void* cbdata) {
   // Find the node host corresponding to the nspace-rank.
   // Guard: negative rank would wrap when compared to size_t, check explicitly.
   if (rank < 0) {
@@ -120,12 +120,12 @@ bool PmixDModexReqManager::PmixDModexGet(const std::string &pmix_namespace,
   // CleanupTimeoutRequests().
   auto remove_req = [this, assigned_seq]() {
     util::lock_guard lock(m_dmodex_mutex_);
-    std::erase_if(m_pmix_dmodex_req_list_, [assigned_seq](const auto &r) {
+    std::erase_if(m_pmix_dmodex_req_list_, [assigned_seq](const auto& r) {
       return r.seq_num == assigned_seq;
     });
   };
 
-  auto *pmix_proc = request.mutable_pmix_proc();
+  auto* pmix_proc = request.mutable_pmix_proc();
   pmix_proc->set_nspace(pmix_namespace);
   pmix_proc->set_rank(rank);
 
@@ -159,9 +159,9 @@ bool PmixDModexReqManager::PmixDModexGet(const std::string &pmix_namespace,
 }
 
 void PmixDModexReqManager::PmixProcessRequest(uint32_t seq_num,
-                                              const CranedId &craned_id,
-                                              const pmix_proc_t &pmix_proc,
-                                              const std::string &send_nspace) {
+                                              const CranedId& craned_id,
+                                              const pmix_proc_t& pmix_proc,
+                                              const std::string& send_nspace) {
   if (pmix_proc.nspace != m_pmix_step_info_.nspace) {
     CRANE_ERROR("Bad request from {}: asked for nspace = {}", craned_id,
                 send_nspace);
@@ -196,8 +196,8 @@ void PmixDModexReqManager::PmixProcessRequest(uint32_t seq_num,
 }
 
 void PmixDModexReqManager::PmixProcessResponse(uint32_t seq_num,
-                                               const CranedId &craned_id,
-                                               const std::string &data,
+                                               const CranedId& craned_id,
+                                               const std::string& data,
                                                pmix_status_t status) {
   PmixDModexReq pmix_dmodex_req{};
 
@@ -205,7 +205,7 @@ void PmixDModexReqManager::PmixProcessResponse(uint32_t seq_num,
     util::lock_guard lock(m_dmodex_mutex_);
     auto it = std::ranges::find_if(
         m_pmix_dmodex_req_list_,
-        [seq_num](const auto &req) { return req.seq_num == seq_num; });
+        [seq_num](const auto& req) { return req.seq_num == seq_num; });
 
     if (it != m_pmix_dmodex_req_list_.end()) {
       pmix_dmodex_req = *it;
@@ -224,7 +224,7 @@ void PmixDModexReqManager::PmixProcessResponse(uint32_t seq_num,
 }
 
 void PmixDModexReqManager::ResponseWithError_(uint32_t seq_num,
-                                              const std::string &craned_id,
+                                              const std::string& craned_id,
                                               pmix_status_t status) {
   crane::grpc::pmix::PmixDModexResponseReq request{};
 
@@ -267,7 +267,7 @@ void PmixDModexReqManager::CleanupTimeoutRequests() {
 void PmixDModexReqManager::DrainAllRequests() {
   util::lock_guard lock(m_dmodex_mutex_);
 
-  for (auto &req : m_pmix_dmodex_req_list_) {
+  for (auto& req : m_pmix_dmodex_req_list_) {
     CRANE_WARN("DrainAllRequests: cancelling dmodex seq_num={} on shutdown",
                req.seq_num);
     PmixLibModexInvoke(req.cb_func, PMIX_ERR_TIMEOUT, nullptr, 0, req.cb_data,

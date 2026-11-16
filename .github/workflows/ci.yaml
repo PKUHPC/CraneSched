@@ -45,8 +45,9 @@ jobs:
     timeout-minutes: 15
     outputs:
       source_sha: ${{ steps.source.outputs.source_sha }}
-    # LLVM 20 apt packages are available for Noble, not Ubuntu 26.04.
-    runs-on: ubuntu-24.04
+    runs-on: crane-ci
+    container:
+      image: ${{ vars.CRANE_CI_DEV_IMAGE }}
 
     steps:
       - name: Checkout the selected product source
@@ -60,15 +61,8 @@ jobs:
         id: source
         run: echo "source_sha=$(git rev-parse HEAD)" >> "$GITHUB_OUTPUT"
 
-      - name: Install Clang-Format 20
-        run: |
-          set -euo pipefail
-          sudo apt-get install -y wget lsb-release
-          sudo wget -O /tmp/llvm.sh https://apt.llvm.org/llvm.sh
-          sudo bash /tmp/llvm.sh 20
-          sudo apt update
-          sudo apt-get install -y clang-format-20
-          clang-format-20 --version
+      - name: Report the image's clang-format version
+        run: clang-format --version
 
       - name: Check clang-format and prepare patch
         id: format
@@ -88,14 +82,14 @@ jobs:
           cpp_check_status=0
           proto_check_status=0
           if ((${#cpp_files[@]})); then
-            if clang-format-20 --dry-run --Werror --style=file "${cpp_files[@]}"; then
+            if clang-format --dry-run --Werror --style=file "${cpp_files[@]}"; then
               cpp_check_status=0
             else
               cpp_check_status=$?
             fi
           fi
           if ((${#proto_files[@]})); then
-            if clang-format-20 --dry-run --Werror --style=file:.clang-format-proto \
+            if clang-format --dry-run --Werror --style=file:.clang-format-proto \
               "${proto_files[@]}"; then
               proto_check_status=0
             else
@@ -112,14 +106,14 @@ jobs:
           cpp_format_status=0
           proto_format_status=0
           if ((cpp_check_status != 0 && ${#cpp_files[@]})); then
-            if clang-format-20 -i --style=file "${cpp_files[@]}"; then
+            if clang-format -i --style=file "${cpp_files[@]}"; then
               cpp_format_status=0
             else
               cpp_format_status=$?
             fi
           fi
           if ((proto_check_status != 0 && ${#proto_files[@]})); then
-            if clang-format-20 -i --style=file:.clang-format-proto "${proto_files[@]}"; then
+            if clang-format -i --style=file:.clang-format-proto "${proto_files[@]}"; then
               proto_format_status=0
             else
               proto_format_status=$?
@@ -251,6 +245,8 @@ jobs:
           ctest --test-dir cmake-build-ci-debug --output-on-failure
           make -C go test
           cmake --build --preset ci-debug --parallel "${BUILD_JOBS:-6}"
+          # Package inputs must all come from this source revision.
+          rm -rf go/build/bin go/build/plugin go/build/tool
           make -C go all tool PREFIX=/usr STRIP=true CHECK_GPU=0
           mkdir -p "$artifact_dir/packages/rpm" "$artifact_dir/cpack-backend"
           (cd cmake-build-ci-debug && cpack -G RPM -B "$artifact_dir/cpack-backend")

@@ -1,13 +1,13 @@
 # Build, Test and Publish
 
-`ci.yaml` starts with a C++ Clang Format job on GitHub-hosted Ubuntu, followed
-by four jobs through repository-scoped ARC scale sets. Each ARC job has an
-explicit digest-pinned container image. The runner image receives work;
+`ci.yaml` runs all five jobs through repository-scoped ARC scale sets. Each job
+has an explicit digest-pinned container image: Dev for C++ formatting, Base for
+Go checks and product builds, and CI tools for downstream execution. The runner image receives work;
 the job container provides the product toolchain or execution tools.
 
 | Job | Runner | Responsibility |
 | --- | --- | --- |
-| `format` | `ubuntu-24.04` | Check C/C++ sources and tests with Clang-Format 20, plus shared protocols with their separate style |
+| `format` | `crane-ci` | Use the pinned Dev image's clang-format for C/C++ sources, tests and shared protocols with their separate style |
 | `build` | `crane-build` | Check Go formatting and run vet, then C++/Go tests, build and package the same checked product commit |
 | `integration` | `crane-ci` | Assemble a test image from those RPMs, prepare versioned test inputs, run the selected tests, collect internal evidence and reclaim environments |
 | `publish` | `crane-ci` | Upload those RPMs immediately after a successful build, independently of integration |
@@ -22,9 +22,9 @@ are no longer part of this workflow.
 ## Formatting and Go vet
 
 Formatting is the first stage of this workflow; there is no separate formatting
-workflow. The C++ job pins Ubuntu 24.04 and Clang-Format 20 because the floating
-`ubuntu-latest` image moved to Ubuntu 26.04 before LLVM 20 apt packages supported
-that release. It checks `src/`, `test/` and shared `.proto` files, and uploads
+workflow. The job runs in the existing Dev image and prints its packaged
+`clang-format` version. The image digest fixes that toolchain; the job installs
+no packages. It checks `src/`, `test/` and shared `.proto` files, and uploads
 `format-diff` when corrections are needed. Its resolved product SHA is the input
 to the build job, so the checked and built revisions cannot diverge.
 
@@ -87,6 +87,7 @@ Repository variables:
 
 | Variable | Contract |
 | --- | --- |
+| `CRANE_CI_DEV_IMAGE` | Published Dev image with an immutable digest and the project's clang-format |
 | `CRANE_CI_BASE_IMAGE` | Published RHEL 10/amd64 build image with an immutable `@sha256:` digest |
 | `CRANE_CI_TOOLS_IMAGE` | Published execution-tools image with an immutable digest |
 | `CRANE_CI_GOPROXY` | Optional Go module proxy override; defaults to `https://goproxy.cn,direct` |
@@ -104,7 +105,11 @@ workflow files. The build container has no Kubernetes API token.
 complete CMake/Ninja tree and dependencies across source revisions. One flock
 covers source update, generation, native tests, build and packaging. Checkout
 uses an independent runner work volume; cleaning it never removes the hot
-build tree. ccache is shared; Go caches are local to the build pod.
+build tree. ccache is shared; Go caches are local to the build pod. Before rebuilding Go package
+inputs, the locked CI step clears `go/build/bin`, `go/build/plugin` and
+`go/build/tool`. This makes a removed command/plugin/tool fail packaging if its
+package declaration still names the old output. Compiler and dependency caches
+and the CMake/Ninja tree remain available.
 
 Every run attempt owns `/ci/attempts/<run-id>-<attempt>/build`. It contains five
 RPMs under `packages/rpm/` and a manifest with source SHA, Base digest, target,

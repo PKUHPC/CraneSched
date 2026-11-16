@@ -32,18 +32,18 @@ namespace util {
 uint32_t Crc32Of(std::string_view data, uint32_t seed) {
   uLong c = crc32(seed, Z_NULL, 0);
   return static_cast<uint32_t>(
-      crc32(c, reinterpret_cast<const Bytef *>(data.data()),
+      crc32(c, reinterpret_cast<const Bytef*>(data.data()),
             static_cast<uInt>(data.size())));
 }
 
 uint32_t Adler32Of(std::string_view data, uint32_t seed) {
   uLong a = adler32(seed, Z_NULL, 0);
   return static_cast<uint32_t>(
-      adler32(a, reinterpret_cast<const Bytef *>(data.data()),
+      adler32(a, reinterpret_cast<const Bytef*>(data.data()),
               static_cast<uInt>(data.size())));
 }
 
-std::string ReadFileIntoString(std::filesystem::path const &p) {
+std::string ReadFileIntoString(std::filesystem::path const& p) {
   std::ifstream file(p, std::ios::in | std::ios::binary);
   size_t sz = std::filesystem::file_size(p);
   std::string str(sz, '\0');
@@ -62,7 +62,7 @@ std::string ReadableMemory(uint64_t memory_bytes) {
     return fmt::format("{}G", memory_bytes / 1024 / 1024 / 1024);
 }
 
-CraneExpected<uint64_t> ParseMemory(const std::string &mem) {
+CraneExpected<uint64_t> ParseMemory(const std::string& mem) {
   std::regex mem_regex(R"((\d+)([KMBG]))");
   std::smatch mem_group;
   if (!std::regex_search(mem, mem_group, mem_regex)) {
@@ -79,7 +79,7 @@ CraneExpected<uint64_t> ParseMemory(const std::string &mem) {
   return memory_bytes;
 }
 
-std::optional<uint64_t> ParseMemStringAsByte(const std::string &mem) {
+std::optional<uint64_t> ParseMemStringAsByte(const std::string& mem) {
   static const LazyRE2 mem_regex = {R"(^([0-9]+(?:\.?[0-9]*))([MmGgKkB]?)$)"};
   std::string num_str, unit;
   if (!RE2::FullMatch(mem, *mem_regex, &num_str, &unit)) {
@@ -90,7 +90,7 @@ std::optional<uint64_t> ParseMemStringAsByte(const std::string &mem) {
   double sz = 0.0;
   try {
     sz = std::stod(num_str);
-  } catch (const std::exception &e) {
+  } catch (const std::exception& e) {
     CRANE_ERROR("invalid memory format: {}", mem);
     return std::nullopt;
   }
@@ -122,8 +122,8 @@ std::optional<uint64_t> ParseMemStringAsByte(const std::string &mem) {
   return bytes;
 }
 
-bool ParseNodeList(const std::string &node_str,
-                   std::list<std::string> *nodelist) {
+bool ParseNodeList(const std::string& node_str,
+                   std::list<std::string>* nodelist) {
   static const LazyRE2 brackets_regex = {R"(.*\[(.*)\])"};
   if (!RE2::PartialMatch(node_str, *brackets_regex)) {
     return false;
@@ -136,7 +136,7 @@ bool ParseNodeList(const std::string &node_str,
   static const LazyRE2 num_regex = {R"(\d+)"};
   static const LazyRE2 scope_regex = {R"(\d+-\d+)"};
 
-  for (const auto &str : unit_str_list) {
+  for (const auto& str : unit_str_list) {
     std::vector<std::string_view> node_num =
         absl::StrSplit(str, absl::ByAnyChar("[,"));
     std::list<std::string> unit_list;
@@ -176,8 +176,8 @@ bool ParseNodeList(const std::string &node_str,
     }
 
     std::list<std::string> temp_list;
-    for (const auto &left : res_list) {
-      for (const auto &right : unit_list) {
+    for (const auto& left : res_list) {
+      for (const auto& right : unit_list) {
         temp_list.emplace_back(fmt::format("{}{}", left, right));
       }
     }
@@ -185,7 +185,7 @@ bool ParseNodeList(const std::string &node_str,
   }
 
   if (!end_str.empty()) {
-    for (auto &str : res_list) {
+    for (auto& str : res_list) {
       str += end_str;
     }
   }
@@ -194,17 +194,17 @@ bool ParseNodeList(const std::string &node_str,
   return true;
 }
 
-std::string ShortHostname(const std::string &hostname) {
+std::string ShortHostname(const std::string& hostname) {
   const auto dot_pos = hostname.find('.');
   return dot_pos == std::string::npos ? hostname : hostname.substr(0, dot_pos);
 }
 
-bool ParseHostList(const std::string &host_str,
-                   std::list<std::string> *host_list) {
+bool ParseHostList(const std::string& host_str,
+                   std::list<std::string>* host_list) {
   std::string name_str;
   name_str.reserve(host_str.size());
 
-  for (auto &i : host_str)
+  for (auto& i : host_str)
     if (i != ' ') name_str += i;  // remove all spaces
 
   name_str += ',';  // uniform end format
@@ -212,7 +212,7 @@ bool ParseHostList(const std::string &host_str,
   std::list<std::string> str_list;
 
   std::string char_queue;
-  for (const auto &c : name_str) {
+  for (const auto& c : name_str) {
     if (c == '[') {
       if (char_queue.empty()) {
         char_queue += c;
@@ -252,7 +252,7 @@ bool ParseHostList(const std::string &host_str,
   // A hostlist's suffix is shared by every expanded element. Slurm permits
   // arbitrary suffixes (for example, "node[01-02]-gpu"), not only dot suffixes.
   static const LazyRE2 regex(R"(.*\[(.*)\].*)");
-  for (auto &&str : str_list) {
+  for (auto&& str : str_list) {
     std::string str_s{absl::StripAsciiWhitespace(str)};
     if (str_s == "") continue;
     if (!RE2::FullMatch(str_s, *regex)) {
@@ -264,8 +264,8 @@ bool ParseHostList(const std::string &host_str,
   return true;
 }
 
-bool HostNameListToStr_(std::list<std::string> &host_list,
-                        std::list<std::string> *res_list) {
+bool HostNameListToStr_(std::list<std::string>& host_list,
+                        std::list<std::string>* res_list) {
   std::unordered_map<std::string, std::vector<std::string>> host_map;
   bool res = true;
 
@@ -277,7 +277,7 @@ bool HostNameListToStr_(std::list<std::string> &host_list,
     return true;
   }
 
-  for (const auto &host : host_list) {
+  for (const auto& host : host_list) {
     if (host.empty()) continue;
 
     int start, end;
@@ -299,11 +299,11 @@ bool HostNameListToStr_(std::list<std::string> &host_list,
 
   if (res) return true;
 
-  for (auto &&iter : host_map) {
+  for (auto&& iter : host_map) {
     std::string host_name_str;
 
     int delimiter_pos = 0;
-    for (const auto &c : iter.first) {
+    for (const auto& c : iter.first) {
       if (c == '<') {
         break;
       }
@@ -313,7 +313,7 @@ bool HostNameListToStr_(std::list<std::string> &host_list,
     host_name_str += "[";
 
     std::sort(iter.second.begin(), iter.second.end(),
-              [](std::string &a, std::string &b) {
+              [](std::string& a, std::string& b) {
                 if (a.length() != b.length()) {
                   return a.length() < b.length();
                 } else {
@@ -326,7 +326,7 @@ bool HostNameListToStr_(std::list<std::string> &host_list,
 
     int first = -1, last = -1, num;
     std::string first_str, last_str;
-    for (const auto &num_str : iter.second) {
+    for (const auto& num_str : iter.second) {
       num = stoi(num_str);
       if (first < 0) {  // init the head
         first = last = num;
@@ -365,13 +365,13 @@ bool HostNameListToStr_(std::list<std::string> &host_list,
   return res;
 }
 
-bool FoundFirstNumberWithoutBrackets(const std::string &input, int *start,
-                                     int *end) {
+bool FoundFirstNumberWithoutBrackets(const std::string& input, int* start,
+                                     int* end) {
   *start = *end = 0;
   size_t opens = 0;
   int i = 0;
 
-  for (const auto &c : input) {
+  for (const auto& c : input) {
     if (c == '[') {
       opens++;
     } else if (c == ']') {
@@ -397,7 +397,7 @@ bool FoundFirstNumberWithoutBrackets(const std::string &input, int *start,
   }
 }
 
-std::string RemoveBracketsWithoutDashOrComma(const std::string &input) {
+std::string RemoveBracketsWithoutDashOrComma(const std::string& input) {
   std::string output = input;
   std::size_t leftBracketPos = 0;
   while ((leftBracketPos = output.find('[', leftBracketPos)) !=
@@ -419,7 +419,7 @@ std::string RemoveBracketsWithoutDashOrComma(const std::string &input) {
   return output;
 }
 
-void SetCurrentThreadName(const std::string &name) {
+void SetCurrentThreadName(const std::string& name) {
   // The thread name is not allowed to exceed 16 characters including '\0'.
   if (name.size() >= 16) {
     CRANE_ERROR("Thread name cannot exceed 16 character!");
@@ -432,21 +432,21 @@ void SetCurrentThreadName(const std::string &name) {
   }
 }
 
-bool ConvertStringToInt64(const std::string &s, int64_t *val) {
+bool ConvertStringToInt64(const std::string& s, int64_t* val) {
   std::from_chars_result convert_result{};
   convert_result = std::from_chars(s.data(), s.data() + s.size(), *val);
   return convert_result.ec == std::errc();
 }
 
-std::string ReadableGresMap(const GresMap &gres_map) {
+std::string ReadableGresMap(const GresMap& gres_map) {
   if (gres_map.empty()) return "None";
 
   std::vector<std::string> gres_str_vec;
-  for (const auto &[name, gc] : gres_map) {
+  for (const auto& [name, gc] : gres_map) {
     // Format: name:total[:type:count[:type:count...]]
     // e.g., gpu:4:A100:2:V100:2 or npu:1
     std::string entry = fmt::format("{}:{}", name, gc.total);
-    for (const auto &[type, cnt] : gc.specified) {
+    for (const auto& [type, cnt] : gc.specified) {
       entry += fmt::format(":{}:{}", type, cnt);
     }
     gres_str_vec.push_back(std::move(entry));
@@ -455,18 +455,18 @@ std::string ReadableGresMap(const GresMap &gres_map) {
   return absl::StrJoin(gres_str_vec, ",");
 }
 
-std::string ReadableResourceView(const ResourceView &resource) {
+std::string ReadableResourceView(const ResourceView& resource) {
   return fmt::format("cpu:{},mem:{},gres:[{}]", resource.CpuCountDouble(),
                      ReadableMemory(resource.GetMemoryBytes()),
                      ReadableGresMap(resource.GetGresMap()));
 }
 
-std::string ReadableDresInNode(const DedicatedResourceInNode &dres) {
+std::string ReadableDresInNode(const DedicatedResourceInNode& dres) {
   if (dres.IsZero()) return "0";
 
   std::vector<std::string> parts;
-  for (const auto &[device_name, type_slots_map] : dres.name_type_slots_map) {
-    for (const auto &[device_type, slots] : type_slots_map.type_slots_map) {
+  for (const auto& [device_name, type_slots_map] : dres.name_type_slots_map) {
+    for (const auto& [device_type, slots] : type_slots_map.type_slots_map) {
       parts.emplace_back(
           fmt::format("{}:{}:{}", device_name, device_type, slots.size()));
     }
@@ -475,14 +475,14 @@ std::string ReadableDresInNode(const DedicatedResourceInNode &dres) {
 }
 
 std::string ReadableGrpcDresInNode(
-    const crane::grpc::DedicatedResourceInNode &dres_in_node) {
+    const crane::grpc::DedicatedResourceInNode& dres_in_node) {
   if (dres_in_node.name_type_map_size() == 0) return "None";
 
   std::vector<std::string> typed_device_str_vec;
-  for (const auto &[dev_name, p] : dres_in_node.name_type_map()) {
-    const auto &type_size_map = p.type_slots_map();
+  for (const auto& [dev_name, p] : dres_in_node.name_type_map()) {
+    const auto& type_size_map = p.type_slots_map();
 
-    for (const auto &[dev_type, slots] : type_size_map)
+    for (const auto& [dev_type, slots] : type_size_map)
       typed_device_str_vec.push_back(
           fmt::format("{}:{}:{}", dev_name, dev_type, slots.slots_size()));
   }
@@ -499,7 +499,7 @@ std::string GenerateCommaSeparatedString(const int val) {
   return absl::StrJoin(val_vec, ",");
 }
 
-uint32_t CalcConfigCRC32(const YAML::Node &config) {
+uint32_t CalcConfigCRC32(const YAML::Node& config) {
   return Crc32Of(YAML::Dump(config));
 }
 
@@ -540,7 +540,7 @@ std::string NormalizeClusterDomain(std::string domain) {
 }
 
 std::expected<CertPair, std::string> ParseCertificate(
-    const std::string &cert_pem) {
+    const std::string& cert_pem) {
   // Load the certificate content into a BIO (memory buffer).
   std::unique_ptr<BIO, decltype(&BIO_free)> bio(
       BIO_new_mem_buf(cert_pem.data(), static_cast<int>(cert_pem.size())),
@@ -553,7 +553,7 @@ std::expected<CertPair, std::string> ParseCertificate(
   if (!cert) return std::unexpected("Failed to parse PEM certificate");
 
   // Retrieve Subject information.
-  X509_NAME *subject = X509_get_subject_name(cert.get());
+  X509_NAME* subject = X509_get_subject_name(cert.get());
   if (!subject) return std::unexpected("Failed to get subject name");
 
   int len = X509_NAME_get_text_by_NID(subject, NID_commonName, nullptr, 0);
@@ -563,14 +563,14 @@ std::expected<CertPair, std::string> ParseCertificate(
   len = X509_NAME_get_text_by_NID(subject, NID_commonName, cn.data(), len + 1);
   if (len <= 0) return std::unexpected("Failed to get common name");
 
-  ASN1_INTEGER *serial = X509_get_serialNumber(cert.get());
+  ASN1_INTEGER* serial = X509_get_serialNumber(cert.get());
   if (!serial) return std::unexpected("Failed to get serial number");
 
   std::unique_ptr<BIGNUM, decltype(&BN_free)> bn(
       ASN1_INTEGER_to_BN(serial, nullptr), &BN_free);
   if (!bn) return std::unexpected("Failed to convert serial to BIGNUM");
 
-  char *hex = BN_bn2hex(bn.get());
+  char* hex = BN_bn2hex(bn.get());
   if (!hex) return std::unexpected("Failed to convert serial to hex");
 
   std::string serial_number = std::string(hex);
@@ -593,15 +593,15 @@ std::string StepIdsToString(const job_id_t job_id, const step_id_t step_id) {
   return fmt::format("{}.{}", job_id, step_id);
 }
 
-std::string StepIdPairToString(const std::pair<job_id_t, step_id_t> &step) {
+std::string StepIdPairToString(const std::pair<job_id_t, step_id_t>& step) {
   return StepIdsToString(step.first, step.second);
 }
 
-std::string StepToDIdString(const crane::grpc::StepToD &step_to_d) {
+std::string StepToDIdString(const crane::grpc::StepToD& step_to_d) {
   return StepIdsToString(step_to_d.job_id(), step_to_d.step_id());
 }
 
-std::string StepStatusToString(const crane::grpc::JobStatus &status) {
+std::string StepStatusToString(const crane::grpc::JobStatus& status) {
   return std::string(Internal::CraneStepStatusStrArr[static_cast<int>(status)]);
 }
 
@@ -639,7 +639,7 @@ int TimeStr2Mins(absl::string_view input) {
 
   if (parts.size() > 3 || parts.empty()) return -1;
 
-  auto parse = [](absl::string_view sv, int &out) {
+  auto parse = [](absl::string_view sv, int& out) {
     return absl::SimpleAtoi(sv, &out);
   };
 
@@ -656,14 +656,14 @@ int TimeStr2Mins(absl::string_view input) {
   return (days * 1440) + hours * 60 + mins + (secs > 0 ? 1 : 0);
 }
 
-void ParsePrologEpilogHookPaths(const std::string &log_hook_config,
-                                const std::string &config_file_path,
-                                std::vector<std::string> *result) {
+void ParsePrologEpilogHookPaths(const std::string& log_hook_config,
+                                const std::string& config_file_path,
+                                std::vector<std::string>* result) {
   auto path_list = absl::StrSplit(log_hook_config, ",");
   std::filesystem::path base_dir =
       std::filesystem::path(config_file_path).parent_path();
 
-  for (const auto &path : path_list) {
+  for (const auto& path : path_list) {
     absl::string_view trimmed = absl::StripAsciiWhitespace(path);
     if (trimmed.empty()) continue;
 
@@ -686,7 +686,7 @@ void ParsePrologEpilogHookPaths(const std::string &log_hook_config,
   std::ranges::sort(*result, std::greater());
 }
 
-bool ConvertStringToGresMap(const std::string &s, GresMap *gres_map) {
+bool ConvertStringToGresMap(const std::string& s, GresMap* gres_map) {
   // Format: "name:count" or "name:type:count" or "name:unlimited"
   std::vector<std::string> items = absl::StrSplit(s, ":");
   std::string key = items[0];
@@ -698,7 +698,7 @@ bool ConvertStringToGresMap(const std::string &s, GresMap *gres_map) {
     uint64_t value;
     try {
       value = std::stoull(items[1]);
-    } catch (const std::exception &e) {
+    } catch (const std::exception& e) {
       return false;
     }
     (*gres_map)[key].total = value;
@@ -717,11 +717,11 @@ bool ConvertStringToGresMap(const std::string &s, GresMap *gres_map) {
     uint64_t value;
     try {
       value = std::stoull(items[2]);
-    } catch (const std::exception &e) {
+    } catch (const std::exception& e) {
       CRANE_ERROR("Failed to parse gres map string: {}", s);
       return false;
     }
-    auto &gc = (*gres_map)[key];
+    auto& gc = (*gres_map)[key];
     auto old = gc.specified[type];
     gc.specified[type] = value;
     gc.total -= old;
@@ -733,7 +733,7 @@ bool ConvertStringToGresMap(const std::string &s, GresMap *gres_map) {
   return true;
 }
 
-bool ConvertStringToResourceView(const std::string &s, ResourceView *res) {
+bool ConvertStringToResourceView(const std::string& s, ResourceView* res) {
   if (s.empty()) {
     res->SetCpuCount(kUnlimitedCpu);
     res->SetMemoryBytes(kMaxJobMemoryBytes);
@@ -744,7 +744,7 @@ bool ConvertStringToResourceView(const std::string &s, ResourceView *res) {
 
   ResourceView tmp = *res;
   std::vector<std::string> items = absl::StrSplit(s, ",");
-  for (const auto &item : items) {
+  for (const auto& item : items) {
     if (item.starts_with("gres/") && item.size() > 5) {
       if (!ConvertStringToGresMap(item.substr(5), &tmp.GetGresMap()))
         return false;
@@ -759,7 +759,7 @@ bool ConvertStringToResourceView(const std::string &s, ResourceView *res) {
           double cpu_count;
           try {
             cpu_count = std::stod(kv[1]);
-          } catch (const std::exception &e) {
+          } catch (const std::exception& e) {
             return false;
           }
           tmp.SetCpuCount(cpu_t(cpu_count));
@@ -793,10 +793,10 @@ bool ConvertStringToResourceView(const std::string &s, ResourceView *res) {
   return true;
 }
 
-std::string ReadableResourceInNodeV3(const ResourceInNodeV3 &res) {
+std::string ReadableResourceInNodeV3(const ResourceInNodeV3& res) {
   std::vector<std::string> parts;
 
-  const auto &cpu_set = res.GetCpuSet();
+  const auto& cpu_set = res.GetCpuSet();
   if (cpu_set.cpu_count > cpu_t{0}) {
     if (cpu_set.IsInteger()) {
       parts.push_back(
@@ -812,7 +812,7 @@ std::string ReadableResourceInNodeV3(const ResourceInNodeV3 &res) {
         fmt::format("mem:{}", ReadableMemory(res.GetMemoryBytes())));
   }
 
-  const auto &gres = res.GetGres();
+  const auto& gres = res.GetGres();
   if (!gres.IsZero()) {
     parts.push_back(fmt::format("gres:[{}]", ReadableDresInNode(gres)));
   }
@@ -821,11 +821,11 @@ std::string ReadableResourceInNodeV3(const ResourceInNodeV3 &res) {
   return absl::StrJoin(parts, ",");
 }
 
-std::string ReadableResourceV3(const ResourceV3 &res) {
+std::string ReadableResourceV3(const ResourceV3& res) {
   if (res.IsZero()) return "None";
 
   std::vector<std::string> node_parts;
-  for (const auto &[node_id, res_in_node] : res.EachNodeResMap()) {
+  for (const auto& [node_id, res_in_node] : res.EachNodeResMap()) {
     node_parts.push_back(fmt::format("{}:{{{}}}", node_id,
                                      ReadableResourceInNodeV3(res_in_node)));
   }
@@ -833,15 +833,15 @@ std::string ReadableResourceV3(const ResourceV3 &res) {
   return absl::StrJoin(node_parts, ";");
 }
 
-bool PartitionNodesProcess(const std::string &node_str,
-                           const std::list<std::string> &host_list,
-                           const std::string &part_name,
+bool PartitionNodesProcess(const std::string& node_str,
+                           const std::list<std::string>& host_list,
+                           const std::string& part_name,
                            bool disallow_unknown_node,
-                           std::unordered_set<std::string> *part_node_list) {
+                           std::unordered_set<std::string>* part_node_list) {
   auto act_nodes_str = absl::StripAsciiWhitespace(node_str);
 
   if (absl::EqualsIgnoreCase(act_nodes_str, "ALL")) {
-    for (const auto &node : host_list) {
+    for (const auto& node : host_list) {
       part_node_list->emplace(node);
       CRANE_TRACE("Find node {} in partition {}", node, part_name);
     }
@@ -857,7 +857,7 @@ bool PartitionNodesProcess(const std::string &node_str,
     } else {
       const std::unordered_set<std::string> node_name_set(host_list.begin(),
                                                           host_list.end());
-      for (const auto &node : name_list) {
+      for (const auto& node : name_list) {
         auto node_it = node_name_set.find(node);
         if (node_it != node_name_set.end()) {
           part_node_list->emplace(*node_it);

@@ -34,20 +34,20 @@ using EnvMap = std::unordered_map<std::string, std::string>;
 
 EnvMap FilterJobEnvForSshSession(EnvMap env);
 
-bool PamGetUserName(pam_handle_t *pamh, std::string *username);
+bool PamGetUserName(pam_handle_t* pamh, std::string* username);
 
-void PamSendMsgToClient(pam_handle_t *pamh, const char *mesg);
+void PamSendMsgToClient(pam_handle_t* pamh, const char* mesg);
 
-bool PamGetRemoteUid(pam_handle_t *pamh, const char *user_name, uid_t *uid);
+bool PamGetRemoteUid(pam_handle_t* pamh, const char* user_name, uid_t* uid);
 
-bool PamGetRemoteAddressPort(pam_handle_t *pamh, std::string *address,
-                             uint16_t *port);
+bool PamGetRemoteAddressPort(pam_handle_t* pamh, std::string* address,
+                             uint16_t* port);
 
-bool GrpcQueryPortFromCraned(pam_handle_t *pamh, uid_t uid,
-                             const std::string &remote_address,
-                             uint16_t port_to_query, uint32_t *job_id);
+bool GrpcQueryPortFromCraned(pam_handle_t* pamh, uid_t uid,
+                             const std::string& remote_address,
+                             uint16_t port_to_query, uint32_t* job_id);
 
-bool GrpcMigrateSshProcToCgroupAndSetEnv(pam_handle_t *pamh, pid_t pid,
+bool GrpcMigrateSshProcToCgroupAndSetEnv(pam_handle_t* pamh, pid_t pid,
                                          job_id_t job_id);
 
 struct PamConfig {
@@ -58,5 +58,5 @@ struct PamConfig {
 
 inline PamConfig g_pam_config;
 
-void LoadCraneConfig(pam_handle_t *pamh, int argc, const char **argv,
-                     bool *initialized);
+void LoadCraneConfig(pam_handle_t* pamh, int argc, const char** argv,
+                     bool* initialized);

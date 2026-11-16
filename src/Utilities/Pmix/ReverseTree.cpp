@@ -85,7 +85,7 @@ static int Dep(int total, int width) {
 }
 
 static int SearchTree(int id, int node, int max_children, int width,
-                      int *parent_id, int *next_max_children, int *depth) {
+                      int* parent_id, int* next_max_children, int* depth) {
   int current, next, next_children;
   int i;
 
@@ -117,8 +117,8 @@ static int SearchTree(int id, int node, int max_children, int width,
   return 0;
 }
 
-void ReverseTreeInfo(int rank, int num_nodes, int width, int *parent,
-                     int *num_children, int *depth, int *max_depth) {
+void ReverseTreeInfo(int rank, int num_nodes, int width, int* parent,
+                     int* num_children, int* depth, int* max_depth) {
   int max_children;
   int p, c;
 
@@ -189,7 +189,7 @@ void ReverseTreeInfo(int rank, int num_nodes, int width, int *parent,
 }
 
 int ReverseTreeDirectChildren(int rank, int num_nodes, int width, int depth,
-                              std::vector<int> *children) {
+                              std::vector<int>* children) {
   int current, child_distance;
   int max_depth, sub_depth, max_rank_children;
   int i;

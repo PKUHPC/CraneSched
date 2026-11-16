@@ -50,7 +50,7 @@ class FormatWorkflowContractTest(unittest.TestCase):
         self.assertIn("--dry-run --Werror", step)
         self.assertIn("find src test -type f", step)
         self.assertIn("-print0", step)
-        self.assertIn("clang-format-20 -i", step)
+        self.assertIn("clang-format -i", step)
         self.assertIn("git diff --binary -- src test protos > format.patch", step)
         self.assertIn("changed=true", step)
 
@@ -75,9 +75,14 @@ class FormatWorkflowContractTest(unittest.TestCase):
         self.assertRegex(gate, r"(?m)^          exit 1$")
 
     def test_pins_the_formatter_environment(self) -> None:
-        self.assertIn("runs-on: ubuntu-24.04", self.workflow)
-        self.assertIn("clang-format-20 --version", self.workflow)
-        self.assertNotIn("ubuntu-latest", self.workflow)
+        import yaml
+
+        job = yaml.safe_load(self.document)['jobs']['format']
+        self.assertEqual(job['runs-on'], 'crane-ci')
+        self.assertEqual(job['container']['image'], '${{ vars.CRANE_CI_DEV_IMAGE }}')
+        self.assertIn('clang-format --version', self.workflow)
+        for command in ('apt-get', 'apt.llvm.org', 'wget', 'sudo'):
+            self.assertNotIn(command, self.workflow)
 
     def _step(self, name: str) -> str:
         match = re.search(

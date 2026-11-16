@@ -14,6 +14,50 @@ import yaml
 
 
 class CIResultTest(unittest.TestCase):
+    def test_go_rebuild_clears_removed_package_inputs_and_preserves_caches(self):
+        product = Path(__file__).resolve().parents[2]
+        workflow = yaml.safe_load((product / '.github/workflows/ci.yaml').read_text())
+        script = next(step['run'] for step in workflow['jobs']['build']['steps'] if step.get('id') == 'build')
+        cleanup = script.split('cmake --build --preset ci-debug --parallel "${BUILD_JOBS:-6}"\n', 1)[1]
+        cleanup = cleanup.split('make -C go all tool', 1)[0]
+        package = yaml.safe_load((product / 'go/.goreleaser.yaml').read_text())
+        self.assertTrue(any(item.get('src') == 'build/plugin/mail.so'
+                            for archive in package['nfpms'] for item in archive['contents']))
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            go = root / 'go'
+            (go / 'plugin/dummy').mkdir(parents=True)
+            for relative in ('bin/removed', 'plugin/mail.so', 'tool/removed'):
+                path = go / 'build' / relative
+                path.parent.mkdir(parents=True, exist_ok=True)
+                path.write_text('previous revision')
+            sentinels = [root / name / 'keep' for name in ('go-cache', 'module-cache', 'ccache', 'cmake-build-ci-debug')]
+            for path in sentinels:
+                path.parent.mkdir()
+                path.write_text('persistent cache')
+            compiler = root / 'fake-go'
+            compiler.write_text('#!/usr/bin/env python3\nimport sys\nfrom pathlib import Path\n'
+                                'if "-o" in sys.argv:\n'
+                                '    path=Path(sys.argv[sys.argv.index("-o")+1]); path.parent.mkdir(parents=True, exist_ok=True); path.write_text("current revision")\n'
+                                'else: print("fixture compiler")\n')
+            compiler.chmod(0o755)
+            command = ['make', '--no-print-directory', '-f', str(product / 'go/Makefile'),
+                       '-o', 'protos', 'plugin-other', 'PLUGIN_NAMES=dummy', 'GO=' + str(compiler)]
+            def build():
+                result = subprocess.run(command, cwd=go, capture_output=True, text=True, timeout=10)
+                self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
+            build()
+            self.assertFalse((go / 'plugin/mail').exists())
+            self.assertEqual((go / 'build/plugin/mail.so').read_text(), 'previous revision')
+            environment = {key: value for key, value in os.environ.items() if key != 'BASH_ENV'}
+            subprocess.run(['bash', '-ec', cleanup], cwd=root, env=environment, check=True, timeout=10)
+            build()
+            self.assertFalse((go / 'build/plugin/mail.so').exists())
+            self.assertFalse((go / 'build/bin/removed').exists())
+            self.assertFalse((go / 'build/tool/removed').exists())
+            self.assertEqual((go / 'build/plugin/dummy.so').read_text(), 'current revision')
+            self.assertTrue(all(path.read_text() == 'persistent cache' for path in sentinels))
+
     def test_reuse_gate_requires_a_successful_attempt_and_unchanged_selected_rpms(self):
         workflow = yaml.safe_load((Path(__file__).parents[1] / 'workflows/ci.yaml').read_text())
         script = next(step['run'] for step in workflow['jobs']['build']['steps'] if step.get('id') == 'reuse')

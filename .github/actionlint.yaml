@@ -4,6 +4,7 @@ self-hosted-runner:
     - crane-ci
 config-variables:
   - CRANE_CI_BASE_IMAGE
+  - CRANE_CI_DEV_IMAGE
   - CRANE_CI_TOOLS_IMAGE
   - CRANE_CI_GOPROXY
   - CRANE_CI_INTEGRATION_ENTRYPOINT

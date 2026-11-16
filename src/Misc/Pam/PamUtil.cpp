@@ -36,8 +36,8 @@
 
 #include "protos/Crane.grpc.pb.h"
 
-static void FreePamResp(struct pam_response *pr, int num_msg) {
-  struct pam_response *r = pr;
+static void FreePamResp(struct pam_response* pr, int num_msg) {
+  struct pam_response* r = pr;
 
   if (pr == nullptr) return;
 
@@ -65,8 +65,8 @@ EnvMap FilterJobEnvForSshSession(EnvMap env) {
   return env;
 }
 
-void LoadCraneConfig(pam_handle_t *pamh, int argc, const char **argv,
-                     bool *initialized) {
+void LoadCraneConfig(pam_handle_t* pamh, int argc, const char** argv,
+                     bool* initialized) {
   g_pam_config.CraneConfigFilePath = kDefaultConfigPath;
 
   for (int i = 0; i < argc; i++) {
@@ -94,7 +94,7 @@ void LoadCraneConfig(pam_handle_t *pamh, int argc, const char **argv,
           g_pam_config.CraneBaseDir + kDefaultCranedForPamUnixSockPath;
 
     *initialized = true;
-  } catch (YAML::BadFile &e) {
+  } catch (YAML::BadFile& e) {
     pam_syslog(pamh, LOG_ERR,
                "[Crane] Pam module failed to read configuration: %s",
                e.msg.c_str());
@@ -102,10 +102,10 @@ void LoadCraneConfig(pam_handle_t *pamh, int argc, const char **argv,
   }
 }
 
-bool PamGetUserName(pam_handle_t *pamh, std::string *username) {
+bool PamGetUserName(pam_handle_t* pamh, std::string* username) {
   int rc;
-  char *p_username = nullptr;
-  rc = pam_get_item(pamh, PAM_USER, (const void **)&p_username);
+  char* p_username = nullptr;
+  rc = pam_get_item(pamh, PAM_USER, (const void**)&p_username);
   if (p_username == nullptr || rc != PAM_SUCCESS) {
     pam_syslog(pamh, LOG_ERR, "[Crane] No username in PAM_USER? Fail!");
     return false;
@@ -115,19 +115,19 @@ bool PamGetUserName(pam_handle_t *pamh, std::string *username) {
   }
 }
 
-void PamSendMsgToClient(pam_handle_t *pamh, const char *mesg) {
+void PamSendMsgToClient(pam_handle_t* pamh, const char* mesg) {
   int rc;
-  struct pam_conv *conv;
-  void *dummy; /* needed to eliminate warning
+  struct pam_conv* conv;
+  void* dummy; /* needed to eliminate warning
                 * dereferencing type-punned pointer will
                 * break strict-aliasing rules */
   struct pam_message msg[1];
-  const struct pam_message *pmsg[1];
-  struct pam_response *prsp;
+  const struct pam_message* pmsg[1];
+  struct pam_response* prsp;
 
   // Get conversation function to talk with app.
-  rc = pam_get_item(pamh, PAM_CONV, (const void **)&dummy);
-  conv = (struct pam_conv *)dummy;
+  rc = pam_get_item(pamh, PAM_CONV, (const void**)&dummy);
+  conv = (struct pam_conv*)dummy;
   if (rc != PAM_SUCCESS) {
     pam_syslog(pamh, LOG_ERR, "unable to get pam_conv: %s",
                pam_strerror(pamh, rc));
@@ -149,9 +149,9 @@ void PamSendMsgToClient(pam_handle_t *pamh, const char *mesg) {
   FreePamResp(prsp, 1);
 }
 
-bool PamGetRemoteUid(pam_handle_t *pamh, const char *user_name, uid_t *uid) {
+bool PamGetRemoteUid(pam_handle_t* pamh, const char* user_name, uid_t* uid) {
   size_t buf_size;
-  char *buf;
+  char* buf;
   struct passwd pwd, *pwd_result;
   int rc;
 
@@ -179,8 +179,8 @@ bool PamGetRemoteUid(pam_handle_t *pamh, const char *user_name, uid_t *uid) {
   return true;
 }
 
-bool PamGetRemoteAddressPort(pam_handle_t *pamh, std::string *address,
-                             uint16_t *port) {
+bool PamGetRemoteAddressPort(pam_handle_t* pamh, std::string* address,
+                             uint16_t* port) {
   std::ifstream tcp_file("/proc/net/tcp");
   std::string line;
   if (!tcp_file) {
@@ -232,7 +232,7 @@ bool PamGetRemoteAddressPort(pam_handle_t *pamh, std::string *address,
 
 #ifndef NDEBUG
   std::string output;
-  for (auto &&[k, v] : inode_addr_port_map) {
+  for (auto&& [k, v] : inode_addr_port_map) {
     output += fmt::format("{}:{}:{} ", k, v.first, v.second);
   }
 
@@ -240,7 +240,7 @@ bool PamGetRemoteAddressPort(pam_handle_t *pamh, std::string *address,
 #endif
 
   std::string fds_path = "/proc/self/fd";
-  for (const auto &entry : std::filesystem::directory_iterator(fds_path)) {
+  for (const auto& entry : std::filesystem::directory_iterator(fds_path)) {
     // entry must have call stat() once in its implementation.
     // So entry.is_socket() points to the real file.
     if (entry.is_socket()) {
@@ -266,8 +266,8 @@ bool PamGetRemoteAddressPort(pam_handle_t *pamh, std::string *address,
       } else {
         std::vector<std::string> addr_port_hex =
             absl::StrSplit(iter->second.first, ':');
-        const std::string &addr_hex = addr_port_hex[0];
-        const std::string &port_hex = addr_port_hex[1];
+        const std::string& addr_hex = addr_port_hex[0];
+        const std::string& port_hex = addr_port_hex[1];
 
         if (iter->second.second == 4) {
           // ipv4
@@ -314,9 +314,9 @@ bool PamGetRemoteAddressPort(pam_handle_t *pamh, std::string *address,
   return false;
 }
 
-bool GrpcQueryPortFromCraned(pam_handle_t *pamh, uid_t uid,
-                             const std::string &remote_address,
-                             uint16_t port_to_query, uint32_t *job_id) {
+bool GrpcQueryPortFromCraned(pam_handle_t* pamh, uid_t uid,
+                             const std::string& remote_address,
+                             uint16_t port_to_query, uint32_t* job_id) {
   using grpc::Channel;
   using grpc::ClientContext;
   using grpc::Status;
@@ -378,7 +378,7 @@ bool GrpcQueryPortFromCraned(pam_handle_t *pamh, uid_t uid,
   }
 }
 
-bool GrpcMigrateSshProcToCgroupAndSetEnv(pam_handle_t *pamh, pid_t pid,
+bool GrpcMigrateSshProcToCgroupAndSetEnv(pam_handle_t* pamh, pid_t pid,
                                          job_id_t job_id) {
   using grpc::Channel;
   using grpc::ClientContext;
@@ -455,7 +455,7 @@ bool GrpcMigrateSshProcToCgroupAndSetEnv(pam_handle_t *pamh, pid_t pid,
     pam_syslog(pamh, LOG_ERR, "[Crane] QueryJobEnvVariablesForward succeeded.");
     auto env = FilterJobEnvForSshSession(
         EnvMap{reply.env_map().begin(), reply.env_map().end()});
-    for (const auto &[name, value] : env) {
+    for (const auto& [name, value] : env) {
       int ret = pam_putenv(pamh, fmt::format("{}={}", name, value).c_str());
       if (ret != PAM_SUCCESS) {
         pam_syslog(pamh, LOG_ERR, "[Crane] Set env %s=%s  failed", name.c_str(),

@@ -24,9 +24,9 @@
 namespace Craned {
 
 grpc::Status CranedForPamServiceImpl::QueryStepFromPortForward(
-    grpc::ServerContext *context,
-    const crane::grpc::QueryStepFromPortForwardRequest *request,
-    crane::grpc::QueryStepFromPortForwardReply *response) {
+    grpc::ServerContext* context,
+    const crane::grpc::QueryStepFromPortForwardRequest* request,
+    crane::grpc::QueryStepFromPortForwardReply* response) {
   bool ok;
   bool job_id_found = false;
   bool remote_is_craned = false;
@@ -191,9 +191,9 @@ grpc::Status CranedForPamServiceImpl::QueryStepFromPortForward(
 }
 
 grpc::Status CranedForPamServiceImpl::MigrateSshProcToCgroup(
-    grpc::ServerContext *context,
-    const crane::grpc::MigrateSshProcToCgroupRequest *request,
-    crane::grpc::MigrateSshProcToCgroupReply *response) {
+    grpc::ServerContext* context,
+    const crane::grpc::MigrateSshProcToCgroupRequest* request,
+    crane::grpc::MigrateSshProcToCgroupReply* response) {
   if (!g_server->ReadyFor(RequestSource::PAM)) {
     CRANE_ERROR("CranedServer is not ready.");
     response->set_ok(false);
@@ -217,9 +217,9 @@ grpc::Status CranedForPamServiceImpl::MigrateSshProcToCgroup(
 }
 
 grpc::Status CranedForPamServiceImpl::QuerySshStepEnvVariablesForward(
-    grpc::ServerContext *context,
-    const crane::grpc::QuerySshStepEnvVariablesForwardRequest *request,
-    crane::grpc::QuerySshStepEnvVariablesForwardReply *response) {
+    grpc::ServerContext* context,
+    const crane::grpc::QuerySshStepEnvVariablesForwardRequest* request,
+    crane::grpc::QuerySshStepEnvVariablesForwardReply* response) {
   if (!g_server->ReadyFor(RequestSource::PAM)) {
     CRANE_ERROR("CranedServer is not ready.");
     response->set_ok(false);
@@ -233,14 +233,14 @@ grpc::Status CranedForPamServiceImpl::QuerySshStepEnvVariablesForward(
     response->set_ok(false);
     return Status::OK;
   }
-  for (const auto &[name, value] : job_env_map.value())
+  for (const auto& [name, value] : job_env_map.value())
     response->mutable_env_map()->emplace(name, value);
   response->set_ok(true);
   return Status::OK;
 }
 
 CranedForPamServer::CranedForPamServer(
-    const Config::CranedListenConf &listen_conf) {
+    const Config::CranedListenConf& listen_conf) {
   m_service_impl_ = std::make_unique<CranedForPamServiceImpl>();
 
   grpc::ServerBuilder builder;
