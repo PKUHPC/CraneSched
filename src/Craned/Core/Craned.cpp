@@ -1108,7 +1108,6 @@ void ParseConfig(int argc, char** argv) {
             RegisterNodeHostnameAliasOrExit_(name, name);
             RegisterNodeHostnameAliasOrExit_(node_hostname, name);
             g_config.CranedIdToNodeHostname[name] = node_hostname;
-            g_config.CranedIdToNodeAddr[name] = node_addr;
             if (!node["state"] ||
                 absl::AsciiStrToUpper(node["state"].as<std::string>()) !=
                     "FUTURE")

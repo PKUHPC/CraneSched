@@ -1288,6 +1288,9 @@ class JobScheduler {
   void QueryRnJobOnCtldForNodeConfig(const CranedId& craned_id,
                                      crane::grpc::ConfigureCranedRequest* req);
 
+  // Nodes required by the nodelist of pending jobs.
+  std::unordered_set<CranedId> GetPendingJobIncludedNodes();
+
   void TerminateStepsOnOtherNodes(
       const std::unordered_map<job_id_t, std::set<step_id_t>>& steps,
       const CranedId& excluded_node);
