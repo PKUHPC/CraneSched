@@ -46,6 +46,9 @@ struct StepInstance {
   crane::ManualSpan wait_execute_span;
 
   std::atomic_bool err_before_supv_start{false};
+  // The Step stays in JobInD::step_map while allocation work is running.
+  bool initialization_pending{false};
+  bool free_requested{false};
   // Stored when Completing is received from supervisor.
   // Used to send the real terminal status after cleanup.
   struct PendingTerminalStatus {

@@ -9,6 +9,7 @@ set(CRANE_UNIT_TEST_TARGETS
     job_query_test
     vault_client_test
     execution_groups_test
+    job_manager_lifecycle_test
     container_identity_test
     embedded_db_client_test
     ctld_public_defs_test

@@ -18,6 +18,7 @@
 
 #include "JobManager.h"
 
+#include <absl/cleanup/cleanup.h>
 #include <pty.h>
 #include <sys/wait.h>
 
@@ -363,7 +364,9 @@ EnvMap JobInD::GetJobEnvMap() {
   return env_map;
 }
 
-JobManager::JobManager() {
+JobManager::JobManager() : JobManager(true) {}
+
+JobManager::JobManager(bool start_loop) {
   m_uvw_loop_ = uvw::loop::create();
 
   m_sigchld_handle_ = m_uvw_loop_->resource<uvw::signal_handle>();
@@ -453,9 +456,11 @@ JobManager::JobManager() {
   m_free_steps_async_handle_ = m_uvw_loop_->resource<uvw::async_handle>();
   m_free_steps_async_handle_->on<uvw::async_event>(
       [this](const uvw::async_event&, uvw::async_handle&) {
+        EvCleanStepInitializationFinishedQueueCb_();
         EvCleanFreeStepsQueueCb_();
       });
 
+  if (!start_loop) return;
   m_uvw_thread_ = std::thread([this]() {
     util::SetCurrentThreadName("JobMgrLoopThr");
     auto idle_handle = m_uvw_loop_->resource<uvw::idle_handle>();
@@ -787,19 +792,38 @@ void JobManager::AllocSteps(std::vector<StepToD>&& steps,
         fail_step(job_id, step_id);
         continue;
       }
-      // Simply wrap the job structure within an Execution structure and
-      // pass it to the event loop. The cgroup field of this job is initialized
-      // in the corresponding handler.
       auto step_inst = std::make_unique<StepInstance>(step);
       step_inst->step_to_d = std::move(step);
       step_inst->traceparent = job_ptr->job_to_d.traceparent();
-      EvQueueAllocateStepElem elem{.step_inst = std::move(step_inst),
+      step_inst->initialization_pending = true;
+
+      EvQueueAllocateStepElem elem{.job_id = job_id,
+                                   .step_id = step_id,
+                                   .traceparent = step_inst->traceparent,
                                    .need_run_prolog = false};
-      // GetJobEnvMap must step_map has the daemon step.
-      if (elem.step_inst->step_id != kDaemonStepId) {
-        elem.need_run_prolog = !job_ptr->is_prolog_run;
-        elem.job_env = job_ptr->GetJobEnvMap();
-        job_ptr->is_prolog_run = true;
+      {
+        absl::MutexLock lk(job_ptr->step_map_mtx.get());
+        auto daemon_it = job_ptr->step_map.find(kDaemonStepId);
+        if (daemon_it != job_ptr->step_map.end() &&
+            daemon_it->second->free_requested) {
+          CRANE_WARN("[Step #{}.{}] Job daemon is being freed.", job_id,
+                     step_id);
+          fail_step(job_id, step_id);
+          continue;
+        }
+        if (step_id != kDaemonStepId) {
+          if (daemon_it == job_ptr->step_map.end()) {
+            CRANE_WARN("[Step #{}.{}] Daemon step is not allocated.", job_id,
+                       step_id);
+            fail_step(job_id, step_id);
+            continue;
+          }
+          elem.need_run_prolog = !job_ptr->is_prolog_run;
+          elem.job_env = job_ptr->GetJobEnvMap();
+          job_ptr->is_prolog_run = true;
+        }
+        job_ptr->step_map.emplace(step_id, std::move(step_inst));
+        if (step_id == kDaemonStepId) elem.job_env = job_ptr->GetJobEnvMap();
       }
       m_grpc_alloc_step_queue_.enqueue(std::move(elem));
       accepted_steps[job_id].insert(step_id);
@@ -1332,16 +1356,14 @@ void JobManager::EvCleanGrpcAllocStepsQueueCb_() {
   bool has_int_job = false;
 
   while (m_grpc_alloc_step_queue_.try_dequeue(elem)) {
-    std::unique_ptr step_inst = std::move(elem.step_inst);
-
-    if (!m_job_map_.Contains(step_inst->job_id)) {
+    if (!m_job_map_.Contains(elem.job_id)) {
       CRANE_ERROR("[Step #{}.{}] Failed to find a job allocation for the step",
-                  step_inst->job_id, step_inst->step_id);
+                  elem.job_id, elem.step_id);
       elem.ok_prom.set_value(CraneErrCode::ERR_CGROUP);
       continue;
     }
 
-    auto job_ptr = m_job_map_.GetValueExclusivePtr(step_inst->job_id);
+    auto job_ptr = m_job_map_.GetValueExclusivePtr(elem.job_id);
     if (job_ptr && !job_ptr->cgroup) {
       ResourceInNodeV3 res_v3(job_ptr->job_to_d.res());
       if (res_v3.GetCpuSet().IsInteger()) {
@@ -1352,26 +1374,55 @@ void JobManager::EvCleanGrpcAllocStepsQueueCb_() {
 
     elem.ok_prom.set_value(CraneErrCode::SUCCESS);
 
-    g_thread_pool->detach_task([this, execution = step_inst.release(),
+    g_thread_pool->detach_task([this, job_id = elem.job_id,
+                                step_id = elem.step_id,
+                                traceparent = elem.traceparent,
                                 need_run_prolog = elem.need_run_prolog,
                                 job_env = elem.job_env] {
+      absl::Cleanup finish_initialization = [this, job_id, step_id] {
+        m_step_initialization_finished_queue_.enqueue({job_id, step_id});
+        m_free_steps_async_handle_->send();
+      };
       if (need_run_prolog) {
-        CRANE_TRACE_SCOPE_FROM_REMOTE(prolog_span, "step/prolog",
-                                      execution->traceparent);
-        prolog_span.SetAttribute("job_id", execution->job_id);
-        prolog_span.SetAttribute("step_id", execution->step_id);
-        if (!RunPrologWhenAllocSteps_(execution->job_id, execution->step_id,
-                                      job_env)) {
+        CRANE_TRACE_SCOPE_FROM_REMOTE(prolog_span, "step/prolog", traceparent);
+        prolog_span.SetAttribute("job_id", job_id);
+        prolog_span.SetAttribute("step_id", step_id);
+        if (!RunPrologWhenAllocSteps_(job_id, step_id, job_env)) {
           prolog_span.SetStatus(crane::StatusCode::kError, "prolog_failed");
           return;
         }
       }
 
-      LaunchStepMt_(std::unique_ptr<StepInstance>(execution));
+      LaunchStepMt_(job_id, step_id, job_env);
     });
   }
 
   if (has_int_job) CgroupManager::WriteOverflowCpuset();
+}
+
+void JobManager::EvCleanStepInitializationFinishedQueueCb_() {
+  StepKey key;
+  while (m_step_initialization_finished_queue_.try_dequeue(key)) {
+    // Failure statuses were queued before the completion notification. Apply
+    // them before Free can move a never-started step to the cleanup path.
+    EvCleanStepStatusChangeQueueCb_();
+    auto job = m_job_map_.GetValueExclusivePtr(key.first);
+    if (!job) continue;
+    absl::MutexLock lk(job->step_map_mtx.get());
+    auto it = job->step_map.find(key.second);
+    if (it == job->step_map.end()) continue;
+    auto& step = *it->second;
+    step.initialization_pending = false;
+    // Prolog failure and Free-before-launch have no supervisor to poll.
+    if (step.supv_pid <= 0) step.err_before_supv_start = true;
+    if (step.free_requested)
+      m_free_steps_queue_.enqueue({key.first, key.second});
+    auto daemon = job->step_map.find(kDaemonStepId);
+    if (daemon != job->step_map.end() && daemon->second->free_requested)
+      m_free_steps_queue_.enqueue({key.first, kDaemonStepId});
+  }
+  m_grpc_execute_step_async_handle_->send();
+  m_terminate_step_async_handle_->send();
 }
 
 void JobManager::Wait() {
@@ -1451,6 +1502,11 @@ CraneExpected<void> JobManager::ChangeStepTimeConstraint(
     auto status = step_it->second->status;
     if (status == StepStatus::Completing || IsFinishedStepStatus(status))
       return {};
+
+    // An accepted allocation can be visible before its supervisor exists.
+    if (step_it->second->initialization_pending &&
+        !step_it->second->supervisor_stub)
+      return std::unexpected{CraneErrCode::ERR_RPC_FAILURE};
 
     stub = step_it->second->supervisor_stub;
   }
@@ -1540,6 +1596,8 @@ CraneExpected<EnvMap> JobManager::QuerySshStepEnvVariables(job_id_t job_id,
     return std::unexpected{CraneErrCode::ERR_NON_EXISTENT};
   }
   auto& stub = step_it->second->supervisor_stub;
+  if (!stub && step_it->second->initialization_pending)
+    return std::unexpected{CraneErrCode::ERR_RPC_FAILURE};
   if (!stub) {
     CRANE_ERROR("[Step #{}.{}] Supervisor stub is null when query env", job_id,
                 step_id);
@@ -1553,6 +1611,7 @@ CraneExpected<EnvMap> JobManager::QuerySshStepEnvVariables(job_id_t job_id,
 
 void JobManager::EvCleanGrpcExecuteStepQueueCb_() {
   EvQueueExecuteStepElem elem;
+  std::vector<EvQueueExecuteStepElem> deferred;
 
   while (m_grpc_execute_step_queue_.try_dequeue(elem)) {
     // Once ExecuteStep RPC is processed, the Execution goes into m_job_map_.
@@ -1579,6 +1638,14 @@ void JobManager::EvCleanGrpcExecuteStepQueueCb_() {
       elem.ok_prom.set_value(CraneErrCode::ERR_NON_EXISTENT);
       continue;
     }
+    if (step_it->second->free_requested) {
+      elem.ok_prom.set_value(CraneErrCode::SUCCESS);
+      continue;
+    }
+    if (step_it->second->initialization_pending) {
+      deferred.push_back(std::move(elem));
+      continue;
+    }
     if (step_it->second->status != StepStatus::Starting) {
       CRANE_DEBUG(
           "[Step #{}.{}] Ignoring duplicate or late ExecuteStep in status {}.",
@@ -1590,6 +1657,8 @@ void JobManager::EvCleanGrpcExecuteStepQueueCb_() {
     step_it->second->ExecuteStepAsync();
     elem.ok_prom.set_value(CraneErrCode::SUCCESS);
   }
+  m_grpc_execute_step_queue_.enqueue_bulk(
+      std::make_move_iterator(deferred.begin()), deferred.size());
 }
 
 std::optional<JobInD> JobManager::FreeJobInfo_(job_id_t job_id) {
@@ -1723,6 +1792,15 @@ void JobManager::FreeStepAllocation_(
                                     .timestamp = pt.timestamp});
     }
     ResolveStepCleanupWaiters_(StepKey{job_id, step_id}, CraneErrCode::SUCCESS);
+    auto job = m_job_map_.GetValueExclusivePtr(job_id);
+    if (job) {
+      absl::MutexLock lk(job->step_map_mtx.get());
+      auto daemon = job->step_map.find(kDaemonStepId);
+      if (daemon != job->step_map.end() && daemon->second->free_requested) {
+        m_free_steps_queue_.enqueue({job_id, kDaemonStepId});
+        m_free_steps_async_handle_->send();
+      }
+    }
   }
 }
 
@@ -1781,13 +1859,12 @@ bool JobManager::RunPrologWhenAllocSteps_(job_id_t job_id, step_id_t step_id,
   return true;
 }
 
-void JobManager::LaunchStepMt_(std::unique_ptr<StepInstance> step) {
+void JobManager::LaunchStepMt_(job_id_t job_id, step_id_t step_id,
+                               const EnvMap& job_env) {
   // This function runs in a multi-threading manner. Take care of thread
   // safety. JobInstance will not be free during this function. Take care of
   // data race for job instance.
 
-  job_id_t job_id = step->job_id;
-  step_id_t step_id = step->step_id;
   auto job_ptr = m_job_map_.GetValueExclusivePtr(job_id);
   if (!job_ptr) {
     CRANE_ERROR("[Step #{}.{}] Failed to find job allocation", job_id, step_id);
@@ -1798,6 +1875,14 @@ void JobManager::LaunchStepMt_(std::unique_ptr<StepInstance> step) {
     return;
   }
   auto* job = job_ptr.get();
+  absl::MutexLock step_map_lock(job->step_map_mtx.get());
+  auto it = job->step_map.find(step_id);
+  if (it == job->step_map.end()) return;
+  auto* step = it->second.get();
+  auto daemon = job->step_map.find(kDaemonStepId);
+  if (step->free_requested ||
+      (daemon != job->step_map.end() && daemon->second->free_requested))
+    return;
 
   // Check if the step is acceptable.
   // We keep this container check here in case we support enabling/disabling
@@ -1836,11 +1921,7 @@ void JobManager::LaunchStepMt_(std::unique_ptr<StepInstance> step) {
     }
   }
 
-  auto* step_ptr = step.get();
-  {
-    absl::MutexLock lk(job->step_map_mtx.get());
-    job->step_map.emplace(step->step_id, std::move(step));
-  }
+  auto* step_ptr = step;
 
   // SpawnSupervisor reports failure before registering a supervisor when
   // setup, fork, or process-group isolation fails. In these cases, report the
@@ -1860,7 +1941,7 @@ void JobManager::LaunchStepMt_(std::unique_ptr<StepInstance> step) {
             : prepare_reason);
     return;
   }
-  err = step_ptr->SpawnSupervisor(job->GetJobEnvMap());
+  err = step_ptr->SpawnSupervisor(job_env);
   if (err != CraneErrCode::SUCCESS) {
     step_ptr->err_before_supv_start = true;
     SendCompletingAndTerminal_(
@@ -2274,8 +2355,9 @@ void JobManager::EvCleanTerminateStepQueueCb_() {
         continue;
       }
       auto& step = job_instance->step_map.at(elem.step_id);
-      if (step->status != StepStatus::Running &&
-          step->status != StepStatus::Starting) {
+      if (step->initialization_pending ||
+          (step->status != StepStatus::Running &&
+           step->status != StepStatus::Starting)) {
         if (step->status == StepStatus::Completing ||
             IsFinishedStepStatus(step->status)) {
           CRANE_DEBUG(
@@ -2311,8 +2393,22 @@ void JobManager::EvCleanTerminateStepQueueCb_() {
                     elem.job_id);
       }
 
+      const bool retry_job_termination =
+          terminate_job &&
+          std::ranges::any_of(job_instance->step_map, [](const auto& entry) {
+            return entry.first != kDaemonStepId &&
+                   (entry.second->initialization_pending ||
+                    entry.second->status == StepStatus::Configuring);
+          });
       for (auto step_id : terminate_step_ids) {
         auto& step_instance = job_instance->step_map.at(step_id);
+        if (step_instance->initialization_pending ||
+            step_instance->status == StepStatus::Configuring ||
+            (step_id == kDaemonStepId && retry_job_termination))
+          continue;
+        if (step_instance->status == StepStatus::Completing ||
+            IsFinishedStepStatus(step_instance->status))
+          continue;
         auto stub = step_instance->supervisor_stub;
         if (!stub) {
           CRANE_ERROR("[Step #{}.{}] Supervisor stub is null when terminating",
@@ -2333,6 +2429,7 @@ void JobManager::EvCleanTerminateStepQueueCb_() {
         }
         CRANE_TRACE("[Step #{}.{}] Terminated.", elem.job_id, step_id);
       }
+      if (retry_job_termination) not_ready_elems.emplace_back(std::move(elem));
     }
   }
   m_step_terminate_queue_.enqueue_bulk(
@@ -2452,11 +2549,42 @@ void JobManager::EvCleanFreeStepsQueueCb_() {
       }
 
       auto& step = job->step_map.at(elem.step_id);
+      step->free_requested = true;
+      if (step->initialization_pending) {
+        CRANE_DEBUG(
+            "[Step #{}.{}] Initialization is still running; defer FreeSteps.",
+            elem.job_id, elem.step_id);
+        continue;
+      }
       if (step->IsDaemonStep()) {
+        if (job->step_map.size() > 1) {
+          for (auto& [id, child] : job->step_map) {
+            if (id == kDaemonStepId) continue;
+            if (step->silent_cleanup) child->silent_cleanup = true;
+            if (!child->free_requested) {
+              child->free_requested = true;
+              m_free_steps_queue_.enqueue({elem.job_id, id});
+            }
+          }
+          continue;
+        }
+        {
+          absl::MutexLock retry_lk(&m_free_job_step_mtx_);
+          if (std::ranges::any_of(m_completing_step_retry_map_,
+                                  [&key](const auto& entry) {
+                                    return entry.first.first == key.first &&
+                                           entry.first.second != kDaemonStepId;
+                                  }) ||
+              std::ranges::any_of(steps_to_free_keys,
+                                  [&key](const auto& child) {
+                                    return child.first == key.first &&
+                                           child.second != kDaemonStepId;
+                                  }))
+            continue;
+        }
         if (step->daemon_job_cleanup.has_value()) {
           CRANE_DEBUG("[Step #{}.{}] Daemon step is already cleaning.",
                       elem.job_id, elem.step_id);
-          ResolveStepCleanupWaiters_(key, CraneErrCode::SUCCESS);
           continue;
         }
 
@@ -2470,6 +2598,13 @@ void JobManager::EvCleanFreeStepsQueueCb_() {
         continue;
       }
 
+      if (step->supv_pid <= 0 && !step->pending_terminal_status) {
+        step->pending_terminal_status = StepInstance::PendingTerminalStatus{
+            .final_status = StepStatus::Completed,
+            .exit_code = 0,
+            .reason = "Allocation released before supervisor startup",
+            .timestamp = google::protobuf::util::TimeUtil::GetCurrentTime()};
+      }
       steps_to_free.emplace_back(step.release());
       steps_to_free_keys.insert(key);
       job->step_map.erase(elem.step_id);
@@ -2487,7 +2622,10 @@ void JobManager::EvCleanFreeStepsQueueCb_() {
       }
       m_completing_step_retry_map_[key] = CompletingStepState{.step = step};
       if (step->err_before_supv_start) continue;
-      if (!step->silent_cleanup && !step->IsDaemonStep()) continue;
+      if (!step->silent_cleanup && !step->IsDaemonStep() &&
+          (step->status == StepStatus::Completing ||
+           IsFinishedStepStatus(step->status)))
+        continue;
       steps_to_shutdown.emplace_back(step);
     }
   }
@@ -2512,7 +2650,7 @@ void JobManager::EvCleanFreeStepsQueueCb_() {
         err = stub->ShutdownSupervisor();
       } else {
         CRANE_TRACE(
-            "[Step #{}.{}] Terminating non-daemon supervisor for silent "
+            "[Step #{}.{}] Terminating non-daemon supervisor for "
             "cleanup.",
             step->job_id, step->step_id);
         err = stub->TerminateStep(

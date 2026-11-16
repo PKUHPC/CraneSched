@@ -192,6 +192,9 @@ class JobManager {
   void SetSigintCallback(std::function<void()> cb);
 
  private:
+  friend class JobManagerLifecycleTest;
+  explicit JobManager(bool start_loop);
+
   template <class T>
   using ConcurrentQueue = moodycamel::ConcurrentQueue<T>;
   using JobMap = util::AtomicHashMap<absl::flat_hash_map, job_id_t, JobInD>;
@@ -204,7 +207,9 @@ class JobManager {
   };
 
   struct EvQueueAllocateStepElem {
-    std::unique_ptr<StepInstance> step_inst;
+    job_id_t job_id;
+    step_id_t step_id;
+    std::string traceparent;
     bool need_run_prolog;
     EnvMap job_env;
     std::promise<CraneErrCode> ok_prom;
@@ -253,7 +258,7 @@ class JobManager {
   bool RunPrologWhenAllocSteps_(job_id_t job_id, step_id_t step_id,
                                 const EnvMap& job_env);
 
-  void LaunchStepMt_(std::unique_ptr<StepInstance> step);
+  void LaunchStepMt_(job_id_t job_id, step_id_t step_id, const EnvMap& job_env);
 
   /**
    * Inform CraneCtld of the status change of a job.
@@ -351,7 +356,9 @@ class JobManager {
 
   std::shared_ptr<uvw::async_handle> m_free_steps_async_handle_;
   ConcurrentQueue<FreeStepElem> m_free_steps_queue_;
+  ConcurrentQueue<StepKey> m_step_initialization_finished_queue_;
   void EvCleanFreeStepsQueueCb_();
+  void EvCleanStepInitializationFinishedQueueCb_();
 
   // The function which will be called when SIGINT is triggered.
   std::function<void()> m_sigint_cb_;
