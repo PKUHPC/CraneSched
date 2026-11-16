@@ -117,6 +117,65 @@ CraneErrCode WaitStepCleanupFutures_(StepCleanupFutureMap&& futures) {
   return result;
 }
 
+// Called by the completion timer under m_free_job_step_mtx_. Keep cleanup
+// progress separate from the execution result already reported by Supervisor.
+bool CheckSupervisorCompletion_(CompletingStepState& state,
+                                std::chrono::steady_clock::time_point now) {
+  auto* step = state.step;
+  if (step == nullptr || step->err_before_supv_start) return true;
+
+  const job_id_t job_id = step->job_id;
+  const step_id_t step_id = step->step_id;
+  const auto timeout =
+      std::chrono::seconds{g_config.CranedConf.SupervisorCompletionTimeoutSec};
+  if (kill(step->supv_pid, 0) == 0) {
+    if (!state.sigkill_sent && now - state.completion_started_at >= timeout) {
+      CRANE_WARN(
+          "[Step #{}.{}] Supervisor is still running after {} seconds of "
+          "step completion, sending SIGKILL.",
+          job_id, step_id, timeout.count());
+      kill(step->supv_pid, SIGKILL);
+      // A cleanup timeout does not invalidate a known execution result. In
+      // particular, replacing Completed/0 with EC_RPC_ERR would requeue a
+      // successfully completed batch job when JobRequeue is enabled.
+      if (!step->pending_terminal_status.has_value()) {
+        step->pending_terminal_status = StepInstance::PendingTerminalStatus{
+            .final_status = StepStatus::Failed,
+            .exit_code = ExitCode::EC_RPC_ERR,
+            .reason = "Supervisor not responding during step completion",
+            .timestamp = google::protobuf::util::TimeUtil::GetCurrentTime()};
+      }
+      state.sigkill_sent = true;
+    }
+    return false;
+  }
+
+  // Supervisor exited. The Completing message may still be in the status
+  // change queue; give it time to arrive before declaring the result lost.
+  if (!step->pending_terminal_status.has_value() && !step->silent_cleanup) {
+    state.status_wait_count++;
+    if (state.status_wait_count >= kMaxStatusWaitRetryCount) {
+      CRANE_ERROR(
+          "[Step #{}.{}] Timed out waiting for pending_terminal_status "
+          "after supervisor exit. Forcing Failed.",
+          job_id, step_id);
+      step->pending_terminal_status = StepInstance::PendingTerminalStatus{
+          .final_status = StepStatus::Failed,
+          .exit_code = ExitCode::EC_RPC_ERR,
+          .reason =
+              "Timed out waiting for terminal status after supervisor exit",
+          .timestamp = google::protobuf::util::TimeUtil::GetCurrentTime()};
+    } else {
+      CRANE_TRACE(
+          "[Step #{}.{}] Supervisor exited but pending_terminal_status "
+          "not set, waiting for next tick.",
+          job_id, step_id);
+      return false;
+    }
+  }
+  return true;
+}
+
 bool ProcHasPendingSigkill_(pid_t pid) {
   std::ifstream ifs(fmt::format("/proc/{}/status", pid));
   if (!ifs.is_open()) return false;
@@ -1131,62 +1190,8 @@ bool JobManager::EvCheckSupervisorRunning_() {
     std::vector<StepKey> exit_steps;
     absl::MutexLock lk(&m_free_job_step_mtx_);
     for (auto& [step_key, state] : m_completing_step_retry_map_) {
-      auto* step = state.step;
-      if (step == nullptr) {
+      if (CheckSupervisorCompletion_(state, std::chrono::steady_clock::now()))
         exit_steps.push_back(step_key);
-        continue;
-      }
-      if (step->err_before_supv_start) {
-        exit_steps.push_back(step_key);
-        continue;
-      }
-      job_id_t job_id = step->job_id;
-      step_id_t step_id = step->step_id;
-      auto exists = kill(step->supv_pid, 0) == 0;
-
-      if (exists) {
-        state.alive_check_count++;
-        if (!state.sigkill_sent &&
-            state.alive_check_count >= kMaxSupervisorCheckRetryCount) {
-          CRANE_WARN(
-              "[Step #{}.{}] Supervisor is still running after {} checks, "
-              "sending SIGKILL.",
-              job_id, step_id, kMaxSupervisorCheckRetryCount);
-          kill(step->supv_pid, SIGKILL);
-          step->pending_terminal_status = StepInstance::PendingTerminalStatus{
-              .final_status = StepStatus::Failed,
-              .exit_code = ExitCode::EC_RPC_ERR,
-              .reason = "Supervisor not responding during step completion",
-              .timestamp = google::protobuf::util::TimeUtil::GetCurrentTime()};
-          state.sigkill_sent = true;
-        }
-        continue;
-      }
-      // Supervisor exited. Wait for pending_terminal_status to be set
-      // (Completing message may still be in the status change queue).
-      if (!step->pending_terminal_status.has_value() && !step->silent_cleanup) {
-        state.status_wait_count++;
-        if (state.status_wait_count >= kMaxStatusWaitRetryCount) {
-          CRANE_ERROR(
-              "[Step #{}.{}] Timed out waiting for pending_terminal_status "
-              "after supervisor exit. Forcing Failed.",
-              job_id, step_id);
-          step->pending_terminal_status = StepInstance::PendingTerminalStatus{
-              .final_status = StepStatus::Failed,
-              .exit_code = ExitCode::EC_RPC_ERR,
-              .reason =
-                  "Timed out waiting for terminal status "
-                  "after supervisor exit",
-              .timestamp = google::protobuf::util::TimeUtil::GetCurrentTime()};
-        } else {
-          CRANE_TRACE(
-              "[Step #{}.{}] Supervisor exited but pending_terminal_status "
-              "not set, waiting for next tick.",
-              job_id, step_id);
-          continue;
-        }
-      }
-      exit_steps.push_back(step_key);
     }
     for (const auto& step_key : exit_steps) {
       auto completing_it = m_completing_step_retry_map_.find(step_key);

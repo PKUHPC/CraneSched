@@ -10,6 +10,7 @@ set(CRANE_UNIT_TEST_TARGETS
     vault_client_test
     execution_groups_test
     task_manager_test
+    step_completion_test
     embedded_db_client_test
     ctld_public_defs_test
     dedicated_resource_test

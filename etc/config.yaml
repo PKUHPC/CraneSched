@@ -110,6 +110,9 @@ Craned:
   ThreadPoolSize: 0
   # Optional worker-local cgroup operation concurrency limit (0 = disabled)
   CgroupOpConcurrency: 0
+  # Seconds to wait for a completing Supervisor to exit before SIGKILL.
+  # Must be positive. A reported terminal status is preserved on timeout.
+  SupervisorCompletionTimeout: 30
   # Use direct cgroup v2 fs operations instead of libcgroup for hot paths.
   CgroupV2FastPath: true
   # sync_rmdir or async_rmdir. async_rmdir lets a background janitor remove dirs.
