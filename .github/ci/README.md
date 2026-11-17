@@ -48,8 +48,10 @@ manual dispatch; automatic PR execution is deferred until the planned acceptance
 uses this workflow's commit. Checkout resolves it to a full SHA; C++ and Go share
 that source and the same `ci-debug` target. `harness_ref` optionally selects the
 integration suite's branch, tag or commit, defaulting to `master`. The site
-entry point resolves it once and records the SHA. Missing inputs or a version
-mismatch fail preparation instead of selecting an older cached suite.
+launcher fetches it on every attempt, resolves it once and records the SHA. The
+executor, environment CLI and cases come from that same commit. Updates on
+`master` need no workflow edits or entry-point variables. Fetch failure or a
+version mismatch fails preparation instead of selecting an older cached suite.
 
 `integration_shards` selects one or four independent environments. The
 integration entrypoint discovers every top-level `TestTC...` function from the
@@ -103,8 +105,6 @@ Repository variables:
 | `CRANE_CI_BASE_IMAGE` | Published RHEL 10/amd64 build image with an immutable `@sha256:` digest |
 | `CRANE_CI_TOOLS_IMAGE` | Published execution-tools image with an immutable digest |
 | `CRANE_CI_GOPROXY` | Optional Go module proxy override; defaults to `https://goproxy.cn,direct` |
-| `CRANE_CI_INTEGRATION_ENTRYPOINT` | Versioned internal entry point under the read-only `/ci/assets/` mount |
-| `CRANE_CI_INTEGRATION_SHA256` | SHA-256 of that prepared entry point |
 
 The Kubernetes hook templates provide shared storage, resource limits, UID/GID
 1001, registry pull authentication and the execution identity. API, registry and
@@ -142,7 +142,12 @@ remain local workflow outputs and are not uploaded as GitHub Releases.
 
 ## Integration entry-point contract
 
-The site entry point receives `CI_ARTIFACT_DIR`, `CI_MANIFEST_SHA256`,
+The platform mounts a stable launcher at `/etc/ci-launcher/launch.py` and its
+site configuration beside it. Source-read credentials remain in Kubernetes.
+The launcher fetches the selected suite revision and invokes its matching executor;
+no private source or repository URL is stored in this product repository.
+
+The executor receives `CI_ARTIFACT_DIR`, `CI_MANIFEST_SHA256`,
 `CI_SOURCE_SHA` and `CI_TEST_REF`. It uses only the successful build attempt's
 RPMs, records the resolved suite revision and actual asset inputs, and invokes
 the existing builder without replacing or deleting it. Suite selection is

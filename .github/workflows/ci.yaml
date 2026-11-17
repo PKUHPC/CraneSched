@@ -228,8 +228,6 @@ jobs:
       CI_MANIFEST_SHA256: ${{ needs.build.outputs.manifest_sha256 }}
       CI_SOURCE_SHA: ${{ needs.build.outputs.source_sha }}
       CI_TEST_REF: ${{ inputs.harness_ref || 'master' }}
-      CI_ENTRYPOINT: ${{ vars.CRANE_CI_INTEGRATION_ENTRYPOINT }}
-      CI_ENTRYPOINT_SHA256: ${{ vars.CRANE_CI_INTEGRATION_SHA256 }}
       CI_SHARD_COUNT: ${{ inputs.integration_shards }}
     steps:
       - name: Prepare the test inputs, run tests and reclaim their environments
@@ -237,10 +235,7 @@ jobs:
         run: |
           set -euo pipefail
           unset HTTP_PROXY HTTPS_PROXY ALL_PROXY http_proxy https_proxy all_proxy
-          [[ "$CI_ENTRYPOINT" == /ci/assets/* ]]
-          [[ "$CI_ENTRYPOINT_SHA256" =~ ^[a-f0-9]{64}$ ]]
-          printf '%s  %s\n' "$CI_ENTRYPOINT_SHA256" "$CI_ENTRYPOINT" | sha256sum --check --status
-          python3 "$CI_ENTRYPOINT"
+          python3 /etc/ci-launcher/launch.py
 
   publish:
     name: Publish this build's RPMs
