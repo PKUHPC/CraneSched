@@ -66,7 +66,7 @@ jobs:
         id: format
         continue-on-error: true
         shell: bash
-        run: python3 .ci-tools/.github/ci/check-format.py
+        run: python3 .ci-tools/.github/ci/check_format.py
 
       - name: Upload format patch
         if: always() && steps.format.outputs.changed == 'true'
@@ -327,4 +327,4 @@ jobs:
           persist-credentials: false
 
       - name: Report and enforce the required results
-        run: python3 .ci-tools/.github/ci/summarize-ci.py
+        run: python3 .ci-tools/.github/ci/summarize_ci.py

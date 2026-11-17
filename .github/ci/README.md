@@ -82,15 +82,18 @@ inherited by Kubernetes job pods.
 ## CI Scripts
 
 The workflow keeps shell and Python behavior in this directory so scripts can be
-run directly and tested without extracting source text from YAML:
+run directly and tested without extracting source text from YAML. Python filenames
+use `snake_case`, including command entrypoints and `test_*.py` files.
+
+Shell scripts retain their command-style hyphenated names.
 
 | Script | Responsibility |
 | --- | --- |
-| `check-format.py` | Check C/C++ and protocol formatting; write an applicable patch on failure |
+| `check_format.py` | Check C/C++ and protocol formatting; write an applicable patch on failure |
 | `prepare-go-package-inputs.sh` | Remove stale generated Go package inputs before rebuilding |
 | `collect-rpm-packages.sh` | Copy final CPack RPMs, excluding intermediate files |
 | `upload-packages.sh` | Upload the manifest-selected RPM files |
-| `summarize-ci.py` | Report job results and enforce required CI phases |
+| `summarize_ci.py` | Report job results and enforce required CI phases |
 
 Repository variables:
 

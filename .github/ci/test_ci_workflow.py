@@ -75,7 +75,7 @@ class CIResultTest(unittest.TestCase):
             self.assertTrue(all(path.read_text() == path.name for path in files))
 
     def test_real_summary_rejects_failed_cancelled_missing_or_partial_phases(self):
-        script = Path(__file__).with_name('summarize-ci.py')
+        script = Path(__file__).with_name('summarize_ci.py')
         cases = [
             ({}, True),
             ({'publish': 'success', 'upload': True}, True),

@@ -14,7 +14,7 @@ import yaml
 CI = Path(__file__).resolve().parent
 PRODUCT = CI.parents[1]
 WORKFLOW = CI.parent / 'workflows/ci.yaml'
-FORMAT_SCRIPT = CI / 'check-format.py'
+FORMAT_SCRIPT = CI / 'check_format.py'
 
 
 class FormatWorkflowContractTest(unittest.TestCase):
