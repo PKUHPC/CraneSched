@@ -218,6 +218,25 @@ bool CreateFolders(std::string const& p) {
   return ok;
 }
 
+std::expected<void, std::error_code> EnsureServiceDirectory(
+    const std::filesystem::path& path, mode_t permissions) {
+  std::error_code ec;
+  if (!path.parent_path().empty()) {
+    std::filesystem::create_directories(path.parent_path(), ec);
+    if (ec) return std::unexpected(ec);
+  }
+  if (mkdir(path.c_str(), permissions) != 0 && errno != EEXIST)
+    return std::unexpected(std::error_code(errno, std::generic_category()));
+
+  int fd = open(path.c_str(), O_RDONLY | O_DIRECTORY | O_NOFOLLOW | O_CLOEXEC);
+  if (fd == -1)
+    return std::unexpected(std::error_code(errno, std::generic_category()));
+  absl::Cleanup close_fd = [fd] { close(fd); };
+  if (fchown(fd, geteuid(), getegid()) != 0 || fchmod(fd, permissions) != 0)
+    return std::unexpected(std::error_code(errno, std::generic_category()));
+  return {};
+}
+
 bool CreateFoldersForFile(std::string const& p) {
   try {
     std::filesystem::path log_path{p};

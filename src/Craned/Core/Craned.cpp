@@ -1439,8 +1439,20 @@ void ParseConfig(int argc, char** argv) {
 
 void CreateRequiredDirectories() {
   bool ok;
-  ok = util::os::CreateFolders(g_config.CranedScriptDir);
-  if (!ok) std::exit(1);
+  auto result =
+      util::os::EnsureServiceDirectory(g_config.CranedScriptDir, 0755);
+  if (!result) {
+    CRANE_ERROR("Failed to secure script directory {}: {}",
+                g_config.CranedScriptDir, result.error().message());
+    std::exit(1);
+  }
+  // Protect historical supervisor logs even before the first new step starts.
+  result = util::os::EnsureServiceDirectory(g_config.Supervisor.LogDir, 0700);
+  if (!result) {
+    CRANE_ERROR("Failed to secure supervisor log directory {}: {}",
+                g_config.Supervisor.LogDir, result.error().message());
+    std::exit(1);
+  }
 
   ok = util::os::CreateFolders(g_config.CraneBaseDir /
                                kDefaultSupervisorUnixSockDir);

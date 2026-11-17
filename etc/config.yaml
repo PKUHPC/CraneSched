@@ -267,7 +267,8 @@ Supervisor:
   Path: /usr/libexec/csupervisor
   # Supervisor log level
   DebugLevel: trace
-  # Relate to CraneBaseDir
+  # Dedicated directory relative to CraneBaseDir. Owned by Craned's runtime
+  # user/group with mode 0700; supervisor log files use mode 0600.
   LogDir: supervisor
   # max size of supervisor log file
   MaxLogFileSize: 50M

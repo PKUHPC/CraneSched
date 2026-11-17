@@ -162,7 +162,8 @@ void InitLogger(spdlog::level::level_enum level,
                 uint64_t max_file_size, uint64_t max_file_num,
                 size_t async_queue_size = kDefaultAsyncLogQueueSize,
                 size_t async_thread_count = kDefaultAsyncLogThreadCount,
-                bool async_block_when_full = kDefaultAsyncLogBlockWhenFull);
+                bool async_block_when_full = kDefaultAsyncLogBlockWhenFull,
+                bool private_file = false);
 
 std::shared_ptr<spdlog::async_logger> AddLogger(
     const std::string& name, spdlog::level::level_enum level,

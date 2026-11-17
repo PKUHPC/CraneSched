@@ -268,9 +268,17 @@ int InitFromStdin(int argc, char** argv) {
 
   auto log_level = StrToLogLevel(g_config.SupervisorDebugLevel);
   if (log_level.has_value()) {
-    InitLogger(log_level.value(), g_config.SupervisorLogFile, false,
-               g_config.SupervisorMaxLogFileSize,
-               g_config.SupervisorMaxLogFileNum);
+    try {
+      InitLogger(log_level.value(), g_config.SupervisorLogFile, false,
+                 g_config.SupervisorMaxLogFileSize,
+                 g_config.SupervisorMaxLogFileNum, kDefaultAsyncLogQueueSize,
+                 kDefaultAsyncLogThreadCount, kDefaultAsyncLogBlockWhenFull,
+                 /*private_file=*/true);
+    } catch (const spdlog::spdlog_ex& e) {
+      fmt::print(stderr, "[Supervisor #{}.{}] Failed to initialize log: {}\n",
+                 g_config.JobId, g_config.StepId, e.what());
+      ok = false;
+    }
   } else {
     fmt::print(stderr, "[Supervisor #{}.{}] Invalid debug level: {}\n",
                g_config.SupervisorDebugLevel, g_config.JobId, g_config.StepId);
@@ -322,15 +330,12 @@ int InitFromStdin(int argc, char** argv) {
 }
 
 bool CreateRequiredDirectories() {
-  bool ok{true};
-  ok = util::os::CreateFolders(g_config.CraneScriptDir);
-  if (!ok) return ok;
-
-  if (g_config.SupervisorDebugLevel != "off") {
-    ok = util::os::CreateFoldersForFile(g_config.SupervisorLogFile);
-    if (!ok) return ok;
+  auto result = util::os::EnsureServiceDirectory(g_config.CraneScriptDir, 0755);
+  if (!result) {
+    CRANE_ERROR("Failed to secure script directory {}: {}",
+                g_config.CraneScriptDir, result.error().message());
+    return false;
   }
-
   return true;
 }
 
