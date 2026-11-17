@@ -16,9 +16,10 @@
 #include "protos/Supervisor.grpc.pb.h"
 
 namespace Craned {
-void ExpectCascadeReleasesConfiguringPrimary(
+void ExpectCascadeResultInCtld(
     job_id_t job_id,
-    const std::vector<crane::grpc::StepStatusChangeRequest>& changes);
+    const std::vector<crane::grpc::StepStatusChangeRequest>& changes,
+    crane::grpc::JobStatus expected_status, uint32_t expected_exit_code);
 namespace {
 using namespace std::chrono_literals;
 
@@ -103,7 +104,9 @@ class JobManagerLifecycleTest : public testing::Test {
   std::unique_ptr<JobManager> manager;
   std::filesystem::path temp_dir;
   TestSupervisor supervisor;
+  TestSupervisor daemon_supervisor;
   std::unique_ptr<grpc::Server> supervisor_server;
+  std::unique_ptr<grpc::Server> daemon_supervisor_server;
   int started_fd{-1};
   int release_fd{-1};
   std::atomic_int job_destroyed{0};
@@ -131,6 +134,8 @@ class JobManagerLifecycleTest : public testing::Test {
     manager.reset();
     if (supervisor_server) supervisor_server->Shutdown();
     supervisor_server.reset();
+    if (daemon_supervisor_server) daemon_supervisor_server->Shutdown();
+    daemon_supervisor_server.reset();
     g_ctld_client.reset();
     g_thread_pool.reset();
     if (started_fd >= 0) close(started_fd);
@@ -241,6 +246,40 @@ class JobManagerLifecycleTest : public testing::Test {
     return manager->m_step_terminate_queue_.size_approx();
   }
 
+  void AttachSupervisor(step_id_t id, TestSupervisor& service,
+                        std::unique_ptr<grpc::Server>& server) {
+    const auto endpoint =
+        "unix://" + (temp_dir / (std::to_string(id) + ".sock")).string();
+    grpc::ServerBuilder builder;
+    builder.AddListeningPort(endpoint, grpc::InsecureServerCredentials());
+    builder.RegisterService(&service);
+    server = builder.BuildAndStart();
+    ASSERT_NE(server, nullptr);
+    auto job = manager->QueryJob(kJob);
+    job->step_map.at(id)->supervisor_stub =
+        std::make_shared<SupervisorStub>(endpoint);
+  }
+
+  void ExpectControllerResult(StepStatus status, uint32_t exit_code) {
+    std::vector<crane::grpc::StepStatusChangeRequest> changes;
+    for (const auto& change : ReportedStatuses()) {
+      auto& request = changes.emplace_back();
+      request.set_step_id(change.step_id);
+      request.set_new_status(change.new_status);
+      request.set_exit_code(change.exit_code);
+      request.set_reason(change.reason.value_or(""));
+      *request.mutable_timestamp() = change.timestamp;
+    }
+    ExpectCascadeResultInCtld(kJob, changes, status, exit_code);
+  }
+
+  void ReportDaemonFailure() {
+    manager->StepStatusChangeAsync(
+        kJob, kDaemonStepId, StepStatus::Completing, 42, "daemon exited",
+        StepStatus::Failed, google::protobuf::util::TimeUtil::GetCurrentTime());
+    ProcessStatus();
+  }
+
   void PrepareSupervisorResult(step_id_t id) {
     // Substitute only cgroup/fork/startup. Keep the pending flag until the
     // production completion event is processed by libuv.
@@ -248,15 +287,9 @@ class JobManagerLifecycleTest : public testing::Test {
     ASSERT_TRUE(manager->m_grpc_alloc_step_queue_.try_dequeue(allocation));
     ASSERT_EQ(allocation.step_id, id);
     allocation.ok_prom.set_value(CraneErrCode::SUCCESS);
-    const auto endpoint = "unix://" + (temp_dir / "supervisor.sock").string();
-    grpc::ServerBuilder builder;
-    builder.AddListeningPort(endpoint, grpc::InsecureServerCredentials());
-    builder.RegisterService(&supervisor);
-    supervisor_server = builder.BuildAndStart();
-    ASSERT_NE(supervisor_server, nullptr);
+    AttachSupervisor(id, supervisor, supervisor_server);
     auto job = manager->QueryJob(kJob);
     auto& step = *job->step_map.at(id);
-    step.supervisor_stub = std::make_shared<SupervisorStub>(endpoint);
     step.supv_pid = getpid();
     step.status = StepStatus::Starting;
     // Disable the periodic fallback: these tests must exercise the completion
@@ -544,10 +577,7 @@ TEST_F(JobManagerLifecycleTest, DaemonCascadeReleasesConfiguringPrimaryInCtld) {
 
   // An unexpected daemon exit asks Ctld to free only the daemon. The new
   // Craned cascade must drive the still-Configuring primary to release too.
-  manager->StepStatusChangeAsync(
-      kJob, kDaemonStepId, StepStatus::Completing, 42, "daemon exited",
-      StepStatus::Failed, google::protobuf::util::TimeUtil::GetCurrentTime());
-  ProcessStatus();
+  ReportDaemonFailure();
   auto freed = Free(kDaemonStepId);
   ProcessFree();
   StartInitialization();
@@ -555,22 +585,51 @@ TEST_F(JobManagerLifecycleTest, DaemonCascadeReleasesConfiguringPrimaryInCtld) {
       [&] { return freed.wait_for(0s) == std::future_status::ready; }));
   ASSERT_EQ(freed.get(), CraneErrCode::SUCCESS);
 
-  std::vector<crane::grpc::StepStatusChangeRequest> changes;
-  for (const auto& change : ReportedStatuses()) {
-    auto& request = changes.emplace_back();
-    request.set_step_id(change.step_id);
-    request.set_new_status(change.new_status);
-    request.set_exit_code(change.exit_code);
-    request.set_reason(change.reason.value_or(""));
-    *request.mutable_timestamp() = change.timestamp;
-  }
-  ExpectCascadeReleasesConfiguringPrimary(kJob, changes);
+  ExpectControllerResult(StepStatus::Failed, 42);
+  const auto changes = ReportedStatuses();
+  auto terminal = std::ranges::find_if(changes, [](const auto& change) {
+    return change.step_id == kPrimaryStepId &&
+           IsFinishedStepStatus(change.new_status);
+  });
+  ASSERT_NE(terminal, changes.end());
+  EXPECT_EQ(terminal->reason, "daemon exited");
+}
+
+TEST_F(JobManagerLifecycleTest, DaemonCascadePreservesChildPrologFailure) {
+  if (geteuid() != 0) GTEST_SKIP() << "Craned Prolog runs as root";
+  AddJob();
+  BlockProlog(3);
+  ASSERT_TRUE(Allocate(kPrimaryStepId));
+  StartInitialization();
+  ASSERT_TRUE(PrologEntered());
+  ReportDaemonFailure();
+  auto freed = Free(kDaemonStepId);
+  ProcessFree();
+  EXPECT_EQ(freed.wait_for(0s), std::future_status::timeout);
+  ReleaseProlog();
+  ASSERT_TRUE(DriveUntil(
+      [&] { return freed.wait_for(0s) == std::future_status::ready; }));
+  EXPECT_EQ(freed.get(), CraneErrCode::SUCCESS);
+  ExpectControllerResult(StepStatus::Failed, ExitCode::EC_PROLOG_ERR);
+}
+
+TEST_F(JobManagerLifecycleTest, NormalDaemonCascadeKeepsSuccessfulCleanup) {
+  AddJob();
+  ASSERT_TRUE(Allocate(kPrimaryStepId));
+  auto freed = Free(kDaemonStepId);
+  ProcessFree();
+  StartInitialization();
+  ASSERT_TRUE(DriveUntil(
+      [&] { return freed.wait_for(0s) == std::future_status::ready; }));
+  EXPECT_EQ(freed.get(), CraneErrCode::SUCCESS);
+  ExpectControllerResult(StepStatus::Completed, 0);
 }
 
 TEST_F(JobManagerLifecycleTest, SilentDaemonCascadeDoesNotReportStatus) {
   AddJob();
   ASSERT_TRUE(Allocate(1));
   manager->MarkStepSilentCleanup(kJob, kDaemonStepId);
+  ReportDaemonFailure();
   auto freed = Free(kDaemonStepId);
   ProcessFree();
   StartInitialization();
@@ -612,22 +671,24 @@ TEST_F(JobManagerLifecycleTest, InitializationCompletionWakesDeferredCancel) {
   EXPECT_EQ(PendingCancels(), 0);
   EXPECT_TRUE(ReportedStatuses().empty());
 }
+
 TEST_F(JobManagerLifecycleTest, WholeJobCancelResumesAfterChildInitialization) {
   AddJob();
   ASSERT_TRUE(Allocate(1));
   PrepareSupervisorResult(1);
-  {
-    auto job = manager->QueryJob(kJob);
-    job->step_map.at(kDaemonStepId)->supervisor_stub =
-        job->step_map.at(1)->supervisor_stub;
-  }
+  AttachSupervisor(kDaemonStepId, daemon_supervisor, daemon_supervisor_server);
   manager->TerminateStepAsync(kJob, kDaemonStepId,
                               crane::grpc::TERMINATE_SOURCE_USER_CANCEL);
   ASSERT_TRUE(RunLoopUntil([&] { return PendingCancels() == 1; }));
   EXPECT_EQ(supervisor.terminations, 0);
+  EXPECT_EQ(daemon_supervisor.terminations, 0);
   FinishInitialization(1);
-  ASSERT_TRUE(RunLoopUntil([&] { return supervisor.terminations == 2; }));
+  ASSERT_TRUE(RunLoopUntil([&] {
+    return supervisor.terminations == 1 && daemon_supervisor.terminations == 1;
+  }));
   EXPECT_EQ(supervisor.source, crane::grpc::TERMINATE_SOURCE_USER_CANCEL);
+  EXPECT_EQ(daemon_supervisor.source,
+            crane::grpc::TERMINATE_SOURCE_USER_CANCEL);
   EXPECT_EQ(PendingCancels(), 0);
   EXPECT_TRUE(ReportedStatuses().empty());
 }

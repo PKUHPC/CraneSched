@@ -2563,6 +2563,18 @@ void JobManager::EvCleanFreeStepsQueueCb_() {
             .exit_code = 0,
             .reason = "Allocation released before supervisor startup",
             .timestamp = now};
+        // A child skipped because its daemon failed did not execute
+        // successfully. Keep the daemon's result, unless initialization has
+        // already supplied the child's own terminal result above.
+        auto daemon = job->step_map.find(kDaemonStepId);
+        if (!step->IsDaemonStep() && daemon != job->step_map.end() &&
+            daemon->second->free_requested &&
+            daemon->second->pending_terminal_status &&
+            daemon->second->pending_terminal_status->final_status !=
+                StepStatus::Completed) {
+          step->pending_terminal_status =
+              daemon->second->pending_terminal_status;
+        }
         step->status = StepStatus::Completing;
         if (!step->silent_cleanup) {
           // No supervisor will announce completion. Send cleanup intent on
