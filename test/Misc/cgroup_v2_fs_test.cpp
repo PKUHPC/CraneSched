@@ -1,3 +1,6 @@
+#include "cri/api.pb.h"
+// CRI signal enums must be included before system signal macros.
+
 #include <gtest/gtest.h>
 #include <sys/stat.h>
 #include <unistd.h>
