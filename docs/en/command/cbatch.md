@@ -376,6 +376,7 @@ Without `--chdir`, the job uses the current directory at submission time. Relati
 against that directory, so `#SBATCH --chdir=.` selects the submission directory, not the script's directory.
 This also applies to `#CBATCH` directives and the `-D` / `--chdir` command-line option; command-line options
 take precedence over script directives.
+Crane's `sbatch` compatibility command (`cwrapper sbatch`) uses the same submission flow and follows these rules.
 
 Specify working directory:
 ```bash
