@@ -227,6 +227,11 @@ func BuildCbatchJob(cmd *cobra.Command, args []string, config *util.Config) (*pr
 	if cmd.Flags().Changed("chdir") {
 		job.Cwd = FlagCwd
 	}
+	// Resolve relative paths on the submitting host, before sending the job.
+	job.Cwd, err = filepath.Abs(job.Cwd)
+	if err != nil {
+		return nil, fmt.Errorf("failed to resolve working directory: %w", err)
+	}
 	if cmd.Flags().Changed("account") {
 		job.Account = FlagAccount
 	}

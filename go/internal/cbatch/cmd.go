@@ -131,9 +131,6 @@ var (
 			// Process the content of --get-user-env
 			util.SetPropagatedEnviron(&job.Env, &job.GetUserEnv)
 
-			if job.Cwd == "" {
-				job.Cwd, _ = os.Getwd()
-			}
 			job.SubmitDir, err = os.Getwd()
 			if err != nil {
 				return util.WrapCraneErr(util.ErrorSystem, "Get submit dir err: %s.", err)

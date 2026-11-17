@@ -370,6 +370,10 @@ NodeName=crane03 State=alloc CPU=2.00 AllocCPU=2.00 FreeCPU=0.00
 
 ### 工作目录
 
+未指定 `--chdir` 时，作业使用提交时的当前目录。相对路径以提交时的当前目录为基准解析，
+因此 `#SBATCH --chdir=.` 表示提交目录，而不是脚本所在目录。
+此规则同样适用于 `#CBATCH` 指令和命令行的 `-D` / `--chdir`；命令行参数优先于脚本指令。
+
 指定工作目录：
 ```bash
 cbatch -D /path test.sh
