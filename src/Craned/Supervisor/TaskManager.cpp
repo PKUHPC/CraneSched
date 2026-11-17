@@ -2805,7 +2805,9 @@ std::optional<const TaskExitInfo> ProcInstance::HandleSigchld(pid_t pid,
   return m_final_info_.raw_exit;
 }
 
-TaskManager::TaskManager()
+TaskManager::TaskManager() : TaskManager(true) {}
+
+TaskManager::TaskManager(bool start_loop)
     : m_supervisor_exit_(false), m_step_(g_config.StepSpec) {
   m_uvw_loop_ = uvw::loop::create();
 
@@ -2921,6 +2923,7 @@ TaskManager::TaskManager()
         EvGrpcMigrateSshProcToCgroupCb_();
       });
 
+  if (!start_loop) return;
   m_uvw_thread_ = std::thread([this]() {
     util::SetCurrentThreadName("TaskMgrLoopThr");
     auto idle_handle = m_uvw_loop_->resource<uvw::idle_handle>();
@@ -3815,17 +3818,19 @@ void TaskManager::EvCleanTerminateStepQueueCb_() {
 
       auto& final_status = m_step_.final_termination_status;
       final_status.max_exit_code = 0U;
-      final_status.final_status_on_termination = StepStatus::Cancelled;
+      final_status.final_status_on_termination =
+          elem.cause == TaskFinalizeCause::NORMAL ? StepStatus::Completed
+                                                  : StepStatus::Cancelled;
       final_status.final_reason_on_termination.clear();
 
-      if (elem.cause != TaskFinalizeCause::NORMAL) {
-        g_craned_client->StepStatusChangeAsync(
-            StepStatus::Completing, final_status.max_exit_code,
-            final_status.final_reason_on_termination,
-            final_status.final_status_on_termination);
-      }
+      // Craned also needs a final result when Free arrives before Execute.
+      // Ordinary supervisors do not report status again during shutdown.
+      g_craned_client->StepStatusChangeAsync(
+          StepStatus::Completing, final_status.max_exit_code,
+          final_status.final_reason_on_termination,
+          final_status.final_status_on_termination);
 
-      g_task_mgr->ShutdownSupervisorAsync(StepStatus::Cancelled, 0U, "");
+      ShutdownSupervisorAsync(final_status.final_status_on_termination, 0U, "");
       continue;
     }
 

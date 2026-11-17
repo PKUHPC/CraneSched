@@ -2556,6 +2556,26 @@ void JobManager::EvCleanFreeStepsQueueCb_() {
             elem.job_id, elem.step_id);
         continue;
       }
+      if (step->supv_pid <= 0 && !step->pending_terminal_status) {
+        const auto now = google::protobuf::util::TimeUtil::GetCurrentTime();
+        step->pending_terminal_status = StepInstance::PendingTerminalStatus{
+            .final_status = StepStatus::Completed,
+            .exit_code = 0,
+            .reason = "Allocation released before supervisor startup",
+            .timestamp = now};
+        step->status = StepStatus::Completing;
+        if (!step->silent_cleanup) {
+          // No supervisor will announce completion. Send cleanup intent on
+          // this event-loop turn, before the poller can send the terminal.
+          // A terminal-only report cannot release a Configuring step in Ctld.
+          g_ctld_client->StepStatusChangeAsync(
+              StepStatusChangeQueueElem{.job_id = elem.job_id,
+                                        .step_id = elem.step_id,
+                                        .new_status = StepStatus::Completing,
+                                        .exit_code = 0,
+                                        .timestamp = now});
+        }
+      }
       if (step->IsDaemonStep()) {
         if (job->step_map.size() > 1) {
           for (auto& [id, child] : job->step_map) {
@@ -2598,13 +2618,6 @@ void JobManager::EvCleanFreeStepsQueueCb_() {
         continue;
       }
 
-      if (step->supv_pid <= 0 && !step->pending_terminal_status) {
-        step->pending_terminal_status = StepInstance::PendingTerminalStatus{
-            .final_status = StepStatus::Completed,
-            .exit_code = 0,
-            .reason = "Allocation released before supervisor startup",
-            .timestamp = google::protobuf::util::TimeUtil::GetCurrentTime()};
-      }
       steps_to_free.emplace_back(step.release());
       steps_to_free_keys.insert(key);
       job->step_map.erase(elem.step_id);

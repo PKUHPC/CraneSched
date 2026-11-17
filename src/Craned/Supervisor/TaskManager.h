@@ -690,6 +690,9 @@ class TaskManager {
   void Shutdown() { m_supervisor_exit_ = true; }
 
  private:
+  friend class TaskManagerLifecycleTest;
+  explicit TaskManager(bool start_loop);
+
   template <class T>
   using ConcurrentQueue = moodycamel::ConcurrentQueue<T>;
 
