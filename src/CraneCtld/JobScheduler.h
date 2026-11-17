@@ -1605,7 +1605,9 @@ class JobScheduler {
   std::expected<void, std::string> CreateResv_(
       const crane::grpc::CreateReservationRequest& request);
 
-  std::expected<void, std::string> DeleteResvMeta_(const ResvId& resv_id);
+  CraneExpectedRich<void> DeleteResvMeta_(
+      const ResvId& resv_id,
+      std::optional<uint64_t> expected_creation_order = std::nullopt);
 
   std::unique_ptr<SchedulerAlgo> m_node_selection_algo_;
 
@@ -1810,7 +1812,11 @@ class JobScheduler {
   std::unordered_map<ResvId, std::shared_ptr<uvw::timer_handle>>
       m_resv_timer_handles_;
 
-  using ResvTimerQueueElem = std::pair<ResvId, absl::Time>;
+  struct ResvTimerQueueElem {
+    ResvId reservation_id;
+    absl::Time end_time;
+    uint64_t creation_order;
+  };
   ConcurrentQueue<ResvTimerQueueElem> m_resv_timer_queue_;
   std::atomic<uint64_t> m_reservation_creation_order_{0};
 

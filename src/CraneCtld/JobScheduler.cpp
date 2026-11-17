@@ -1196,9 +1196,11 @@ bool JobScheduler::Init() {
       [this, loop = uvw_reservation_loop]() { CleanResvThread_(loop); });
 
   for (const auto& [id, request] : resv_req_map) {
-    m_resv_timer_queue_.enqueue(std::make_pair(
-        id, absl::FromUnixSeconds(request.start_time_unix_seconds()) +
-                absl::Seconds(request.duration_seconds())));
+    m_resv_timer_queue_.enqueue(ResvTimerQueueElem{
+        id,
+        absl::FromUnixSeconds(request.start_time_unix_seconds()) +
+            absl::Seconds(request.duration_seconds()),
+        request.creation_order()});
   }
   if (!resv_req_map.empty()) m_clean_resv_timer_queue_handle_->send();
 
@@ -5176,7 +5178,8 @@ std::expected<void, std::string> JobScheduler::CreateResv_(
     if (!ok) CRANE_ERROR("Failed to commit txn for reservation {}.", resv_name);
   }
 
-  m_resv_timer_queue_.enqueue(std::make_pair(resv_name, end_time));
+  m_resv_timer_queue_.enqueue(
+      ResvTimerQueueElem{resv_name, end_time, creation_order});
   m_clean_resv_timer_queue_handle_->send();
 
   return {};
@@ -5193,14 +5196,14 @@ crane::grpc::DeleteReservationReply JobScheduler::DeleteResv(
     reply.set_ok(true);
   } else {
     reply.set_ok(false);
-    reply.set_reason(res.error());
+    reply.set_reason(res.error().description());
   }
 
   return reply;
 }
 
-std::expected<void, std::string> JobScheduler::DeleteResvMeta_(
-    const ResvId& resv_id) {
+CraneExpectedRich<void> JobScheduler::DeleteResvMeta_(
+    const ResvId& resv_id, std::optional<uint64_t> expected_creation_order) {
   g_meta_container->LockResReduceEvents();
   absl::flat_hash_set<CranedId> craned_ids;
   {
@@ -5208,14 +5211,25 @@ std::expected<void, std::string> JobScheduler::DeleteResvMeta_(
     CRANE_TRACE("Deleting reservation {}", resv_id);
     if (!resv_meta_map->contains(resv_id)) {
       g_meta_container->UnlockResReduceEvents();
-      return std::unexpected(fmt::format("Reservation {} not found", resv_id));
+      return std::unexpected(FormatRichErr(
+          CraneErrCode::ERR_NON_EXISTENT, "Reservation {} not found", resv_id));
     }
 
     const auto& resv_meta = resv_meta_map->at(resv_id).GetExclusivePtr();
 
+    if (expected_creation_order &&
+        resv_meta->creation_order != *expected_creation_order) {
+      g_meta_container->UnlockResReduceEvents();
+      return std::unexpected(
+          FormatRichErr(CraneErrCode::ERR_NON_EXISTENT,
+                        "Reservation {} with creation order {} not found",
+                        resv_id, *expected_creation_order));
+    }
+
     if (!resv_meta->rn_job_res_map.empty()) {
       g_meta_container->UnlockResReduceEvents();
-      return std::unexpected(fmt::format(
+      return std::unexpected(FormatRichErr(
+          CraneErrCode::ERR_EXISTING_JOB,
           "Not allowed to delete reservation {} with running jobs", resv_id));
     }
 
@@ -5277,7 +5291,7 @@ crane::grpc::DeleteReservationReply JobScheduler::PurgeAllReservations() {
   for (const auto& name : resv_names) {
     auto res = DeleteResvMeta_(name);
     if (!res) {
-      failed_reasons.push_back(res.error());
+      failed_reasons.push_back(res.error().description());
     }
   }
 
@@ -5371,8 +5385,13 @@ void JobScheduler::CleanResvTimerQueueCb_(
   timer_to_create.resize(actual_size);
 
   absl::Time now = absl::Now();
-  for (const auto& [reservation_id, end_time] : timer_to_create) {
-    // If any timer for the reservation exists, remove it.
+  for (const auto& [reservation_id, end_time, creation_order] :
+       timer_to_create) {
+    {
+      auto resv_meta = g_meta_container->GetResvMetaPtr(reservation_id);
+      if (!resv_meta || resv_meta->creation_order != creation_order) continue;
+    }
+
     auto timer_it = m_resv_timer_handles_.find(reservation_id);
     if (timer_it != m_resv_timer_handles_.end()) {
       timer_it->second->close();
@@ -5380,16 +5399,22 @@ void JobScheduler::CleanResvTimerQueueCb_(
     }
 
     int64_t secs = std::max<int64_t>(0, absl::ToInt64Seconds(end_time - now));
-    auto on_timer_cb = [this, reservation_id](const uvw::timer_event&,
-                                              uvw::timer_handle& handle) {
-      auto err = DeleteResvMeta_(reservation_id);
+    auto on_timer_cb = [this, reservation_id, creation_order](
+                           const uvw::timer_event&, uvw::timer_handle& handle) {
+      auto err = DeleteResvMeta_(reservation_id, creation_order);
 
-      if (err.has_value()) {
+      if (err.has_value() ||
+          err.error().code() == CraneErrCode::ERR_NON_EXISTENT) {
         handle.close();
-        m_resv_timer_handles_.erase(reservation_id);
+        auto it = m_resv_timer_handles_.find(reservation_id);
+        if (it != m_resv_timer_handles_.end() && it->second.get() == &handle)
+          m_resv_timer_handles_.erase(it);
+      } else if (err.error().code() == CraneErrCode::ERR_EXISTING_JOB) {
+        CRANE_TRACE("Reservation {} still has running jobs, retrying cleanup",
+                    reservation_id);
       } else {
         CRANE_WARN("Failed to clean up reservation {}: {}", reservation_id,
-                   err.error());
+                   err.error().description());
       }
     };
     auto resv_timer_handle_ = uvw_loop->resource<uvw::timer_handle>();
