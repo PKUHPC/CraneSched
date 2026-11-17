@@ -1775,6 +1775,9 @@ void JobManager::FreeStepAllocation_(
         std::nullopt;
     if (step->pending_terminal_status.has_value() && !step->silent_cleanup) {
       terminal_status = step->pending_terminal_status.value();
+      if (terminal_status->final_status == StepStatus::Completed &&
+          step->daemon_failure)
+        terminal_status = step->daemon_failure;
     }
     step.reset();
     // Send terminal status after step cleanup is done (skip for silent
@@ -1989,7 +1992,15 @@ void JobManager::EvCleanStepStatusChangeQueueCb_() {
     // Lambda to update step fields once we have the pointer.
     auto update_step = [&](StepInstance* step) {
       step->GotNewStatus(status_change.new_status);
-      if (pending_terminal) step->pending_terminal_status = *pending_terminal;
+      if (pending_terminal) {
+        auto& current = step->pending_terminal_status;
+        if (!current ||
+            (current->final_status == StepStatus::Completed &&
+             pending_terminal->final_status != StepStatus::Completed)) {
+          // Preserve the first non-success result from this step.
+          current = *pending_terminal;
+        }
+      }
       should_forward = !step->silent_cleanup &&
                        !(IsFinishedStepStatus(status_change.new_status) &&
                          step->pending_terminal_status.has_value());
@@ -2590,9 +2601,18 @@ void JobManager::EvCleanFreeStepsQueueCb_() {
       }
       if (step->IsDaemonStep()) {
         if (job->step_map.size() > 1) {
+          const auto daemon_failure =
+              step->pending_terminal_status.has_value() &&
+                      step->pending_terminal_status->final_status !=
+                          StepStatus::Completed
+                  ? step->pending_terminal_status
+                  : std::nullopt;
           for (auto& [id, child] : job->step_map) {
             if (id == kDaemonStepId) continue;
             if (step->silent_cleanup) child->silent_cleanup = true;
+            if (daemon_failure && !child->pending_terminal_status &&
+                !IsFinishedStepStatus(child->status) && !child->daemon_failure)
+              child->daemon_failure = daemon_failure;
             if (!child->free_requested) {
               child->free_requested = true;
               m_free_steps_queue_.enqueue({elem.job_id, id});

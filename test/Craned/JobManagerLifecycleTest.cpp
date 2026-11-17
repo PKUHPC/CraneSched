@@ -5,6 +5,7 @@
 #include <gtest/gtest.h>
 #include <poll.h>
 #include <sys/stat.h>
+#include <sys/wait.h>
 #include <unistd.h>
 
 #include <atomic>
@@ -109,6 +110,8 @@ class JobManagerLifecycleTest : public testing::Test {
   std::unique_ptr<grpc::Server> daemon_supervisor_server;
   int started_fd{-1};
   int release_fd{-1};
+  int supervisor_exit_fd{-1};
+  pid_t supervisor_pid{-1};
   std::atomic_int job_destroyed{0};
 
   void SetUp() override {
@@ -126,6 +129,7 @@ class JobManagerLifecycleTest : public testing::Test {
 
   void TearDown() override {
     ReleaseProlog();
+    ReleaseSupervisor();
     EXPECT_TRUE(
         DriveUntil([] { return g_thread_pool->get_tasks_total() == 0; }));
     g_thread_pool->wait();
@@ -221,6 +225,7 @@ class JobManagerLifecycleTest : public testing::Test {
   void ProcessCancel() { manager->EvCleanTerminateStepQueueCb_(); }
   void ProcessExecute() { manager->EvCleanGrpcExecuteStepQueueCb_(); }
   void ProcessStatus() { manager->EvCleanStepStatusChangeQueueCb_(); }
+  void PollSupervisor() { manager->EvCheckSupervisorRunning_(); }
   bool InitializationPending(step_id_t id) {
     auto job = manager->QueryJob(kJob);
     return job->step_map.at(id)->initialization_pending;
@@ -300,6 +305,63 @@ class JobManagerLifecycleTest : public testing::Test {
   void FinishInitialization(step_id_t id) {
     manager->m_step_initialization_finished_queue_.enqueue({kJob, id});
     manager->m_free_steps_async_handle_->send();
+  }
+
+  void PrepareStartedPrimary() {
+    // Keep a real, controlled PID alive until the fake supervisor has reported
+    // its result. The cleanup poller must never target the test process.
+    int pipe_fds[2];
+    ASSERT_EQ(pipe2(pipe_fds, O_CLOEXEC), 0);
+    supervisor_exit_fd = pipe_fds[1];
+    supervisor_pid = fork();
+    if (supervisor_pid == 0) {
+      close(pipe_fds[1]);
+      char byte;
+      while (read(pipe_fds[0], &byte, 1) < 0 && errno == EINTR) {}
+      _exit(0);
+    }
+    close(pipe_fds[0]);
+    ASSERT_GT(supervisor_pid, 0);
+    PrepareSupervisorResult(kPrimaryStepId);
+    {
+      auto job = manager->QueryJob(kJob);
+      job->step_map.at(kPrimaryStepId)->supv_pid = supervisor_pid;
+      job->step_map.at(kPrimaryStepId)->status = StepStatus::Configuring;
+    }
+    manager->StepStatusChangeAsync(
+        kJob, kPrimaryStepId, StepStatus::Starting, 0, std::nullopt,
+        std::nullopt, google::protobuf::util::TimeUtil::GetCurrentTime());
+    ProcessStatus();
+  }
+
+  void JoinPrimaryInitialization() {
+    FinishInitialization(kPrimaryStepId);
+    manager->EvCleanStepInitializationFinishedQueueCb_();
+  }
+
+  void ReportPrimaryCompletion(StepStatus status, uint32_t exit_code = 0,
+                               std::string reason = "") {
+    manager->StepStatusChangeAsync(
+        kJob, kPrimaryStepId, StepStatus::Completing, exit_code,
+        std::move(reason), status,
+        google::protobuf::util::TimeUtil::GetCurrentTime());
+    ProcessStatus();
+  }
+
+  void ReleaseSupervisor() {
+    if (supervisor_exit_fd >= 0) {
+      close(supervisor_exit_fd);
+      supervisor_exit_fd = -1;
+    }
+    if (supervisor_pid > 0) {
+      int status;
+      pid_t reaped;
+      do {
+        reaped = waitpid(supervisor_pid, &status, 0);
+      } while (reaped < 0 && errno == EINTR);
+      EXPECT_EQ(reaped, supervisor_pid);
+      supervisor_pid = -1;
+    }
   }
 
   bool RunLoopUntil(const std::function<bool()>& ready) {
@@ -611,6 +673,125 @@ TEST_F(JobManagerLifecycleTest, DaemonCascadePreservesChildPrologFailure) {
       [&] { return freed.wait_for(0s) == std::future_status::ready; }));
   EXPECT_EQ(freed.get(), CraneErrCode::SUCCESS);
   ExpectControllerResult(StepStatus::Failed, ExitCode::EC_PROLOG_ERR);
+}
+
+TEST_F(JobManagerLifecycleTest, DaemonFailureSurvivesStartedSupervisorCleanup) {
+  AddJob();
+  ASSERT_TRUE(Allocate(kPrimaryStepId));
+  PrepareStartedPrimary();
+  ReportDaemonFailure();
+  auto freed = Free(kDaemonStepId);
+  ProcessFree();
+  auto executed = QueueExecute(kPrimaryStepId);
+  ProcessExecute();
+  ASSERT_EQ(executed.wait_for(0s), std::future_status::ready);
+  EXPECT_EQ(executed.get(), CraneErrCode::SUCCESS);
+  EXPECT_EQ(supervisor.executions, 0);
+  JoinPrimaryInitialization();
+  ProcessFree();
+  EXPECT_EQ(supervisor.terminations, 1);
+  EXPECT_EQ(supervisor.source, crane::grpc::TERMINATE_SOURCE_NORMAL_COMPLETION);
+  EXPECT_EQ(freed.wait_for(0s), std::future_status::timeout);
+
+  // A process exit can be observed before its status RPC. The daemon fallback
+  // must not make the poller treat the missing completion report as received.
+  ReleaseSupervisor();
+  PollSupervisor();
+  EXPECT_EQ(freed.wait_for(0s), std::future_status::timeout);
+  const auto before_completion = ReportedStatuses();
+  EXPECT_EQ(
+      std::ranges::find_if(before_completion,
+                           [](const auto& change) {
+                             return change.step_id == kPrimaryStepId &&
+                                    IsFinishedStepStatus(change.new_status);
+                           }),
+      before_completion.end());
+  // This is the result emitted by TaskManager for NORMAL while Starting.
+  ReportPrimaryCompletion(StepStatus::Completed);
+  ASSERT_TRUE(DriveUntil(
+      [&] { return freed.wait_for(0s) == std::future_status::ready; }));
+  EXPECT_EQ(freed.get(), CraneErrCode::SUCCESS);
+  ExpectControllerResult(StepStatus::Failed, 42);
+  for (const auto& change : ReportedStatuses()) {
+    if (change.step_id == kPrimaryStepId &&
+        IsFinishedStepStatus(change.new_status))
+      EXPECT_EQ(change.reason, "daemon exited");
+  }
+}
+
+TEST_F(JobManagerLifecycleTest, DaemonCascadeKeepsStartedChildFailure) {
+  AddJob();
+  ASSERT_TRUE(Allocate(kPrimaryStepId));
+  PrepareStartedPrimary();
+  JoinPrimaryInitialization();
+  ReportPrimaryCompletion(StepStatus::Failed, 17, "child failed");
+  ReportDaemonFailure();
+  auto freed = Free(kDaemonStepId);
+  ProcessFree();
+  EXPECT_EQ(supervisor.terminations, 0);
+  ReleaseSupervisor();
+  ASSERT_TRUE(DriveUntil(
+      [&] { return freed.wait_for(0s) == std::future_status::ready; }));
+  EXPECT_EQ(freed.get(), CraneErrCode::SUCCESS);
+  ExpectControllerResult(StepStatus::Failed, 17);
+}
+
+TEST_F(JobManagerLifecycleTest, ChildFailureAfterFreeOverridesDaemonFailure) {
+  AddJob();
+  ASSERT_TRUE(Allocate(kPrimaryStepId));
+  PrepareStartedPrimary();
+  JoinPrimaryInitialization();
+  ReportDaemonFailure();
+  auto freed = Free(kDaemonStepId);
+  ProcessFree();
+  ReportPrimaryCompletion(StepStatus::Failed, 17, "child failed");
+  // A later non-success report must not replace the child's original result.
+  ReportPrimaryCompletion(StepStatus::Cancelled, 18, "late cancellation");
+  ReleaseSupervisor();
+  ASSERT_TRUE(DriveUntil(
+      [&] { return freed.wait_for(0s) == std::future_status::ready; }));
+  EXPECT_EQ(freed.get(), CraneErrCode::SUCCESS);
+  ExpectControllerResult(StepStatus::Failed, 17);
+  const auto changes = ReportedStatuses();
+  auto terminal = std::ranges::find_if(changes, [](const auto& change) {
+    return change.step_id == kPrimaryStepId &&
+           IsFinishedStepStatus(change.new_status);
+  });
+  ASSERT_NE(terminal, changes.end());
+  EXPECT_EQ(terminal->reason, "child failed");
+}
+
+TEST_F(JobManagerLifecycleTest, NormalDaemonCascadeReleasesStartedPrimary) {
+  AddJob();
+  ASSERT_TRUE(Allocate(kPrimaryStepId));
+  PrepareStartedPrimary();
+  JoinPrimaryInitialization();
+  auto freed = Free(kDaemonStepId);
+  ProcessFree();
+  EXPECT_EQ(supervisor.terminations, 1);
+  ReportPrimaryCompletion(StepStatus::Completed);
+  ReleaseSupervisor();
+  ASSERT_TRUE(DriveUntil(
+      [&] { return freed.wait_for(0s) == std::future_status::ready; }));
+  EXPECT_EQ(freed.get(), CraneErrCode::SUCCESS);
+  ExpectControllerResult(StepStatus::Completed, 0);
+}
+
+TEST_F(JobManagerLifecycleTest, DaemonFailureKeepsAlreadyCompletedChildResult) {
+  AddJob();
+  ASSERT_TRUE(Allocate(kPrimaryStepId));
+  PrepareStartedPrimary();
+  JoinPrimaryInitialization();
+  ReportPrimaryCompletion(StepStatus::Completed);
+  ReportDaemonFailure();
+  auto freed = Free(kDaemonStepId);
+  ProcessFree();
+  EXPECT_EQ(supervisor.terminations, 0);
+  ReleaseSupervisor();
+  ASSERT_TRUE(DriveUntil(
+      [&] { return freed.wait_for(0s) == std::future_status::ready; }));
+  EXPECT_EQ(freed.get(), CraneErrCode::SUCCESS);
+  ExpectControllerResult(StepStatus::Completed, 0);
 }
 
 TEST_F(JobManagerLifecycleTest, NormalDaemonCascadeKeepsSuccessfulCleanup) {
