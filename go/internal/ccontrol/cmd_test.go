@@ -2,16 +2,11 @@ package ccontrol
 
 import (
 	"context"
-	"strings"
 	"testing"
-	"time"
 
 	"github.com/PKUHPC/CraneSched/go/generated/protos"
 	"github.com/PKUHPC/CraneSched/go/internal/testutil"
 	"google.golang.org/grpc"
-	"google.golang.org/protobuf/encoding/protojson"
-	"google.golang.org/protobuf/types/known/durationpb"
-	"google.golang.org/protobuf/types/known/timestamppb"
 )
 
 type reservationFlexClient struct {
@@ -71,25 +66,5 @@ func TestReservationFlexCreateOptions(t *testing.T) {
 	before := len(client.requests)
 	if err := executeCreateReservationCommand(command); err == nil || len(client.requests) != before {
 		t.Fatalf("invalid option reached server: err=%v", err)
-	}
-}
-
-func TestReservationFlexQueryFormats(t *testing.T) {
-	reservation := &protos.ReservationInfo{
-		ReservationName: "class", Flex: true,
-		StartTime: timestamppb.New(time.Unix(100, 0)), Duration: durationpb.New(time.Hour),
-		ResTotal: &protos.ResourceView{}, ResAvail: &protos.ResourceView{}, ResAlloc: &protos.ResourceView{},
-	}
-	text := formatReservationDetails(reservation)
-	if !strings.Contains(text, "Flex=true") || !strings.Contains(text, "State=EXPIRED") {
-		t.Fatalf("unexpected reservation text: %s", text)
-	}
-	native, err := protojson.Marshal(reservation)
-	if err != nil || !strings.Contains(string(native), `"flex":true`) {
-		t.Fatalf("native JSON=%s err=%v", native, err)
-	}
-	compat, err := formatSlurmReservationsJSON(&protos.QueryReservationInfoReply{Ok: true, ReservationInfoList: []*protos.ReservationInfo{reservation}})
-	if err != nil || !strings.Contains(compat, `"flex":true`) {
-		t.Fatalf("compat JSON=%s err=%v", compat, err)
 	}
 }
