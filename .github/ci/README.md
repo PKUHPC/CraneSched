@@ -79,6 +79,19 @@ custom extensions. Job pods use that shared resolution instead of individual
 host aliases. The operator terminal's `/etc/hosts` entries are not automatically
 inherited by Kubernetes job pods.
 
+## CI Scripts
+
+The workflow keeps shell and Python behavior in this directory so scripts can be
+run directly and tested without extracting source text from YAML:
+
+| Script | Responsibility |
+| --- | --- |
+| `check-format.py` | Check C/C++ and protocol formatting; write an applicable patch on failure |
+| `prepare-go-package-inputs.sh` | Remove stale generated Go package inputs before rebuilding |
+| `collect-rpm-packages.sh` | Copy final CPack RPMs, excluding intermediate files |
+| `upload-packages.sh` | Upload the manifest-selected RPM files |
+| `summarize-ci.py` | Report job results and enforce required CI phases |
+
 Repository variables:
 
 | Variable | Contract |

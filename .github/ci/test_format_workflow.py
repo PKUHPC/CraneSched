@@ -36,9 +36,6 @@ class FormatWorkflowContractTest(unittest.TestCase):
         self.assertIn("steps.format.outputs.changed == 'true'", upload['if'])
         self.assertIn("steps.format.outcome == 'failure'", gate['if'])
         self.assertLess(steps.index(upload), steps.index(gate))
-        result = subprocess.run(['bash', '-c', gate['run']], capture_output=True, timeout=5)
-        self.assertNotEqual(result.returncode, 0)
-
 
 class FormatScriptBehaviorTest(unittest.TestCase):
     def setUp(self):

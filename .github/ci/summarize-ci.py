@@ -1,4 +1,4 @@
-"""Enforce the required CI phase results without special skipped-build paths."""
+"""Summarize the CI jobs and enforce the required workflow result."""
 import json
 import os
 from pathlib import Path

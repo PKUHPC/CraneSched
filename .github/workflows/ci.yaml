@@ -327,4 +327,4 @@ jobs:
           persist-credentials: false
 
       - name: Report and enforce the required results
-        run: python3 .ci-tools/.github/ci/report-result.py
+        run: python3 .ci-tools/.github/ci/summarize-ci.py
