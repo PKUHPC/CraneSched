@@ -137,4 +137,24 @@ TEST_F(LogPermissionsTest, ScriptDirectoryIsServiceOwnedAndTraversable) {
   ASSERT_TRUE(result) << result.error().message();
   Check(directory_, 0755);
 }
+
+TEST_F(LogPermissionsTest, CreatesMissingAncestorsWithExplicitPermissions) {
+  auto nested = root_ / "missing-parent" / "supervisor";
+  auto result = util::os::EnsureServiceDirectory(nested, 0700);
+  ASSERT_TRUE(result) << result.error().message();
+  Check(root_ / "missing-parent", 0755);
+  Check(nested, 0700);
+}
+
+TEST_F(LogPermissionsTest, TrailingSlashDoesNotFollowLinkedDirectory) {
+  auto target = root_ / "target";
+  ASSERT_TRUE(std::filesystem::create_directory(target));
+  ASSERT_EQ(chmod(target.c_str(), 0777), 0);
+  auto link = root_ / "linked";
+  std::filesystem::create_directory_symlink(target, link);
+
+  auto result = util::os::EnsureServiceDirectory(link.string() + "/", 0700);
+  ASSERT_FALSE(result);
+  Check(target, 0777);
+}
 }  // namespace

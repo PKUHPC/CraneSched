@@ -220,20 +220,42 @@ bool CreateFolders(std::string const& p) {
 
 std::expected<void, std::error_code> EnsureServiceDirectory(
     const std::filesystem::path& path, mode_t permissions) {
-  std::error_code ec;
-  if (!path.parent_path().empty()) {
-    std::filesystem::create_directories(path.parent_path(), ec);
-    if (ec) return std::unexpected(ec);
-  }
-  if (mkdir(path.c_str(), permissions) != 0 && errno != EEXIST)
-    return std::unexpected(std::error_code(errno, std::generic_category()));
+  std::string normalized_path = path.string();
+  while (normalized_path.size() > 1 && normalized_path.back() == '/')
+    normalized_path.pop_back();
+  if (normalized_path.empty())
+    return std::unexpected(std::make_error_code(std::errc::invalid_argument));
 
-  int fd = open(path.c_str(), O_RDONLY | O_DIRECTORY | O_NOFOLLOW | O_CLOEXEC);
-  if (fd == -1)
-    return std::unexpected(std::error_code(errno, std::generic_category()));
-  absl::Cleanup close_fd = [fd] { close(fd); };
-  if (fchown(fd, geteuid(), getegid()) != 0 || fchmod(fd, permissions) != 0)
-    return std::unexpected(std::error_code(errno, std::generic_category()));
+  const std::filesystem::path target{normalized_path};
+  const uid_t owner = geteuid();
+  const gid_t group = getegid();
+  const mode_t ancestor_permissions = 0755;
+  std::filesystem::path current;
+  for (const auto& component : target) {
+    current /= component;
+    const bool is_root = current == current.root_path();
+    const bool is_target = current == target;
+    bool created = false;
+    if (!is_root) {
+      if (mkdir(current.c_str(),
+                is_target ? permissions : ancestor_permissions) == 0) {
+        created = true;
+      } else if (errno != EEXIST) {
+        return std::unexpected(std::error_code(errno, std::generic_category()));
+      }
+    }
+
+    int fd =
+        open(current.c_str(), O_RDONLY | O_DIRECTORY | O_NOFOLLOW | O_CLOEXEC);
+    if (fd == -1)
+      return std::unexpected(std::error_code(errno, std::generic_category()));
+    absl::Cleanup close_fd = [fd] { close(fd); };
+    if (!is_root && (created || is_target) &&
+        (fchown(fd, owner, group) != 0 ||
+         fchmod(fd, is_target ? permissions : ancestor_permissions) != 0)) {
+      return std::unexpected(std::error_code(errno, std::generic_category()));
+    }
+  }
   return {};
 }
 

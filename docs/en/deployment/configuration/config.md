@@ -411,7 +411,7 @@ Supervisor:
 
 - **Path**: Full path to the supervisor executable. The default path is `/usr/libexec/csupervisor`, **which is typically set correctly during installation**.
 - **DebugLevel**: Controls the verbosity of supervisor logs. Available values include `trace` (most verbose), `debug`, `info`, `warn`, `error` (least verbose). For production environments, `info` or `warn` is recommended.
-- **LogDir**: Dedicated directory for supervisor logs, relative to `CraneBaseDir`. The directory belongs to Craned's runtime user and group with mode `0700`; log files use mode `0600`, including newly rotated files. Ordinary job users cannot read these internal diagnostic logs. Do not share this directory with job scripts or output files, or configure it as a symbolic link.
+- **LogDir**: Dedicated directory for supervisor logs, relative to `CraneBaseDir`. The directory belongs to Craned's runtime user and group with mode `0700`; log files use mode `0600`, including newly rotated files. Ordinary job users cannot read these internal diagnostic logs. Every ancestor directory in this path must be trusted and unwritable by untrusted users. Do not share this directory with job scripts or output files, or configure it as a symbolic link.
 - **ThreadPoolSize**: Worker threads created in each Supervisor process. The default is `4`; set it to `0` to use the host's hardware concurrency.
 
 !!! tip

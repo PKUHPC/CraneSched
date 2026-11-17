@@ -407,7 +407,7 @@ Supervisor:
 
 - **Path**: Supervisor 可执行文件的完整路径。默认路径为 `/usr/libexec/csupervisor`,通常在安装时已正确设置。
 - **DebugLevel**: 控制 Supervisor 日志的详细程度。可选值包括 `trace`(最详细)、`debug`、`info`、`warn`、`error`(最简略)。生产环境建议使用 `info` 或 `warn`。
-- **LogDir**: Supervisor 日志文件的专用目录，相对于 `CraneBaseDir` 配置项。目录归 Craned 的运行用户和组所有，权限为 `0700`；日志文件权限为 `0600`，轮转时保持相同权限。普通作业用户不能读取这些内部诊断日志。不要与作业脚本或输出目录共用，也不要将该目录设为符号链接。
+- **LogDir**: Supervisor 日志文件的专用目录，相对于 `CraneBaseDir` 配置项。目录归 Craned 的运行用户和组所有，权限为 `0700`；日志文件权限为 `0600`，轮转时保持相同权限。普通作业用户不能读取这些内部诊断日志。该路径的所有祖先目录都必须可信且不能被不受信任的用户写入。不要与作业脚本或输出目录共用，也不要将该目录设为符号链接。
 - **ThreadPoolSize**: 每个 Supervisor 进程创建的工作线程数。默认值为 `4`；配置为 `0` 时使用宿主机硬件并发数。
 
 !!! tip
