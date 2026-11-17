@@ -372,12 +372,6 @@ NodeName=crane03 State=alloc CPU=2.00 AllocCPU=2.00 FreeCPU=0.00
 
 ### Working Directory
 
-Without `--chdir`, the job uses the current directory at submission time. Relative paths are resolved
-against that directory, so `#SBATCH --chdir=.` selects the submission directory, not the script's directory.
-This also applies to `#CBATCH` directives and the `-D` / `--chdir` command-line option; command-line options
-take precedence over script directives.
-Crane's `sbatch` compatibility command (`cwrapper sbatch`) uses the same submission flow and follows these rules.
-
 Specify working directory:
 ```bash
 cbatch -D /path test.sh
