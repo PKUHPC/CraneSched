@@ -85,6 +85,9 @@ Internal package DNS is maintained by cluster DNS, without Pod host aliases.
 | `upload_packages.sh` | Upload the final RPM directory |
 | `summarize_ci.py` | Enforce job results and integration completeness |
 
+Regression files are named for the behavior they exercise: `test_check_format.py`,
+`test_ci_scripts.py`, and `test_rpm_publish.py`.
+
 CI helper scripts use `snake_case` regardless of language. `ci.yaml` retains GitHub's required workflow extension.
 
 | Repository variable | Purpose |
