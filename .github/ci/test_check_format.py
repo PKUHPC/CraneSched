@@ -8,25 +8,11 @@ import sys
 import tempfile
 import unittest
 
-import yaml
-
 
 CI = Path(__file__).resolve().parent
 PRODUCT = CI.parents[1]
-WORKFLOW = CI.parent / 'workflows/ci.yaml'
 FORMAT_SCRIPT = CI / 'check_format.py'
 
-
-class FormatWorkflowContractTest(unittest.TestCase):
-    def test_failed_formatting_is_uploaded_before_the_job_failure_gate(self):
-        steps = yaml.safe_load(WORKFLOW.read_text())['jobs']['build']['steps']
-        check = next(step for step in steps if step.get('id') == 'format')
-        upload = next(step for step in steps if step.get('uses', '').startswith('actions/upload-artifact@'))
-        gate = next(step for step in steps if step.get('id') == 'format_gate')
-        self.assertTrue(check['continue-on-error'])
-        self.assertIn("steps.format.outputs.changed == 'true'", upload['if'])
-        self.assertIn("steps.format.outcome == 'failure'", gate['if'])
-        self.assertLess(steps.index(upload), steps.index(gate))
 
 class FormatScriptBehaviorTest(unittest.TestCase):
     def setUp(self):

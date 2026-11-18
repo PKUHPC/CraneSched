@@ -127,3 +127,8 @@ Run script regressions with `python3 -m unittest discover -s .github/ci -p
 The pinned actionlint predates `concurrency.queue`; only that field is omitted
 from a temporary lint copy. A real workflow attempt must still validate hooks,
 identities, shared storage and the complete DAG before automatic triggers.
+Script tests exercise applicable format patches, formatter failures, stale Go
+package cleanup, final RPM collection, upload behavior and the summary gate.
+They do not snapshot step names or expressions, or execute code extracted from
+workflow YAML. Suite ref precedence and updates are tested by the suite launcher;
+workflow wiring still requires real Actions acceptance.
