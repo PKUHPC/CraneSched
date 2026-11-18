@@ -54,7 +54,9 @@ make -C go all tool PREFIX=/usr STRIP=true CHECK_GPU=0
 
 mkdir -p "$artifact_dir/packages/rpm" "$artifact_dir/cpack-backend"
 (cd cmake-build-ci-debug && cpack -G RPM -B "$artifact_dir/cpack-backend")
-ARTIFACT_DIR="$artifact_dir" bash "$(dirname "${BASH_SOURCE[0]}")/collect_rpm_packages.sh"
+mapfile -t backend_rpms < <(find "$artifact_dir/cpack-backend" -maxdepth 1 -type f -name '*.rpm' -print)
+[[ "${#backend_rpms[@]}" == 2 ]]
+cp "${backend_rpms[@]}" "$artifact_dir/packages/rpm/"
 
 GITHUB_TOKEN="$CI_PACKAGING_TOKEN" make -C go package SKIP_REBUILD=true CHECK_GPU=0 \
   GORELEASER_SNAPSHOT=false GORELEASER_RELEASE_ARGS=--skip=publish,validate

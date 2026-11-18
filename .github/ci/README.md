@@ -81,7 +81,6 @@ Internal package DNS is maintained by cluster DNS, without Pod host aliases.
 | --- | --- |
 | `check_format.py` | Check C++/proto style and produce an applicable patch |
 | `build_product.sh` | Hold the persistent tree lock through Go checks, native tests, builds, packaging and RPM validation |
-| `collect_rpm_packages.sh` | Collect final CPack RPMs without intermediate files |
 | `upload_packages.sh` | Upload the final RPM directory |
 | `summarize_ci.py` | Enforce job results and integration completeness |
 
