@@ -49,7 +49,7 @@ ctest --test-dir cmake-build-ci-debug --output-on-failure
 make -C go test
 cmake --build --preset ci-debug --parallel "${BUILD_JOBS:-6}"
 
-make -C go clean-package-inputs
+make -C go clean
 make -C go all tool PREFIX=/usr STRIP=true CHECK_GPU=0
 
 mkdir -p "$artifact_dir/packages/rpm" "$artifact_dir/cpack-backend"
