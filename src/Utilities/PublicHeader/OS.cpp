@@ -245,8 +245,9 @@ std::expected<void, std::error_code> EnsureServiceDirectory(
       }
     }
 
-    int fd =
-        open(current.c_str(), O_RDONLY | O_DIRECTORY | O_NOFOLLOW | O_CLOEXEC);
+    int open_flags = O_RDONLY | O_DIRECTORY | O_CLOEXEC;
+    if (is_target) open_flags |= O_NOFOLLOW;
+    int fd = open(current.c_str(), open_flags);
     if (fd == -1)
       return std::unexpected(std::error_code(errno, std::generic_category()));
     absl::Cleanup close_fd = [fd] { close(fd); };

@@ -146,6 +146,19 @@ TEST_F(LogPermissionsTest, CreatesMissingAncestorsWithExplicitPermissions) {
   Check(nested, 0700);
 }
 
+TEST_F(LogPermissionsTest, AllowsTrustedAncestorSymlink) {
+  auto real_parent = root_ / "real-parent";
+  ASSERT_TRUE(std::filesystem::create_directory(real_parent));
+  auto trusted_link = root_ / "trusted-link";
+  std::filesystem::create_directory_symlink(real_parent, trusted_link);
+
+  auto nested = trusted_link / "missing-parent" / "supervisor";
+  auto result = util::os::EnsureServiceDirectory(nested, 0700);
+  ASSERT_TRUE(result) << result.error().message();
+  Check(real_parent / "missing-parent", 0755);
+  Check(real_parent / "missing-parent" / "supervisor", 0700);
+}
+
 TEST_F(LogPermissionsTest, TrailingSlashDoesNotFollowLinkedDirectory) {
   auto target = root_ / "target";
   ASSERT_TRUE(std::filesystem::create_directory(target));
