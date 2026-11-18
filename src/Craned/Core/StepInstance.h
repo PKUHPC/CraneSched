@@ -46,6 +46,9 @@ struct StepInstance {
   crane::ManualSpan wait_execute_span;
 
   std::atomic_bool err_before_supv_start{false};
+  // The Step stays in JobInD::step_map while allocation work is running.
+  bool initialization_pending{false};
+  bool free_requested{false};
   // Stored when Completing is received from supervisor.
   // Used to send the real terminal status after cleanup.
   struct PendingTerminalStatus {
@@ -55,6 +58,9 @@ struct StepInstance {
     google::protobuf::Timestamp timestamp;
   };
   std::optional<PendingTerminalStatus> pending_terminal_status;
+  // Fallback for a child interrupted by daemon failure. This is not a
+  // supervisor completion report and must not satisfy the cleanup wait.
+  std::optional<PendingTerminalStatus> daemon_failure;
 
   // When true, status changes from this step are NOT forwarded to CraneCtld.
   // Used for invalid steps (not tracked by CraneCtld) that need local cleanup.
