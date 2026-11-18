@@ -1283,7 +1283,10 @@ void CtldClient::HealthCheck_() {
   std::vector<const char*> argv = {g_config.HealthCheck.Program.c_str(),
                                    nullptr};
 
-  if (subprocess_create(argv.data(), 0, &subprocess) != 0) {
+  // Health checks need Craned's environment, including HOME for CLI
+  // certificates and PATH for commands invoked by the script.
+  if (subprocess_create(argv.data(), subprocess_option_inherit_environment,
+                        &subprocess) != 0) {
     CRANE_ERROR("HealthCheck subprocess creation failed: {}.", strerror(errno));
     return;
   }
