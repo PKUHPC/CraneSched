@@ -12,12 +12,11 @@ def main():
     expected = int(integration.get('expected') or '0')
     passed = int(integration.get('passed') or '0')
     results = {name: jobs.get(name, {}).get('result', 'missing')
-               for name in ('format', 'build', 'integration', 'publish')}
-    success = (all(results[name] == 'success' for name in ('format', 'build', 'integration'))
+               for name in ('build', 'integration', 'publish')}
+    success = (all(results[name] == 'success' for name in ('build', 'integration'))
                and complete and expected > 0 and passed == expected
                and results['publish'] == ('success' if upload else 'skipped'))
     lines = ['### Build, Test and Publish', '',
-             f"- C++ formatting: {results['format']}",
              f"- Build: {results['build']}",
              f"- Integration: {results['integration']} ({passed}/{expected})",
              f"- Package upload: {results['publish']} (requested: {str(upload).lower()})"]

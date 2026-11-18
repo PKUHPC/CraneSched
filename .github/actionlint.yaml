@@ -3,7 +3,7 @@ self-hosted-runner:
     - crane-build
     - crane-ci
 config-variables:
-  - CRANE_CI_BASE_IMAGE
   - CRANE_CI_DEV_IMAGE
+  - CRANE_CI_TEST_IMAGE
   - CRANE_CI_TOOLS_IMAGE
   - CRANE_CI_GOPROXY

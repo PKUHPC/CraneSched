@@ -18,17 +18,8 @@ FORMAT_SCRIPT = CI / 'check_format.py'
 
 
 class FormatWorkflowContractTest(unittest.TestCase):
-    def test_build_consumes_the_revision_checked_by_formatting(self):
-        jobs = yaml.safe_load(WORKFLOW.read_text())['jobs']
-        self.assertEqual(jobs['build']['needs'], 'format')
-        checkout = next(step for step in jobs['build']['steps']
-                        if step.get('uses', '').startswith('actions/checkout@')
-                        and step.get('with', {}).get('path') != '.ci-tools')
-        self.assertEqual(checkout['with']['ref'], '${{ needs.format.outputs.source_sha }}')
-        self.assertIn('format', jobs['summary']['needs'])
-
     def test_failed_formatting_is_uploaded_before_the_job_failure_gate(self):
-        steps = yaml.safe_load(WORKFLOW.read_text())['jobs']['format']['steps']
+        steps = yaml.safe_load(WORKFLOW.read_text())['jobs']['build']['steps']
         check = next(step for step in steps if step.get('id') == 'format')
         upload = next(step for step in steps if step.get('uses', '').startswith('actions/upload-artifact@'))
         gate = next(step for step in steps if step.get('id') == 'format_gate')

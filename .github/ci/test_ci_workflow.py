@@ -12,6 +12,39 @@ import yaml
 
 
 class CIResultTest(unittest.TestCase):
+    def test_suite_matching_uses_the_selected_product_branch_and_leaves_override_optional(self):
+        product = Path(__file__).resolve().parents[2]
+        jobs = yaml.safe_load((product / '.github/workflows/ci.yaml').read_text())['jobs']
+        source = next(step for step in jobs['build']['steps'] if step.get('id') == 'source')
+        suite = next(step for step in jobs['build']['steps'] if step.get('id') == 'suite')
+        self.assertEqual(suite['env']['CI_TEST_REF'], '${{ inputs.harness_ref }}')
+        self.assertEqual(suite['env']['CI_PRODUCT_BRANCH'], '${{ steps.source.outputs.source_branch }}')
+        self.assertEqual(jobs['integration']['env']['CI_SUITE_REVISION'], '${{ needs.build.outputs.harness_sha }}')
+        self.assertEqual(jobs['integration']['env']['CI_TEST_IMAGE'], '${{ needs.build.outputs.test_image }}')
+        self.assertEqual(jobs['integration']['env']['CI_ASSET_DIR'], '${{ needs.build.outputs.asset_dir }}')
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            def git(*args):
+                subprocess.run(['git', '-C', str(root), *args], check=True, capture_output=True, timeout=10)
+            git('init', '-b', 'feature/product')
+            git('-c', 'user.name=CI fixture', '-c', 'user.email=ci@example.invalid', 'commit', '--allow-empty', '-m', 'source')
+            git('tag', 'release')
+            git('tag', 'feature/product')
+            output = root / 'outputs'
+            cases = [('', 'feature/pr', 'feature/pr'),
+                     ('feature/product', 'feature/workflow', 'feature/product'),
+                     ('release', 'feature/workflow', ''), ('a' * 40, 'feature/workflow', '')]
+            for selected, event, expected in cases:
+                with self.subTest(selected=selected):
+                    git('checkout', '--detach' if expected == '' else 'feature/product')
+                    output.write_text('')
+                    result = subprocess.run(['bash', '-euc', source['run']], cwd=root, capture_output=True,
+                                            text=True, timeout=10, env={**os.environ, 'SOURCE_REF': selected,
+                                                                       'EVENT_BRANCH': event, 'GITHUB_OUTPUT': str(output)})
+                    self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
+                    values = dict(line.split('=', 1) for line in output.read_text().splitlines())
+                    self.assertEqual(values['source_branch'], expected)
+
     def test_go_rebuild_clears_removed_package_inputs_and_preserves_caches(self):
         product = Path(__file__).resolve().parents[2]
         cleanup = product / '.github/ci/prepare-go-package-inputs.sh'
@@ -79,10 +112,9 @@ class CIResultTest(unittest.TestCase):
         cases = [
             ({}, True),
             ({'publish': 'success', 'upload': True}, True),
-            ({'format': 'failure'}, False),
-            ({'format': 'cancelled'}, False),
-            ({'format': 'skipped'}, False),
-            ({'format': None}, False),
+            ({'build': 'cancelled'}, False),
+            ({'build': 'skipped'}, False),
+            ({'build': None}, False),
             ({'build': 'failure'}, False),
             ({'integration': 'cancelled'}, False),
             ({'integration': 'skipped'}, False),
@@ -95,12 +127,12 @@ class CIResultTest(unittest.TestCase):
         with tempfile.TemporaryDirectory() as directory:
             for changes, success in cases:
                 with self.subTest(changes=changes):
-                    values = dict(format='success', build='success', integration='success', publish='skipped',
+                    values = dict(build='success', integration='success', publish='skipped',
                                   upload=False, complete='true', expected='5', passed='5')
                     values.update(changes)
-                    needs = {name: {'result': values[name]} for name in ('format', 'build', 'integration', 'publish')}
-                    if values['format'] is None:
-                        del needs['format']
+                    needs = {name: {'result': values[name]} for name in ('build', 'integration', 'publish')}
+                    if values['build'] is None:
+                        del needs['build']
                     needs['integration']['outputs'] = {name: values[name] for name in ('complete', 'expected', 'passed')}
                     result = subprocess.run(
                         [sys.executable, str(script)], capture_output=True, text=True, timeout=10,

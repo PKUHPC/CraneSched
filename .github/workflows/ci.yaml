@@ -8,7 +8,7 @@ on:
         required: false
         type: string
       harness_ref:
-        description: Integration suite branch, tag or commit (blank uses master)
+        description: Integration suite ref (blank matches the selected product branch, then master)
         required: false
         type: string
       publish_packages:
@@ -30,15 +30,23 @@ defaults:
     shell: bash
 
 jobs:
-  format:
-    name: C++ Clang Format
-    timeout-minutes: 15
+  build:
+    name: Format, build and prepare tests
+    timeout-minutes: 150
     outputs:
-      source_sha: ${{ steps.source.outputs.source_sha }}
-    runs-on: crane-ci
+      harness_sha: ${{ steps.suite.outputs.harness_sha }}
+      rpm_dir: ${{ steps.build.outputs.rpm_dir }}
+      test_image: ${{ steps.prepare.outputs.test_image }}
+      asset_dir: ${{ steps.prepare.outputs.asset_dir }}
+    runs-on: crane-build
     container:
       image: ${{ vars.CRANE_CI_DEV_IMAGE }}
 
+    env:
+      CI_DEV_IMAGE: ${{ vars.CRANE_CI_DEV_IMAGE }}
+      CI_TEST_TARGET: ${{ vars.CRANE_CI_TEST_IMAGE }}
+      GOPROXY: ${{ vars.CRANE_CI_GOPROXY || 'https://goproxy.cn,direct' }}
+      GOWORK: 'off'
     steps:
       - name: Checkout the selected product source
         uses: actions/checkout@93cb6efe18208431cddfb8368fd83d5badbf9bfd # v5
@@ -57,7 +65,25 @@ jobs:
 
       - name: Record the selected product revision
         id: source
-        run: echo "source_sha=$(git rev-parse HEAD)" >> "$GITHUB_OUTPUT"
+        env:
+          SOURCE_REF: ${{ inputs.source_ref }}
+          EVENT_BRANCH: ${{ github.head_ref || (github.ref_type == 'branch' && github.ref_name) || '' }}
+        run: |
+          echo "source_sha=$(git rev-parse HEAD)" >> "$GITHUB_OUTPUT"
+          if [[ -n "$SOURCE_REF" ]]; then
+            source_branch=$(git symbolic-ref --quiet HEAD || true)
+            source_branch=${source_branch#refs/heads/}
+          else
+            source_branch=$EVENT_BRANCH
+          fi
+          echo "source_branch=$source_branch" >> "$GITHUB_OUTPUT"
+
+      - name: Select and freeze the integration suite
+        id: suite
+        env:
+          CI_TEST_REF: ${{ inputs.harness_ref }}
+          CI_PRODUCT_BRANCH: ${{ steps.source.outputs.source_branch }}
+        run: python3 /etc/ci-launcher/launch.py --select-suite
 
       - name: Report the image's clang-format version
         run: clang-format --version
@@ -84,131 +110,22 @@ jobs:
           echo 'Clang-format failed; a format-diff artifact is available when a patch could be prepared.'
           exit 1
 
-  build:
-    name: Go checks, tests and RPM build
-    needs: format
-    if: ${{ !cancelled() && needs.format.result == 'success' }}
-    permissions:
-      contents: read
-    runs-on: crane-build
-    timeout-minutes: 120
-    container:
-      image: ${{ vars.CRANE_CI_BASE_IMAGE }}
-    outputs:
-      source_sha: ${{ steps.build.outputs.source_sha }}
-      artifact_dir: ${{ steps.build.outputs.artifact_dir }}
-      manifest_sha256: ${{ steps.build.outputs.manifest_sha256 }}
-    env:
-      BASE_IMAGE: ${{ vars.CRANE_CI_BASE_IMAGE }}
-      GOPROXY: ${{ vars.CRANE_CI_GOPROXY || 'https://goproxy.cn,direct' }}
-      GOWORK: 'off'
-    steps:
-      - name: Checkout the selected product source
-        uses: actions/checkout@93cb6efe18208431cddfb8368fd83d5badbf9bfd # v5
-        with:
-          ref: ${{ needs.format.outputs.source_sha }}
-          fetch-depth: 1
-          persist-credentials: false
-
-      - name: Checkout CI scripts from the workflow revision
-        uses: actions/checkout@93cb6efe18208431cddfb8368fd83d5badbf9bfd # v5
-        with:
-          ref: ${{ github.sha }}
-          path: .ci-tools
-          sparse-checkout: .github/ci
-          persist-credentials: false
-
-      - name: Test and package with a persistent build tree
+      - name: Build, run native tests and package RPMs
         id: build
-        run: |
-          set -euo pipefail
-          unset HTTP_PROXY HTTPS_PROXY ALL_PROXY http_proxy https_proxy all_proxy
-          [[ "$BASE_IMAGE" =~ @sha256:[a-f0-9]{64}$ ]]
-          [[ "$(id -u)" == 1001 && "$(id -g)" == 1001 ]]
-          getent passwd 1001 >/dev/null
-          getent group 1001 >/dev/null
-          source_sha="$(git rev-parse HEAD)"
-          source_checkout="$PWD"
-          ci_scripts="$source_checkout/.ci-tools/.github/ci"
-          state="/ci/workspaces/native-rhel10-amd64/${BASE_IMAGE##*@sha256:}/ci-debug"
-          artifact_dir="/ci/attempts/${GITHUB_RUN_ID}-${GITHUB_RUN_ATTEMPT}/build"
-          mkdir -p "$state" "$(dirname "$artifact_dir")"
-          mkdir "$artifact_dir"
-          exec 9>"$state/build.lock"
-          flock 9
-          if [[ ! -d "$state/source/.git" ]]; then
-            git init "$state/source"
-          fi
-          git -C "$state/source" config remote.origin.url "$(git -C "$source_checkout" remote get-url origin)"
-          git -C "$state/source" fetch --no-tags --update-shallow "$source_checkout" "$source_sha"
-          git -C "$state/source" checkout --force --detach "$source_sha"
-          cd -P "$state/source"
-          [[ "$(git rev-parse HEAD)" == "$source_sha" ]]
-          [[ -z "$(git status --porcelain --untracked-files=no)" ]]
-          export SOURCE_SHA="$source_sha" ARTIFACT_DIR="$artifact_dir"
-          export SOURCE_DATE_EPOCH="$(git log -1 --format=%ct)"
-          export CPM_SOURCE_CACHE=/ci/cache/cpm
-          mkdir -p "$CPM_SOURCE_CACHE" "$CCACHE_DIR" "$CCACHE_TEMPDIR"
-          # Check Go sources before tests or packaging.
-          unformatted="$(gofmt -l go)"
-          if [[ -n "$unformatted" ]]; then
-            printf '%s\n' "$unformatted"
-            echo '::error::Run gofmt on the listed files.'
-            exit 1
-          fi
-          make -C go protos
-          (cd go && go vet -mod=readonly ./...)
-          cmake --preset ci-debug
-          cmake --build --preset ci-debug --target crane_unit_tests --parallel "${BUILD_JOBS:-6}"
-          ctest --test-dir cmake-build-ci-debug --output-on-failure
-          make -C go test
-          cmake --build --preset ci-debug --parallel "${BUILD_JOBS:-6}"
-          # Package inputs must all come from this source revision.
-          bash "$ci_scripts/prepare-go-package-inputs.sh"
-          make -C go all tool PREFIX=/usr STRIP=true CHECK_GPU=0
-          mkdir -p "$artifact_dir/packages/rpm" "$artifact_dir/cpack-backend"
-          (cd cmake-build-ci-debug && cpack -G RPM -B "$artifact_dir/cpack-backend")
-          ARTIFACT_DIR="$artifact_dir" bash "$ci_scripts/collect-rpm-packages.sh"
-          GITHUB_TOKEN='${{ github.token }}' make -C go package SKIP_REBUILD=true CHECK_GPU=0 \
-            GORELEASER_SNAPSHOT=false GORELEASER_RELEASE_ARGS=--skip=publish,validate
-          cp go/build/dist/*.rpm "$artifact_dir/packages/rpm/"
-          python3 - <<'PY'
-          import hashlib
-          import json
-          import os
-          import subprocess
-          from pathlib import Path
+        env:
+          CI_SOURCE_SHA: ${{ steps.source.outputs.source_sha }}
+          CI_PACKAGING_TOKEN: ${{ github.token }}
+        run: bash .ci-tools/.github/ci/build-product.sh
 
-          root = Path(os.environ['ARTIFACT_DIR'])
-          expected = {'cranesched-cranectld', 'cranesched-craned', 'cranesched-client',
-                      'cranesched-plugin', 'cranesched-slurm-compat'}
-          packages = []
-          for path in sorted((root / 'packages/rpm').glob('*.rpm')):
-              name, version, architecture = subprocess.check_output(
-                  ['rpm', '-qp', '--qf', '%{NAME}\t%{VERSION}\t%{ARCH}', str(path)], text=True
-              ).split('\t')
-              if architecture != 'x86_64':
-                  raise SystemExit('Unexpected RPM architecture')
-              packages.append({'path': str(path.relative_to(root)), 'name': name,
-                               'version': version, 'architecture': architecture,
-                               'sha256': hashlib.file_digest(path.open('rb'), 'sha256').hexdigest()})
-          if len(packages) != 5 or {item['name'] for item in packages} != expected:
-              raise SystemExit('The expected five RPMs were not produced')
-          if {item['version'] for item in packages} != {Path('VERSION').read_text().strip()}:
-              raise SystemExit('RPM versions do not match the selected product source')
-          manifest = {'schema': 1, 'sourceRevision': os.environ['SOURCE_SHA'],
-                      'baseImage': os.environ['BASE_IMAGE'], 'target': 'rhel10-amd64',
-                      'preset': 'ci-debug', 'nativeTestsPassed': True, 'packages': packages}
-          data = (json.dumps(manifest, indent=2) + '\n').encode()
-          (root / 'manifest.json').write_bytes(data)
-          with Path(os.environ['GITHUB_OUTPUT']).open('a') as output:
-              output.write(f"source_sha={manifest['sourceRevision']}\nartifact_dir={root}\n")
-              output.write(f"manifest_sha256={hashlib.sha256(data).hexdigest()}\n")
-          print('Tests and the five RPMs completed successfully.')
-          PY
+      - name: Prepare full-suite assets and push the Test image
+        id: prepare
+        env:
+          CI_SUITE_REVISION: ${{ steps.suite.outputs.harness_sha }}
+          CI_RPM_DIR: ${{ steps.build.outputs.rpm_dir }}
+        run: python3 /etc/ci-launcher/launch.py --prepare
 
   integration:
-    name: Assemble and test the same RPMs
+    name: Full integration tests
     needs: build
     if: ${{ !cancelled() && needs.build.result == 'success' }}
     runs-on: crane-ci
@@ -224,18 +141,17 @@ jobs:
       expected: ${{ steps.integration.outputs.expected }}
       passed: ${{ steps.integration.outputs.passed }}
     env:
-      CI_ARTIFACT_DIR: ${{ needs.build.outputs.artifact_dir }}
-      CI_MANIFEST_SHA256: ${{ needs.build.outputs.manifest_sha256 }}
-      CI_SOURCE_SHA: ${{ needs.build.outputs.source_sha }}
-      CI_TEST_REF: ${{ inputs.harness_ref || 'master' }}
+      CI_TEST_IMAGE: ${{ needs.build.outputs.test_image }}
+      CI_ASSET_DIR: ${{ needs.build.outputs.asset_dir }}
+      CI_SUITE_REVISION: ${{ needs.build.outputs.harness_sha }}
       CI_SHARD_COUNT: ${{ inputs.integration_shards }}
     steps:
-      - name: Prepare the test inputs, run tests and reclaim their environments
+      - name: Run all prepared tests and reclaim their environments
         id: integration
         run: |
           set -euo pipefail
           unset HTTP_PROXY HTTPS_PROXY ALL_PROXY http_proxy https_proxy all_proxy
-          python3 /etc/ci-launcher/launch.py
+          python3 /etc/ci-launcher/launch.py --integration
 
   publish:
     name: Publish this build's RPMs
@@ -250,8 +166,7 @@ jobs:
     container:
       image: ${{ vars.CRANE_CI_TOOLS_IMAGE }}
     env:
-      CI_ARTIFACT_DIR: ${{ needs.build.outputs.artifact_dir }}
-      CI_MANIFEST_SHA256: ${{ needs.build.outputs.manifest_sha256 }}
+      PACKAGE_DIR: ${{ needs.build.outputs.rpm_dir }}
       NEXUS_URL: ${{ secrets.CCREPO_URL }}
       NEXUS_USERNAME: ${{ secrets.CCREPO_USERNAME }}
       NEXUS_PASSWORD: ${{ secrets.CCREPO_PASSWORD }}
@@ -262,10 +177,10 @@ jobs:
       VERSION: master
       CONTINUE_ON_ERROR: 'true'
     steps:
-      - name: Checkout the uploader from the built revision
+      - name: Checkout the uploader from the workflow revision
         uses: actions/checkout@93cb6efe18208431cddfb8368fd83d5badbf9bfd # v5
         with:
-          ref: ${{ needs.build.outputs.source_sha }}
+          ref: ${{ github.sha }}
           persist-credentials: false
           sparse-checkout: .github/ci
 
@@ -274,36 +189,13 @@ jobs:
           set -euo pipefail
           unset HTTP_PROXY HTTPS_PROXY ALL_PROXY http_proxy https_proxy all_proxy
           [[ -n "$NEXUS_URL" && -n "$NEXUS_USERNAME" && -n "$NEXUS_PASSWORD" ]]
-          export PACKAGE_DIR="/ci/attempts/${GITHUB_RUN_ID}-${GITHUB_RUN_ATTEMPT}/publish-rpm"
-          python3 - <<'PY'
-          import hashlib
-          import json
-          import os
-          import shutil
-          from pathlib import Path
-
-          root = Path(os.environ['CI_ARTIFACT_DIR'])
-          data = (root / 'manifest.json').read_bytes()
-          if hashlib.sha256(data).hexdigest() != os.environ['CI_MANIFEST_SHA256']:
-              raise SystemExit('Build manifest checksum mismatch')
-          manifest = json.loads(data)
-          if not manifest.get('nativeTestsPassed') or len(manifest['packages']) != 5:
-              raise SystemExit('Build output is incomplete')
-          selected = Path(os.environ['PACKAGE_DIR'])
-          selected.mkdir(parents=True, exist_ok=False)
-          for package in manifest['packages']:
-              path = (root / package['path']).resolve()
-              if not path.is_relative_to(root.resolve() / 'packages'):
-                  raise SystemExit('RPM path is outside this build output')
-              if hashlib.file_digest(path.open('rb'), 'sha256').hexdigest() != package['sha256']:
-                  raise SystemExit('RPM checksum mismatch')
-              shutil.copyfile(path, selected / path.name)
-          PY
+          [[ "$PACKAGE_DIR" == /ci/attempts/*/build/packages/rpm ]]
+          compgen -G "$PACKAGE_DIR/*.rpm" >/dev/null
           bash .github/ci/upload-packages.sh
 
   summary:
     name: CI result
-    needs: [format, build, integration, publish]
+    needs: [build, integration, publish]
     if: ${{ always() }}
     runs-on: crane-ci
     timeout-minutes: 5
