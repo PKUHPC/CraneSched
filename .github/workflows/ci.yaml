@@ -148,10 +148,7 @@ jobs:
     steps:
       - name: Run all prepared tests and reclaim their environments
         id: integration
-        run: |
-          set -euo pipefail
-          unset HTTP_PROXY HTTPS_PROXY ALL_PROXY http_proxy https_proxy all_proxy
-          python3 /etc/ci-launcher/launch.py --integration
+        run: python3 /etc/ci-launcher/launch.py --integration
 
   publish:
     name: Publish this build's RPMs
@@ -170,12 +167,10 @@ jobs:
       NEXUS_URL: ${{ secrets.CCREPO_URL }}
       NEXUS_USERNAME: ${{ secrets.CCREPO_USERNAME }}
       NEXUS_PASSWORD: ${{ secrets.CCREPO_PASSWORD }}
-      UPLOAD_MODE: RPM
       RPM_REPO_NAME: crane
       RPM_ARCH: x86_64
       RPM_DISTRO: '10'
       VERSION: master
-      CONTINUE_ON_ERROR: 'true'
     steps:
       - name: Checkout the uploader from the workflow revision
         uses: actions/checkout@93cb6efe18208431cddfb8368fd83d5badbf9bfd # v5
@@ -185,13 +180,7 @@ jobs:
           sparse-checkout: .github/ci
 
       - name: Verify and upload the build output
-        run: |
-          set -euo pipefail
-          unset HTTP_PROXY HTTPS_PROXY ALL_PROXY http_proxy https_proxy all_proxy
-          [[ -n "$NEXUS_URL" && -n "$NEXUS_USERNAME" && -n "$NEXUS_PASSWORD" ]]
-          [[ "$PACKAGE_DIR" == /ci/attempts/*/build/packages/rpm ]]
-          compgen -G "$PACKAGE_DIR/*.rpm" >/dev/null
-          bash .github/ci/upload_packages.sh
+        run: bash .github/ci/upload_packages.sh
 
   summary:
     name: CI result

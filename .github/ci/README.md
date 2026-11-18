@@ -81,7 +81,7 @@ Internal package DNS is maintained by cluster DNS, without Pod host aliases.
 | --- | --- |
 | `check_format.py` | Check C++/proto style and produce an applicable patch |
 | `build_product.sh` | Hold the persistent tree lock through Go checks, native tests, builds, packaging and RPM validation |
-| `upload_packages.sh` | Upload the final RPM directory |
+| `upload_packages.sh` | Upload final RPMs, retry failures, and fail after trying every package |
 | `summarize_ci.py` | Enforce job results and integration completeness |
 
 CI helper scripts use `snake_case` regardless of language. `ci.yaml` retains GitHub's required workflow extension.
