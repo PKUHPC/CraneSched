@@ -671,16 +671,17 @@ func (m *StateMachineOfCrun) StateForwarding() {
 }
 
 func (m *StateMachineOfCrun) forwardLocalRequests(taskIdWithInput *uint32) {
+	stdinInput := m.chanInputFromLocal
 	var x11Requests <-chan *protos.StreamCrunRequest
 	if m.X11SessionMgr != nil {
 		x11Requests = m.X11SessionMgr.X11RequestChan
 	}
 
-	for {
+	for stdinInput != nil || x11Requests != nil {
 		select {
 		case <-m.stopReadCtx.Done():
 			return
-		case msg, ok := <-m.chanInputFromLocal:
+		case msg, ok := <-stdinInput:
 			eof := !ok || msg == nil
 			request := &protos.StreamCrunRequest{
 				Type: protos.StreamCrunRequest_TASK_IO_FORWARD,
@@ -701,7 +702,10 @@ func (m *StateMachineOfCrun) forwardLocalRequests(taskIdWithInput *uint32) {
 				return
 			}
 			if eof {
-				return
+				// Stdin EOF must not stop independent X11 traffic. Disable this
+				// input after its EOF has been sent, leaving X11 active until
+				// the step ends or forwarding is cancelled.
+				stdinInput = nil
 			}
 		case request := <-x11Requests:
 			if err := m.sendRequest(m.stopReadCtx, request); err != nil {

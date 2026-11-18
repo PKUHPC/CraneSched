@@ -289,3 +289,105 @@ func TestCrunStdinCancellation(t *testing.T) {
 		})
 	}
 }
+
+func TestCrunX11ForwardingAfterStdinEOF(t *testing.T) {
+	for _, test := range []struct {
+		name   string
+		nilEOF bool
+		x11    bool
+	}{
+		{name: "closed_stdin_with_x11", x11: true},
+		{name: "nil_eof_with_x11", nilEOF: true, x11: true},
+		{name: "closed_stdin_without_x11"},
+		{name: "nil_eof_without_x11", nilEOF: true},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			ctx, cancel := context.WithCancel(context.Background())
+			recorder := &stdinRequestRecorder{requests: make(chan *protos.StreamCrunRequest, 128)}
+			sender := newCrunStreamSender(ctx, recorder)
+			m := &StateMachineOfCrun{
+				stopReadCtx: ctx, stopStepCb: cancel, sender: sender,
+				chanInputFromLocal: make(chan []byte, 2),
+			}
+			if test.x11 {
+				m.X11SessionMgr = NewX11SessionMgr(&protos.X11Meta{}, &ctx)
+			}
+			data := []byte("input before EOF\n")
+			m.chanInputFromLocal <- data
+			if test.nilEOF {
+				m.chanInputFromLocal <- nil
+			} else {
+				close(m.chanInputFromLocal)
+			}
+			taskID := uint32(3)
+			done := make(chan struct{})
+			go func() {
+				defer close(done)
+				m.forwardLocalRequests(&taskID)
+			}()
+			t.Cleanup(func() {
+				cancel()
+				select {
+				case <-done:
+				case <-time.After(5 * time.Second):
+					t.Error("forwarder did not stop after cancellation")
+				}
+				sender.Close()
+			})
+			deadline := time.NewTimer(5 * time.Second)
+			defer deadline.Stop()
+			for _, eof := range []bool{false, true} {
+				select {
+				case request := <-recorder.requests:
+					input := request.GetPayloadTaskIoForwardReq()
+					if request.Type != protos.StreamCrunRequest_TASK_IO_FORWARD || input == nil || input.Eof != eof {
+						t.Fatalf("expected stdin request with EOF=%t, got %v", eof, request)
+					}
+					if input.TaskId == nil || *input.TaskId != taskID {
+						t.Fatalf("stdin request lost destination task %d", taskID)
+					}
+					if (!eof && !bytes.Equal(input.Msg, data)) || (eof && len(input.Msg) != 0) {
+						t.Fatalf("unexpected stdin data with EOF=%t: %q", eof, input.Msg)
+					}
+				case <-deadline.C:
+					t.Fatalf("timed out waiting for stdin request with EOF=%t", eof)
+				}
+			}
+			if test.x11 {
+				// Send only after stdin EOF has reached the transport. More than
+				// one X11 channel's capacity must still be forwarded, with no
+				// repeated stdin EOF messages interleaved.
+				for i := 0; i <= cap(m.X11SessionMgr.X11RequestChan); i++ {
+					request := &protos.StreamCrunRequest{
+						Type: protos.StreamCrunRequest_STEP_X11_FORWARD,
+						Payload: &protos.StreamCrunRequest_PayloadStepX11ForwardReq{
+							PayloadStepX11ForwardReq: &protos.StreamCrunRequest_StepX11ForwardReq{
+								CranedId: "node1", LocalId: uint32(i), Msg: []byte("X11 response"),
+							},
+						},
+					}
+					m.X11SessionMgr.X11RequestChan <- request
+					select {
+					case got := <-recorder.requests:
+						if got != request {
+							t.Fatalf("expected X11 request %d after stdin EOF, got %v", i, got)
+						}
+					case <-done:
+						t.Fatal("stdin EOF stopped X11 forwarding")
+					case <-deadline.C:
+						t.Fatalf("timed out forwarding X11 request %d after stdin EOF", i)
+					}
+				}
+				cancel()
+			}
+			select {
+			case <-done:
+			case <-deadline.C:
+				t.Fatal("forwarder did not stop")
+			}
+			if len(recorder.requests) != 0 {
+				t.Fatal("unexpected requests after forwarding completed")
+			}
+		})
+	}
+}
