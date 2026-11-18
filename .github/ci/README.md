@@ -85,9 +85,6 @@ Internal package DNS is maintained by cluster DNS, without Pod host aliases.
 | `upload_packages.sh` | Upload the final RPM directory |
 | `summarize_ci.py` | Enforce job results and integration completeness |
 
-Regression files are named for the behavior they exercise: `test_check_format.py`,
-`test_ci_scripts.py`, and `test_rpm_publish.py`.
-
 CI helper scripts use `snake_case` regardless of language. `ci.yaml` retains GitHub's required workflow extension.
 
 | Repository variable | Purpose |
@@ -128,13 +125,11 @@ cache directories on shared storage.
 
 ## Validation
 
-Run script regressions with `python3 -m unittest discover -s .github/ci -p
- 'test_*.py'` and check workflow syntax with actionlint configured for ARC labels.
+Check workflow syntax with actionlint configured for ARC labels, and run `bash -n`
+on the directly invoked shell scripts when editing them.
 The pinned actionlint predates `concurrency.queue`; only that field is omitted
 from a temporary lint copy. A real workflow attempt must still validate hooks,
 identities, shared storage and the complete DAG before automatic triggers.
-Script tests exercise applicable format patches, formatter failures, stale Go
-package cleanup, final RPM collection, upload behavior and the summary gate.
-They do not snapshot step names or expressions, or execute code extracted from
-workflow YAML. Suite ref precedence and updates are tested by the suite launcher;
-workflow wiring still requires real Actions acceptance.
+Local static checks do not prove ARC routing, live RBAC, Registry access or a real
+Actions DAG. The actual Actions workflow remains the acceptance check for the
+combined build, publish and integration path.
