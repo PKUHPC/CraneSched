@@ -9,7 +9,7 @@ from pathlib import Path
 
 
 
-UPLOADER = Path(__file__).with_name("upload-packages.sh")
+UPLOADER = Path(__file__).with_name("upload_packages.sh")
 
 
 class RpmRepositoryUploadTest(unittest.TestCase):

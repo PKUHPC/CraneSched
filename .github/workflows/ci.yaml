@@ -115,7 +115,7 @@ jobs:
         env:
           CI_SOURCE_SHA: ${{ steps.source.outputs.source_sha }}
           CI_PACKAGING_TOKEN: ${{ github.token }}
-        run: bash .ci-tools/.github/ci/build-product.sh
+        run: bash .ci-tools/.github/ci/build_product.sh
 
       - name: Prepare full-suite assets and push the Test image
         id: prepare
@@ -191,7 +191,7 @@ jobs:
           [[ -n "$NEXUS_URL" && -n "$NEXUS_USERNAME" && -n "$NEXUS_PASSWORD" ]]
           [[ "$PACKAGE_DIR" == /ci/attempts/*/build/packages/rpm ]]
           compgen -G "$PACKAGE_DIR/*.rpm" >/dev/null
-          bash .github/ci/upload-packages.sh
+          bash .github/ci/upload_packages.sh
 
   summary:
     name: CI result

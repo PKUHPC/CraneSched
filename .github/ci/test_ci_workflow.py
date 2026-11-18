@@ -14,7 +14,6 @@ import yaml
 class CIResultTest(unittest.TestCase):
     def test_go_rebuild_clears_removed_package_inputs_and_preserves_caches(self):
         product = Path(__file__).resolve().parents[2]
-        cleanup = product / '.github/ci/prepare-go-package-inputs.sh'
         package = yaml.safe_load((product / 'go/.goreleaser.yaml').read_text())
         self.assertTrue(any(item.get('src') == 'build/plugin/mail.so'
                             for archive in package['nfpms'] for item in archive['contents']))
@@ -44,8 +43,9 @@ class CIResultTest(unittest.TestCase):
             build()
             self.assertFalse((go / 'plugin/mail').exists())
             self.assertEqual((go / 'build/plugin/mail.so').read_text(), 'previous revision')
-            environment = {key: value for key, value in os.environ.items() if key != 'BASH_ENV'}
-            subprocess.run([str(cleanup), str(root)], cwd=root, env=environment, check=True, timeout=10)
+            subprocess.run(['make', '--no-print-directory', '-C', str(go),
+                            '-f', str(product / 'go/Makefile'), 'clean-package-inputs'],
+                           cwd=root, check=True, capture_output=True, timeout=10)
             build()
             self.assertFalse((go / 'build/plugin/mail.so').exists())
             self.assertFalse((go / 'build/bin/removed').exists())
@@ -54,7 +54,7 @@ class CIResultTest(unittest.TestCase):
             self.assertTrue(all(path.read_text() == 'persistent cache' for path in sentinels))
 
     def test_cpack_collection_excludes_intermediate_rpms(self):
-        collector = Path(__file__).resolve().parents[2] / '.github/ci/collect-rpm-packages.sh'
+        collector = Path(__file__).resolve().parents[2] / '.github/ci/collect_rpm_packages.sh'
         with tempfile.TemporaryDirectory() as directory:
             root = Path(directory)
             (root / 'packages/rpm').mkdir(parents=True)

@@ -80,13 +80,12 @@ Internal package DNS is maintained by cluster DNS, without Pod host aliases.
 | Script | Responsibility |
 | --- | --- |
 | `check_format.py` | Check C++/proto style and produce an applicable patch |
-| `build-product.sh` | Hold the persistent tree lock through Go checks, native tests, builds, packaging and RPM validation |
-| `prepare-go-package-inputs.sh` | Remove obsolete generated Go package inputs before rebuild |
-| `collect-rpm-packages.sh` | Collect final CPack RPMs without intermediate files |
-| `upload-packages.sh` | Upload the final RPM directory |
+| `build_product.sh` | Hold the persistent tree lock through Go checks, native tests, builds, packaging and RPM validation |
+| `collect_rpm_packages.sh` | Collect final CPack RPMs without intermediate files |
+| `upload_packages.sh` | Upload the final RPM directory |
 | `summarize_ci.py` | Enforce job results and integration completeness |
 
-Python entrypoints use `snake_case`. Shell entrypoints use command-style hyphenated names.
+CI helper scripts use `snake_case` regardless of language. `ci.yaml` retains GitHub's required workflow extension.
 
 | Repository variable | Purpose |
 | --- | --- |
@@ -101,6 +100,10 @@ The launcher is mounted at `/etc/ci-launcher/launch.py`; build calls
 `--select-suite` then `--prepare`, and integration calls `--integration`.
 Run templates and platform metadata are maintained through Kubernetes objects.
 No private repository URL or source is stored in the product workflow.
+The workflow keeps GitHub-specific triggers, permissions, runner/container selection,
+job dependencies, outputs and conditions. Product build, format, upload and result
+logic lives in directly runnable scripts; short Actions-only setup and gate commands
+remain inline.
 
 ## Persistent build state
 

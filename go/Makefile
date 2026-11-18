@@ -106,7 +106,7 @@ else
 endif
 
 # Targets
-.PHONY: all build test protos clean install plugin plugin-monitor plugin-trace plugin-other tool service format package check-goreleaser
+.PHONY: all build test protos clean clean-package-inputs install plugin plugin-monitor plugin-trace plugin-other tool service format package check-goreleaser
 
 all: build plugin service
 
@@ -196,6 +196,9 @@ service:
 clean:
 	@echo "Cleaning up..."
 	@rm -rf build generated
+
+clean-package-inputs:
+	@rm -rf build/bin build/plugin build/tool
 
 install: build plugin service
 	@echo "- Installing executables, plugins and auxiliary files..."

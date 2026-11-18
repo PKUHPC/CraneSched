@@ -7,7 +7,6 @@ getent passwd 1001 >/dev/null
 getent group 1001 >/dev/null
 source_sha="$CI_SOURCE_SHA"
 source_checkout="$PWD"
-ci_scripts="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 state="/ci/workspaces/native-rhel10-amd64/${CI_DEV_IMAGE##*@sha256:}/ci-debug"
 artifact_dir="/ci/attempts/${GITHUB_RUN_ID}-${GITHUB_RUN_ATTEMPT}/build"
 mkdir -p "$state" "$(dirname "$artifact_dir")"
@@ -42,11 +41,11 @@ ctest --test-dir cmake-build-ci-debug --output-on-failure
 make -C go test
 cmake --build --preset ci-debug --parallel "${BUILD_JOBS:-6}"
 # Package inputs must all come from this source revision.
-bash "$ci_scripts/prepare-go-package-inputs.sh"
+make -C go clean-package-inputs
 make -C go all tool PREFIX=/usr STRIP=true CHECK_GPU=0
 mkdir -p "$artifact_dir/packages/rpm" "$artifact_dir/cpack-backend"
 (cd cmake-build-ci-debug && cpack -G RPM -B "$artifact_dir/cpack-backend")
-ARTIFACT_DIR="$artifact_dir" bash "$ci_scripts/collect-rpm-packages.sh"
+ARTIFACT_DIR="$artifact_dir" bash "$(dirname "${BASH_SOURCE[0]}")/collect_rpm_packages.sh"
 GITHUB_TOKEN="$CI_PACKAGING_TOKEN" make -C go package SKIP_REBUILD=true CHECK_GPU=0 \
   GORELEASER_SNAPSHOT=false GORELEASER_RELEASE_ARGS=--skip=publish,validate
 cp go/build/dist/*.rpm "$artifact_dir/packages/rpm/"
