@@ -481,6 +481,96 @@ void SetupJobAllocation(Ctld::JobInCtld& job,
 
 }  // namespace
 
+class MpiFailureStateMachineTest
+    : public ::testing::TestWithParam<crane::grpc::JobStatus> {};
+
+TEST_P(MpiFailureStateMachineTest, TerminatesOnlyRemainingPeersOnce) {
+  Ctld::JobInCtld job;
+  job.SetJobId(70);
+  job.SetPrimaryStep(MakePrimaryStep(&job, {"node-a", "node-b", "node-c"}));
+  auto common = MakePrimaryStep(&job, {"node-a", "node-b", "node-c"});
+  common->SetStepId(2);
+  common->SetStepType(crane::grpc::StepType::COMMON);
+  common->type = crane::grpc::JobType::Interactive;
+  common->SetStatus(crane::grpc::Running);
+  common->SetConfiguringNodes({});
+  auto* step = common.get();
+  job.AddStep(std::move(common));
+  Ctld::StepStatusChangeContext context;
+
+  // One node has already stopped; the other still needs a failure broadcast.
+  step->StepStatusChange(crane::grpc::Completing, 0, "", "node-c",
+                         TimestampAt(100), &context);
+  step->StepStatusChange(GetParam(), ExitCode::EC_MPI_ERR, "MPI failure",
+                         "node-a", TimestampAt(101), &context);
+  ASSERT_TRUE(step->PendingFinalStatus().has_value());
+  EXPECT_EQ(*step->PendingFinalStatus(), crane::grpc::Failed);
+  EXPECT_EQ(step->PendingFinalExitCode(), ExitCode::EC_MPI_ERR);
+  ASSERT_EQ(context.craned_mpi_failure_steps.size(), 1);
+  EXPECT_EQ(context.craned_mpi_failure_steps.at("node-b").at(job.JobId()),
+            (std::set<step_id_t>{2}));
+  EXPECT_TRUE(context.craned_cancel_steps.empty());
+  EXPECT_EQ(job.PrimaryStep()->Status(), crane::grpc::Configuring);
+
+  // Duplicate or peer failures must not turn one broadcast into O(nodes^2).
+  context.craned_mpi_failure_steps.clear();
+  step->StepStatusChange(GetParam(), ExitCode::EC_MPI_ERR, "duplicate",
+                         "node-a", TimestampAt(102), &context);
+  EXPECT_TRUE(context.craned_mpi_failure_steps.empty());
+  step->StepStatusChange(crane::grpc::Completing, ExitCode::EC_MPI_ERR,
+                         "peer failure", "node-b", TimestampAt(103), &context);
+  EXPECT_TRUE(context.craned_mpi_failure_steps.empty());
+  EXPECT_EQ(step->Status(), crane::grpc::Completing);
+
+  // Later cleanup/cancellation reports retain the original MPI failure.
+  for (const auto& node : {"node-a", "node-b", "node-c"}) {
+    step->StepStatusChange(crane::grpc::Cancelled, ExitCode::EC_TERMINATED,
+                           "cleanup", node, TimestampAt(104), &context);
+  }
+  EXPECT_EQ(job.GetStep(2), nullptr);
+  EXPECT_EQ(step->Status(), crane::grpc::Failed);
+  EXPECT_EQ(step->ExitCode(), ExitCode::EC_MPI_ERR);
+  EXPECT_NE(job.PrimaryStep(), nullptr);
+}
+
+INSTANTIATE_TEST_SUITE_P(Reports, MpiFailureStateMachineTest,
+                         ::testing::Values(crane::grpc::Completing,
+                                           crane::grpc::Failed));
+
+TEST(CtldStepStateMachineTest, MpiFailurePreservesPriorTerminationReason) {
+  for (const auto status :
+       {crane::grpc::Cancelled, crane::grpc::ExceedTimeLimit}) {
+    Ctld::JobInCtld job;
+    job.SetJobId(71);
+    auto step = MakePrimaryStep(&job, {"node-a", "node-b"});
+    step->SetStatus(crane::grpc::Running);
+    step->SetPendingFinalResultIfUnset(status, ExitCode::EC_TERMINATED);
+    Ctld::StepStatusChangeContext context;
+    step->StepStatusChange(crane::grpc::Completing, ExitCode::EC_MPI_ERR,
+                           "shutdown", "node-a", TimestampAt(100), &context);
+    EXPECT_EQ(step->PendingFinalStatus(), status);
+    EXPECT_EQ(step->PendingFinalExitCode(), ExitCode::EC_TERMINATED);
+    EXPECT_TRUE(context.craned_mpi_failure_steps.empty());
+  }
+}
+
+TEST(CtldStepStateMachineTest, IgnoresUnrelatedOrNonExecutionMpiFailure) {
+  Ctld::JobInCtld job;
+  job.SetJobId(72);
+  auto step = MakePrimaryStep(&job, {"node-a", "node-b"});
+  step->SetStatus(crane::grpc::Running);
+  Ctld::StepStatusChangeContext context;
+  step->StepStatusChange(crane::grpc::Completing, ExitCode::EC_MPI_ERR,
+                         "foreign node", "other", TimestampAt(100), &context);
+  EXPECT_FALSE(step->PendingFinalStatus().has_value());
+  EXPECT_TRUE(context.craned_mpi_failure_steps.empty());
+
+  step->StepStatusChange(crane::grpc::Completing, 1, "ordinary exit", "node-a",
+                         TimestampAt(101), &context);
+  EXPECT_FALSE(step->PendingFinalStatus().has_value());
+  EXPECT_TRUE(context.craned_mpi_failure_steps.empty());
+}
+
 class StepToDSerializationTest : public ::testing::TestWithParam<bool> {};
 
 TEST_P(StepToDSerializationTest, ForwardsExternalLauncherFlag) {

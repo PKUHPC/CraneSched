@@ -38,8 +38,9 @@ crun可以运行在两种模式下：
 **--mpi=<type>**
 
 :   **适用于：** `作业`, `作业步`  
-选择 MPI 集成方式。当前支持的取值：`pmix`。设置为 `pmix` 时，CraneSched 将作为进程管理器，通过内置 PMIx 服务端为 MPI 进程分配 rank/namespace 并完成 modex/fence，无需 `mpirun`。  
+选择 MPI 集成方式。当前支持的取值：`pmix`、`pmi2`。设置为 `pmix` 时，CraneSched 将作为进程管理器，通过内置 PMIx 服务端为 MPI 进程分配 rank/namespace 并完成 modex/fence，无需 `mpirun`。
 注意：若本集群未启用 PMIx 支持，将报错 “PMIx support is not compiled in.”  
+PMI-2 的客户端安装、Intel MPI 配置和支持边界见 [PMI-2 直接启动](../deployment/configuration/pmi2.md)。
 详见《PMIx 使用指南》：../deployment/configuration/pmix.md
 **-N, --nodes=&lt;num&gt;**
 

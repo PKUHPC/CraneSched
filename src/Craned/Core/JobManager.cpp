@@ -2540,47 +2540,25 @@ void JobManager::StepStatusChangeAsync(
                                  std::move(timestamp));
 }
 
-bool JobManager::ReceivePmixPort(
-    const std::vector<std::pair<CranedId, std::string>>& pmix_ports,
-    job_id_t job_id, step_id_t step_id) {
-  auto job = m_job_map_.GetValueExclusivePtr(job_id);
-  if (!job) {
-    CRANE_ERROR(
-        "[Step #{}.{}] Failed to find job allocation when receiving PMIx ports",
-        job_id, step_id);
-    return false;
+bool JobManager::ReceiveMpiEndpoints(
+    const crane::grpc::mpi::ReceiveMpiEndpointsRequest& request) {
+  std::shared_ptr<SupervisorStub> supervisor;
+  {
+    auto job = m_job_map_.GetValueExclusivePtr(request.job_id());
+    if (!job) return false;
+    absl::MutexLock lock(job->step_map_mtx.get());
+    auto step = job->step_map.find(request.step_id());
+    if (step == job->step_map.end() || !step->second->supervisor_stub)
+      return false;
+    const auto& protocol = step->second->step_to_d.interactive_meta().mpi();
+    if (!((request.protocol() == crane::grpc::mpi::PROTOCOL_PMI &&
+           protocol == kMpiTypePmi2) ||
+          (request.protocol() == crane::grpc::mpi::PROTOCOL_PMIX &&
+           protocol == kMpiTypePmix)))
+      return false;
+    supervisor = step->second->supervisor_stub;
   }
-
-  absl::MutexLock lk(job->step_map_mtx.get());
-  auto step_it = job->step_map.find(step_id);
-  if (step_it == job->step_map.end()) {
-    CRANE_ERROR(
-        "[Step #{}.{}] Failed to find step allocation when receiving PMIx "
-        "ports",
-        job_id, step_id);
-    return false;
-  }
-
-  auto& stub = step_it->second->supervisor_stub;
-  if (!stub) {
-    CRANE_ERROR(
-        "[Step #{}.{}] Supervisor stub is null when receiving PMIx ports",
-        job_id, step_id);
-    return false;
-  }
-
-  auto result = stub->ReceivePmixPort(pmix_ports);
-  if (result != CraneErrCode::SUCCESS) {
-    CRANE_ERROR("[Step #{}.{}] Failed to deliver PMIx ports to supervisor: {}",
-                job_id, step_id, CraneErrStr(result));
-    return false;
-  }
-
-  CRANE_TRACE(
-      "[Step #{}.{}] Successfully delivered {} PMIx ports to supervisor",
-      job_id, step_id, pmix_ports.size());
-
-  return true;
+  return supervisor->ReceiveMpiEndpoints(request) == CraneErrCode::SUCCESS;
 }
 
 }  // namespace Craned

@@ -47,6 +47,20 @@ using namespace std::chrono_literals;
 
 namespace {
 
+std::expected<void, std::string> CheckMpiProtocol(std::string_view protocol) {
+  if (!protocol.empty() && protocol != kMpiTypePmix && protocol != kMpiTypePmi2)
+    return std::unexpected("Unsupported MPI protocol.");
+#ifndef HAVE_PMI2
+  if (protocol == kMpiTypePmi2)
+    return std::unexpected("PMI-2 support is not compiled in.");
+#endif
+#ifndef HAVE_PMIX
+  if (protocol == kMpiTypePmix)
+    return std::unexpected("PMIx support is not compiled in.");
+#endif
+  return {};
+}
+
 std::vector<std::string> FindNodesNotInPartition_(
     const std::unordered_set<std::string>& requested_nodes,
     const std::unordered_set<std::string>& partition_nodes) {
@@ -1188,11 +1202,9 @@ std::expected<void, std::string> JobScheduler::PreJobSubmitCheck(
     if (!valid) return valid;
   }
 
-#ifndef HAVE_PMIX
-  if (job->IsPmix()) {
-    return std::unexpected("PMIx support is not compiled in.");
-  }
-#endif
+  if (auto valid = CheckMpiProtocol(job->JobToCtld().interactive_meta().mpi());
+      !valid)
+    return valid;
 
   return {};
 }
@@ -1204,11 +1216,10 @@ std::expected<void, std::string> JobScheduler::PreStepSubmitCheck(
   if (step->gids.size() > kMaxExecutionGroups)
     return std::unexpected("GID list exceeds maximum size");
 
-#ifndef HAVE_PMIX
-  if (step->IsPmix()) {
-    return std::unexpected("PMIx support is not compiled in.");
-  }
-#endif
+  if (auto valid =
+          CheckMpiProtocol(step->StepToCtld().interactive_meta().mpi());
+      !valid)
+    return valid;
 
   return {};
 }
@@ -2393,6 +2404,16 @@ void JobScheduler::StepScheduleThread_() {
             craned_alloc_steps;
         for (auto* step : scheduled_steps) {
           if (db_update_failed_steps.contains(step)) continue;
+          // Register before supervisors start. Endpoint announcements only
+          // modify existing entries, so a late RPC cannot resurrect a step
+          // after its terminal cleanup erases the rendezvous state.
+          if (step->IsPmi2() || step->IsPmix())
+            m_mpi_endpoints_.try_emplace(
+                std::pair{step->job_id, step->StepId()}, step->job_id,
+                step->StepId(),
+                step->IsPmi2() ? crane::grpc::mpi::PROTOCOL_PMI
+                               : crane::grpc::mpi::PROTOCOL_PMIX,
+                step->CranedIds());
           for (const auto& craned_id : step->CranedIds()) {
             craned_alloc_steps[craned_id].emplace_back(
                 step->GetStepToD(craned_id));
@@ -5943,12 +5964,12 @@ void JobScheduler::DispatchFreeSteps_(
 }
 
 void JobScheduler::DispatchTerminateSteps_(
-    CranedId craned_id,
-    std::unordered_map<job_id_t, std::set<step_id_t>> steps) {
+    CranedId craned_id, std::unordered_map<job_id_t, std::set<step_id_t>> steps,
+    crane::grpc::TerminateSource terminate_source) {
   if (steps.empty()) return;
 
   m_rpc_worker_pool_->detach_task([this, craned_id = std::move(craned_id),
-                                   steps = std::move(steps)] {
+                                   steps = std::move(steps), terminate_source] {
     auto synthesize_completing_if_down = [this, &craned_id, &steps] {
       return SynthesizeStepStatusIfCranedDown_(
           craned_id, steps, crane::grpc::JobStatus::Completing, 0,
@@ -5959,7 +5980,7 @@ void JobScheduler::DispatchTerminateSteps_(
     auto stub = g_craned_keeper->GetCranedStub(craned_id);
     const bool stub_valid = stub && !stub->Invalid();
     if (stub_valid) {
-      auto err = stub->TerminateSteps(steps);
+      auto err = stub->TerminateSteps(steps, terminate_source);
       if (err == CraneErrCode::SUCCESS) return;
     }
 
@@ -6430,6 +6451,18 @@ void JobScheduler::CleanJobStatusChangeQueueCb_() {
           if (it->second.empty()) context.craned_step_alloc_map.erase(it);
         }
       }
+    } else {
+      // Standalone crun creates its primary step here, bypassing the pending
+      // common-step scheduler. Both paths must register before AllocSteps so
+      // endpoint announcements can only update a live rendezvous.
+      for (const auto* step : ptrs)
+        if (step->IsPmi2() || step->IsPmix())
+          m_mpi_endpoints_.try_emplace(std::pair{step->job_id, step->StepId()},
+                                       step->job_id, step->StepId(),
+                                       step->IsPmi2()
+                                           ? crane::grpc::mpi::PROTOCOL_PMI
+                                           : crane::grpc::mpi::PROTOCOL_PMIX,
+                                       step->CranedIds());
     }
   }
 
@@ -6543,6 +6576,11 @@ void JobScheduler::CleanJobStatusChangeQueueCb_() {
 
   for (auto& [craned_id, steps] : context.craned_cancel_steps) {
     DispatchTerminateSteps_(std::move(craned_id), std::move(steps));
+  }
+
+  for (auto& [craned_id, steps] : context.craned_mpi_failure_steps) {
+    DispatchTerminateSteps_(std::move(craned_id), std::move(steps),
+                            crane::grpc::TERMINATE_SOURCE_MPI_FAILURE);
   }
 
   for (auto& [craned_id, jobs] : context.craned_jobs_to_free) {

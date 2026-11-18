@@ -621,6 +621,10 @@ struct StepStatusChangeContext {
   std::unordered_map<CranedId,
                      std::unordered_map<job_id_t, std::set<step_id_t>>>
       craned_cancel_steps{};
+  // MPI failures terminate the whole step with an explicit failure cause.
+  std::unordered_map<CranedId,
+                     std::unordered_map<job_id_t, std::set<step_id_t>>>
+      craned_mpi_failure_steps{};
   // Steps will update in embeddedDb
   std::unordered_set<StepInCtld*> rn_step_raw_ptrs;
   std::unordered_set<StepInCtld*> step_raw_ptrs;
@@ -754,6 +758,12 @@ struct StepInCtld {
            m_step_to_ctld_.interactive_meta().interactive_type() ==
                crane::grpc::InteractiveJobType::Crun &&
            m_step_to_ctld_.interactive_meta().mpi() == kMpiTypePmix;
+  }
+  bool IsPmi2() const {
+    return type == crane::grpc::JobType::Interactive &&
+           m_step_to_ctld_.interactive_meta().interactive_type() ==
+               crane::grpc::InteractiveJobType::Crun &&
+           m_step_to_ctld_.interactive_meta().mpi() == kMpiTypePmi2;
   }
 
   void SetStepType(crane::grpc::StepType type);
@@ -1148,6 +1158,12 @@ struct JobInCtld {
            job_to_ctld.interactive_meta().interactive_type() ==
                crane::grpc::InteractiveJobType::Crun &&
            job_to_ctld.interactive_meta().mpi() == kMpiTypePmix;
+  }
+  bool IsPmi2() const {
+    return type == crane::grpc::JobType::Interactive &&
+           job_to_ctld.interactive_meta().interactive_type() ==
+               crane::grpc::InteractiveJobType::Crun &&
+           job_to_ctld.interactive_meta().mpi() == kMpiTypePmi2;
   }
 
   bool IsContainer() const { return type == crane::grpc::Container; }

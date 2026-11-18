@@ -92,6 +92,9 @@ grpc::Status SupervisorServiceImpl::TerminateStep(
     crane::grpc::supervisor::TerminateStepReply* response) {
   TaskFinalizeCause cause;
   switch (request->terminate_source()) {
+  case crane::grpc::TERMINATE_SOURCE_MPI_FAILURE:
+    cause = TaskFinalizeCause::MPI_FAILURE;
+    break;
   case crane::grpc::TERMINATE_SOURCE_NORMAL_COMPLETION:
     cause = TaskFinalizeCause::NORMAL;
     break;
@@ -108,13 +111,11 @@ grpc::Status SupervisorServiceImpl::TerminateStep(
   return Status::OK;
 }
 
-grpc::Status SupervisorServiceImpl::ReceivePmixPort(
-    grpc::ServerContext* context,
-    const crane::grpc::supervisor::ReceivePmixPortRequest* request,
-    crane::grpc::supervisor::ReceivePmixPortReply* response) {
-  CRANE_TRACE("Received ReceivePmixPort gRPC with {} pmix ports.",
-              request->pmix_ports().size());
-  response->set_ok(g_task_mgr->ReceivePmixPort(*request));
+grpc::Status SupervisorServiceImpl::ReceiveMpiEndpoints(
+    grpc::ServerContext*,
+    const crane::grpc::mpi::ReceiveMpiEndpointsRequest* request,
+    crane::grpc::mpi::ReceiveMpiEndpointsReply* response) {
+  response->set_ok(g_task_mgr->ReceiveMpiEndpoints(*request));
   return Status::OK;
 }
 

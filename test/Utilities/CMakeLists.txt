@@ -9,6 +9,7 @@ target_link_libraries(dedicated_resource_test
         )
 gtest_discover_tests(dedicated_resource_test)
 
+
 add_executable(public_header_test
         AccountingTime_test.cpp
         PublicHeader_test.cpp)

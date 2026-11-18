@@ -33,8 +33,7 @@
 #include "CforedClient.h"
 #include "CgroupManager.h"
 #include "CranedClient.h"
-#include "Pmix.h"
-#include "PmixCommon.h"
+#include "Environment.h"
 #include "SupervisorPublicDefs.h"
 #include "SupervisorServer.h"
 #include "crane/CriClient.h"
@@ -200,9 +199,11 @@ CraneErrCode StepInstance::Prepare() {
       this->x11_meta = std::move(x11_meta);
       close(xauth_fd);
     }
-    if (!IsDaemon() && IsPmix()) {
-      pmix_server = std::make_unique<pmix::PmixServer>();
-      pmix::Config pmix_config{
+    if (!IsDaemon() && !m_step_to_supv_.interactive_meta().mpi().empty()) {
+      mpi_runtime =
+          mpi::CreateRuntime(m_step_to_supv_.interactive_meta().mpi());
+      if (!mpi_runtime) return CraneErrCode::ERR_INVALID_PARAM;
+      mpi::Config mpi_config{
           .UseTls = g_config.CforedListenConf.TlsConfig.Enabled,
           .TlsCerts = g_config.CforedListenConf.TlsConfig.TlsCerts,
           .CompressedRpc = g_config.CompressedRpc,
@@ -214,11 +215,9 @@ CraneErrCode StepInstance::Prepare() {
           .CranedIdToNodeAddr = g_config.CranedIdToNodeAddr,
           .EnableSlurmCompatibleEnv = g_config.EnableSlurmCompatibleEnv};
 
-      if (!pmix_server->Init(pmix_config, m_step_to_supv_)) {
-        // Init() already cleaned up PMIx internals on failure.
-        // Reset here so ~PmixServer() does not attempt a second finalize.
-        pmix_server.reset();
-        return CraneErrCode::ERR_PMIX_ERR;
+      if (!mpi_runtime->Init(mpi_config, m_step_to_supv_)) {
+        mpi_runtime.reset();
+        return CraneErrCode::ERR_GENERIC_FAILURE;
       }
     }
   }
@@ -226,6 +225,7 @@ CraneErrCode StepInstance::Prepare() {
 }
 
 void StepInstance::CleanUp() {
+  mpi_runtime.reset();
   if (script_path.has_value()) util::os::DeleteFile(script_path.value());
   if (x11_meta.has_value()) {
     auto x11_auth_path = x11_meta.value().x11_auth_path;
@@ -702,23 +702,7 @@ void ProcInstance::InitEnvMap() {
   if (g_config.EnableSlurmCompatibleEnv)
     m_env_.insert_or_assign("SLURM_TASK_PID", std::to_string(getpid()));
 
-  if (m_parent_step_inst_->IsCrun() &&
-      m_parent_step_inst_->GetStep().interactive_meta().mpi() == kMpiTypePmix) {
-    // SetupFork() is called in the forked child process.  On failure use
-    // _exit() rather than abort() to avoid flushing stdio buffers or running
-    // parent-process destructors, and to prevent generating a core dump.
-    auto result = m_parent_step_inst_->pmix_server->SetupFork(task_id);
-    if (!result) {
-      fmt::print(stderr,
-                 "[Craned Subprocess] Pmix Server SetupFork() failed for "
-                 "task_id={}. Terminating child process.\n",
-                 task_id);
-      _exit(EXIT_FAILURE);
-    }
-    for (const auto& [k, v] : result.value()) {
-      m_env_.insert_or_assign(k, v);
-    }
-  }
+  if (m_mpi_launch_) mpi::MergeLaunchEnvironment(m_env_, *m_mpi_launch_);
 }
 
 std::string ProcInstance::ParseFilePathPattern_(const std::string& pattern,
@@ -2489,6 +2473,11 @@ CraneErrCode ProcInstance::Spawn() {
   using crane::grpc::supervisor::CanStartMessage;
   using crane::grpc::supervisor::ChildProcessReady;
 
+  if (m_parent_step_inst_->mpi_runtime) {
+    m_mpi_launch_ = m_parent_step_inst_->mpi_runtime->PrepareTask(task_id);
+    if (!m_mpi_launch_) return CraneErrCode::ERR_GENERIC_FAILURE;
+  }
+
   // NOLINTNEXTLINE(hicpp-avoid-c-arrays, modernize-avoid-c-arrays)
   int ctrl_sock_pair[2];  // Socket pair for passing control messages.
 
@@ -2518,6 +2507,9 @@ CraneErrCode ProcInstance::Spawn() {
   }
 
   if (child_pid > 0) {  // Parent proc
+    // Without this close the server would never observe EOF from an exited
+    // rank.
+    if (m_mpi_launch_) m_mpi_launch_->Close();
     m_pid_ = child_pid;
     CRANE_DEBUG("Subprocess was created for task #{} pid: {}", task_id, m_pid_);
 
@@ -2648,7 +2640,15 @@ CraneErrCode ProcInstance::Spawn() {
     }
 
     close(ctrl_fd);
-    util::os::CloseFdFrom(3);
+    if (m_mpi_launch_ && m_mpi_launch_->fd >= 0) {
+      if (!util::os::CloseFdFromExcept(3, {m_mpi_launch_->fd})) {
+        fmt::print(stderr,
+                   "Cannot preserve the PMI-2 channel during fd cleanup\n");
+        _exit(EXIT_FAILURE);
+      }
+    } else {
+      util::os::CloseFdFrom(3);
+    }
 
     if (m_parent_step_inst_->IsCrun() && m_parent_step_inst_->x11) {
       SetupChildProcCrunX11_();
@@ -2725,6 +2725,15 @@ CraneErrCode ProcInstance::Spawn() {
     // TODO: Before exec, bind integer CPU cores from ResourceInNodeV3::CpuSet
     // using sched_setaffinity(). Fractional CPU is handled by cgroup quota
     // only. Integer cores should be pinned to the task process here.
+
+    if (m_mpi_launch_ && m_mpi_launch_->fd >= 0) {
+      // Prologs must not inherit the application channel. Clear CLOEXEC only
+      // after all hooks finish, immediately before executing the MPI rank.
+      auto fd = m_mpi_launch_->fd;
+      auto flags = fcntl(fd, F_GETFD);
+      if (flags < 0 || fcntl(fd, F_SETFD, flags & ~FD_CLOEXEC) < 0)
+        _exit(EXIT_FAILURE);
+    }
 
     // Exec
     execv(argv_ptrs[0], const_cast<char* const*>(argv_ptrs.data()));
@@ -2982,41 +2991,25 @@ void TaskManager::SupervisorFinishInit(StepStatus status) {
   g_craned_client->StepStatusChangeAsync(status, 0, std::nullopt);
 }
 
-bool TaskManager::ReceivePmixPort(
-    const crane::grpc::supervisor::ReceivePmixPortRequest& request) {
-  if (!m_step_.pmix_server) {
-    CRANE_ERROR(
-        "[Step#{}.{}] PMIx server is not initialized when receiving "
-        "pmix ports.",
-        g_config.JobId, g_config.StepId);
+bool TaskManager::ReceiveMpiEndpoints(
+    const crane::grpc::mpi::ReceiveMpiEndpointsRequest& request) {
+  const auto& step = m_step_.GetStep();
+  if (!m_step_.mpi_runtime || request.job_id() != step.job_id() ||
+      request.step_id() != step.step_id())
     return false;
-  }
-
-  auto* pmix_client = m_step_.pmix_server->GetPmixClient();
-  if (!pmix_client) {
-    CRANE_ERROR("[Step#{}.{}] PMIx client is null when receiving pmix ports.",
-                g_config.JobId, g_config.StepId);
+  const auto& protocol = step.interactive_meta().mpi();
+  if (!((request.protocol() == crane::grpc::mpi::PROTOCOL_PMI &&
+         protocol == kMpiTypePmi2) ||
+        (request.protocol() == crane::grpc::mpi::PROTOCOL_PMIX &&
+         protocol == kMpiTypePmix)))
     return false;
+  std::vector<std::pair<CranedId, std::string>> peers;
+  peers.reserve(request.endpoints_size());
+  for (const auto& endpoint : request.endpoints()) {
+    if (endpoint.craned_id() != g_config.CranedIdOfThisNode)
+      peers.emplace_back(endpoint.craned_id(), endpoint.address());
   }
-
-  CRANE_DEBUG("[Step#{}.{}] Receiving {} PMIx port(s).", g_config.JobId,
-              g_config.StepId, request.pmix_ports().size());
-
-  for (const auto& pmix_port : request.pmix_ports()) {
-    if (pmix_port.craned_id() == g_config.CranedIdOfThisNode ||
-        !g_config.CranedIdToNodeHostname.contains(pmix_port.craned_id()) ||
-        !g_config.CranedIdToNodeAddr.contains(pmix_port.craned_id())) {
-      CRANE_ERROR("[Step#{}.{}] Unexpected PMIx peer ID: {}", g_config.JobId,
-                  g_config.StepId, pmix_port.craned_id());
-      return false;
-    }
-    CRANE_TRACE("[Step#{}.{}] Emplacing PMIx stub: craned_id={}, port={}",
-                g_config.JobId, g_config.StepId, pmix_port.craned_id(),
-                pmix_port.port());
-    pmix_client->EmplacePmixStub(pmix_port.craned_id(), pmix_port.port());
-  }
-
-  return true;
+  return m_step_.mpi_runtime->ReceivePeers(peers);
 }
 
 void TaskManager::Wait() {
@@ -3066,6 +3059,8 @@ void TaskManager::ResolveFinishedTask_(task_id_t task_id, StepStatus new_status,
     CRANE_DEBUG("[Task #{}] Task not found.", task_id);
     return;
   }
+
+  if (m_step_.mpi_runtime) m_step_.mpi_runtime->TaskExited(task_id);
 
   // One-shot model: nothing to stop, just proceed to cleanup.
   CraneErrCode err;
@@ -3623,6 +3618,10 @@ void TaskManager::EvCleanFinalizingTaskQueueCb_() {
       ResolveFinishedTask_(task_id, crane::grpc::JobStatus::ExceedTimeLimit,
                            ExitCode::EC_EXCEED_TIME_LIMIT, fi->reason);
       continue;
+    case TaskFinalizeCause::MPI_FAILURE:
+      ResolveFinishedTask_(task_id, crane::grpc::JobStatus::Failed,
+                           ExitCode::EC_MPI_ERR, "MPI runtime failure");
+      continue;
     case TaskFinalizeCause::CANCELLED_BY_USER: {
       uint32_t exit_code = fi->raw_exit.has_value()
                                ? raw_exit_code(*fi->raw_exit)
@@ -3814,9 +3813,12 @@ void TaskManager::EvCleanTerminateStepQueueCb_() {
       m_step_.GotNewStatus(StepStatus::Completing);
 
       auto& final_status = m_step_.final_termination_status;
-      final_status.max_exit_code = 0U;
-      final_status.final_status_on_termination = StepStatus::Cancelled;
-      final_status.final_reason_on_termination.clear();
+      const bool mpi_failure = elem.cause == TaskFinalizeCause::MPI_FAILURE;
+      final_status.max_exit_code = mpi_failure ? ExitCode::EC_MPI_ERR : 0U;
+      final_status.final_status_on_termination =
+          mpi_failure ? StepStatus::Failed : StepStatus::Cancelled;
+      final_status.final_reason_on_termination =
+          mpi_failure ? "MPI runtime failure" : "";
 
       if (elem.cause != TaskFinalizeCause::NORMAL) {
         g_craned_client->StepStatusChangeAsync(
@@ -3825,7 +3827,9 @@ void TaskManager::EvCleanTerminateStepQueueCb_() {
             final_status.final_status_on_termination);
       }
 
-      g_task_mgr->ShutdownSupervisorAsync(StepStatus::Cancelled, 0U, "");
+      g_task_mgr->ShutdownSupervisorAsync(
+          final_status.final_status_on_termination, final_status.max_exit_code,
+          final_status.final_reason_on_termination);
       continue;
     }
 
@@ -3838,6 +3842,11 @@ void TaskManager::EvCleanTerminateStepQueueCb_() {
 
     for (task_id_t task_id : m_step_.GetTaskIds()) {
       auto* task = m_step_.GetTaskInstance(task_id);
+      // Closing channels while cancelling or timing out a task can report an
+      // MPI failure. Preserve the cause that initiated that shutdown.
+      if (elem.cause == TaskFinalizeCause::MPI_FAILURE &&
+          task->GetFinalInfo()->cause != TaskFinalizeCause::NORMAL)
+        continue;
       task->GetFinalInfo()->cause = elem.cause;
 
       if (task->GetExecId().has_value()) {

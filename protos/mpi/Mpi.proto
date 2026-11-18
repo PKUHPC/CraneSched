@@ -1,0 +1,62 @@
+/**
+ * Copyright (c) 2024 Peking University and Peking University
+ * Changsha Institute for Computing and Digital Economy
+ *
+ * This program is free software: you can redistribute it and/or modify
+ * it under the terms of the GNU Affero General Public License as
+ * published by the Free Software Foundation, either version 3 of the
+ * License, or (at your option) any later version.
+ *
+ * This program is distributed in the hope that it will be useful,
+ * but WITHOUT ANY WARRANTY; without even the implied warranty of
+ * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+ * GNU Affero General Public License for more details.
+ *
+ * You should have received a copy of the GNU Affero General Public License
+ * along with this program.  If not, see <https://www.gnu.org/licenses/>.
+ */
+
+syntax = "proto3";
+
+package crane.grpc.mpi;
+option go_package = "github.com/PKUHPC/CraneSched/go/generated/protos/mpi";
+
+enum Protocol {
+  PROTOCOL_UNSPECIFIED = 0;
+  PROTOCOL_PMI = 1;
+  PROTOCOL_PMIX = 2;
+}
+
+message ProcessIdentity {
+  string nspace = 1;
+  uint32 rank = 2;
+}
+
+message Endpoint {
+  string craned_id = 1;
+  // TCP port text or an opaque UCX address; never assume UTF-8.
+  bytes address = 2;
+}
+
+message BroadcastMpiEndpointRequest {
+  uint32 job_id = 1;
+  uint32 step_id = 2;
+  Protocol protocol = 3;
+  repeated string craned_ids = 4;
+  Endpoint endpoint = 5;
+}
+
+message BroadcastMpiEndpointReply {
+  bool ok = 1;
+}
+
+message ReceiveMpiEndpointsRequest {
+  uint32 job_id = 1;
+  uint32 step_id = 2;
+  Protocol protocol = 3;
+  repeated Endpoint endpoints = 4;
+}
+
+message ReceiveMpiEndpointsReply {
+  bool ok = 1;
+}

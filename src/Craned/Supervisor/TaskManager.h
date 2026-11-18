@@ -24,7 +24,7 @@
 // Precompiled header comes first.
 
 #include "CforedClient.h"
-#include "Pmix.h"
+#include "Runtime.h"
 #include "Supervisor.grpc.pb.h"
 #include "crane/BindFs.h"
 #include "crane/CriClient.h"
@@ -49,7 +49,8 @@ enum class TaskFinalizeCause : uint8_t {
   DAEMON_POD_SHUTDOWN_REQUESTED,
   INTERACTIVE_NO_PROCESS,
   TIMEOUT,
-  DEADLINE
+  DEADLINE,
+  MPI_FAILURE
 };
 
 class ITaskInstance;
@@ -101,7 +102,7 @@ class StepInstance {
 
   crane::ManualSpan execute_span_;
   crane::ManualSpan& ExecuteSpan() { return execute_span_; }
-  std::unique_ptr<pmix::PmixServer> pmix_server;
+  std::unique_ptr<mpi::Runtime> mpi_runtime;
 
   explicit StepInstance(const StepToSupv& step)
       : m_step_to_supv_(step),
@@ -564,6 +565,8 @@ class ProcInstance : public ITaskInstance {
   std::unique_ptr<ProcInstanceMeta> m_meta_;
   pid_t m_pid_{0};  // forked pid
 
+  std::optional<mpi::LaunchInfo> m_mpi_launch_;
+
   std::string m_executable_;  // bash -c "m_executable_ [m_arguments_...]"
   std::vector<std::string> m_arguments_;  // NOTE: Not used currently.
 };
@@ -581,8 +584,8 @@ class TaskManager {
 
   void SupervisorFinishInit(StepStatus status);
 
-  bool ReceivePmixPort(
-      const crane::grpc::supervisor::ReceivePmixPortRequest& request);
+  bool ReceiveMpiEndpoints(
+      const crane::grpc::mpi::ReceiveMpiEndpointsRequest& request);
 
   void Wait();
   // Shutdown supervisor asynchronously with given status, exit code and reason.

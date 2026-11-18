@@ -1025,6 +1025,7 @@ enum TerminateSource {
   TERMINATE_SOURCE_NORMAL_COMPLETION = 1;
   TERMINATE_SOURCE_FRONTEND_DISCONNECT = 2;
   TERMINATE_SOURCE_PREEMPT = 3;
+  TERMINATE_SOURCE_MPI_FAILURE = 4;
 }
 
 enum OperationType {
@@ -1285,9 +1286,4 @@ message JobSizeSummaryItem {
   uint32 cpus_alloc = 4;
   double total_cpu_time = 5;
   int64 total_count = 6;
-}
-
-message PmixProc {
-  string nspace = 1;
-  uint32 rank = 2;
 }
