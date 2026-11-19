@@ -26,8 +26,9 @@ Build mounts the compatible published C++ tree at `/workspace` using
 producer creates each generation from a clean source/build directory, reuses
 ccache, and switches `latest` only after all C++ native checks pass. A missing
 compatible tree or failed FUSE mount falls back to a private cold build; Build
-never writes into a published generation. After a successful publish, the
-producer keeps the new and previous generations and removes older whole trees.
+never writes into a published generation. After all checks pass, the producer
+keeps the new and previous generations, removes older whole trees, then switches
+`latest`.
 For a manual producer run, pause Build jobs until publication finishes so a
 Build cannot retain a generation older than the previous one.
 
