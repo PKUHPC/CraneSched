@@ -16,9 +16,10 @@ which is also the parent of Test. Product Pods in test environments use Test.
 Integration does not compile attachments, unpack RPMs or push images.
 
 The `ci-debug` preset explicitly selects `clang` and `clang++` from the image.
-The existing Clang build rules select LLD and enable IPO on supported product
-targets. Start with a clean build tree when switching from the previous GCC
-configuration; the compiler version remains determined by the pinned Dev image.
+Clang uses LLD, while IPO/LTO remains disabled for Debug builds to keep
+incremental links and memory use predictable. Start with a clean build tree
+when switching from the previous GCC configuration; the compiler version
+remains determined by the pinned Dev image.
 
 ## Source selection and checks
 
