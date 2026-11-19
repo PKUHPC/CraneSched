@@ -1,6 +1,21 @@
 #!/usr/bin/env bash
 set -euo pipefail
+proxy_environment=()
+for name in HTTP_PROXY HTTPS_PROXY ALL_PROXY http_proxy https_proxy all_proxy; do
+  value=${!name:-}
+  if [[ -n "$value" ]]; then
+    proxy_environment+=("$name=$value")
+  fi
+done
 unset HTTP_PROXY HTTPS_PROXY ALL_PROXY http_proxy https_proxy all_proxy
+
+run_with_proxy() {
+  if ((${#proxy_environment[@]})); then
+    env "${proxy_environment[@]}" "$@"
+  else
+    "$@"
+  fi
+}
 
 [[ "$(id -u)" == 1001 && "$(id -g)" == 1001 ]]
 [[ "$CI_DEV_IMAGE" =~ @sha256:[a-f0-9]{64}$ ]]
@@ -34,10 +49,10 @@ git -C "$workspace" checkout --force --detach "$source_sha"
 [[ "$(git -C "$workspace" rev-parse HEAD)" == "$source_sha" ]]
 
 cd "$workspace"
-cmake --preset ci-debug
-cmake --build --preset ci-debug --target crane_unit_tests --parallel "${BUILD_JOBS:-6}"
+run_with_proxy cmake --preset ci-debug
+run_with_proxy cmake --build --preset ci-debug --target crane_unit_tests --parallel "${BUILD_JOBS:-6}"
 ctest --test-dir cmake-build-ci-debug --output-on-failure
-cmake --build --preset ci-debug --parallel "${BUILD_JOBS:-6}"
+run_with_proxy cmake --build --preset ci-debug --parallel "${BUILD_JOBS:-6}"
 
 printf '%s\n' "$source_sha" > "$generation_root/source.sha"
 ln -s "trees/$generation/workspace" "$CI_GOLDEN_ROOT/latest-$generation"

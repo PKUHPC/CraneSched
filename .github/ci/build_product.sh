@@ -1,6 +1,19 @@
 #!/usr/bin/env bash
 set -euo pipefail
+proxy_environment=()
+if [[ -r /etc/ci-proxy/HTTP_PROXY && -r /etc/ci-proxy/HTTPS_PROXY ]]; then
+  proxy_environment+=("HTTP_PROXY=$(< /etc/ci-proxy/HTTP_PROXY)")
+  proxy_environment+=("HTTPS_PROXY=$(< /etc/ci-proxy/HTTPS_PROXY)")
+fi
 unset HTTP_PROXY HTTPS_PROXY ALL_PROXY http_proxy https_proxy all_proxy
+
+run_with_proxy() {
+  if ((${#proxy_environment[@]})); then
+    env "${proxy_environment[@]}" "$@"
+  else
+    "$@"
+  fi
+}
 
 [[ "$CI_DEV_IMAGE" =~ @sha256:[a-f0-9]{64}$ ]]
 [[ "$(id -u)" == 1001 && "$(id -g)" == 1001 ]]
@@ -76,10 +89,10 @@ make -C go protos
 (cd go && go vet -mod=readonly ./...)
 make -C go test
 
-cmake --preset ci-debug
-cmake --build --preset ci-debug --target crane_unit_tests --parallel "${BUILD_JOBS:-6}"
+run_with_proxy cmake --preset ci-debug
+run_with_proxy cmake --build --preset ci-debug --target crane_unit_tests --parallel "${BUILD_JOBS:-6}"
 ctest --test-dir cmake-build-ci-debug --output-on-failure
-cmake --build --preset ci-debug --parallel "${BUILD_JOBS:-6}"
+run_with_proxy cmake --build --preset ci-debug --parallel "${BUILD_JOBS:-6}"
 
 make -C go clean
 make -C go all tool PREFIX=/usr STRIP=true CHECK_GPU=0
