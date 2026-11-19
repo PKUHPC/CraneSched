@@ -51,17 +51,26 @@ if [[ -e "$golden_root/latest" ]]; then
   [[ -d "$lower/.git" ]]
   fuse-overlayfs -f -o "lowerdir=$lower,upperdir=$overlay_root/upper,workdir=$overlay_root/work" /workspace &
   overlay_pid=$!
+  mounted=false
   for attempt in {1..100}; do
     if mountpoint -q /workspace; then
+      mounted=true
       break
     fi
     if ! kill -0 "$overlay_pid" 2>/dev/null; then
-      wait "$overlay_pid"
-      exit 1
+      wait "$overlay_pid" || true
+      overlay_pid=
+      break
     fi
     sleep 0.1
   done
-  mountpoint -q /workspace
+  if [[ "$mounted" != true ]]; then
+    if mountpoint -q /workspace; then
+      fusermount3 -u /workspace
+    fi
+    echo '::warning::fuse-overlayfs did not mount; using a private cold build.'
+    git init /workspace
+  fi
 else
   git init /workspace
 fi
