@@ -25,8 +25,8 @@ Build mounts the compatible published C++ tree at `/workspace` using
 `fuse-overlayfs` and a private disk-backed upper/work pair. The nightly
 producer creates each generation from a clean source/build directory, reuses
 ccache, and switches `latest` only after all C++ native checks pass. A missing
-compatible tree falls back to a private cold build; Build never writes into a
-published generation.
+compatible tree or failed FUSE mount falls back to a private cold build; Build
+never writes into a published generation.
 
 ## Source selection and checks
 
