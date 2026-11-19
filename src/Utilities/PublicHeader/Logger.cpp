@@ -18,9 +18,63 @@
 
 #include "crane/Logger.h"
 
+#include <absl/cleanup/cleanup.h>
+#include <sys/stat.h>
+
+#include "crane/OS.h"
+
 static LoggerSinks default_sinks{};
 static spdlog::async_overflow_policy default_overflow_policy =
     spdlog::async_overflow_policy::block;
+
+namespace {
+void SecureLogFile(const spdlog::filename_t& filename, bool create) {
+  int flags = O_WRONLY | O_APPEND | O_CLOEXEC | O_NOFOLLOW | O_NONBLOCK;
+  int fd = open(filename.c_str(), flags | (create ? O_CREAT : 0), 0600);
+  if (fd == -1) {
+    if (!create && errno == ENOENT) return;
+    throw spdlog::spdlog_ex("Failed to open private log " + filename, errno);
+  }
+  absl::Cleanup close_fd = [fd] { close(fd); };
+  struct stat st{};
+  if (fstat(fd, &st) != 0)
+    throw spdlog::spdlog_ex("Failed to stat log " + filename, errno);
+  if (!S_ISREG(st.st_mode) || st.st_nlink != 1)
+    throw spdlog::spdlog_ex("Log must be a regular, singly linked file: " +
+                            filename);
+  if (fchown(fd, geteuid(), getegid()) != 0 || fchmod(fd, 0600) != 0)
+    throw spdlog::spdlog_ex("Failed to secure log " + filename, errno);
+}
+
+spdlog::file_event_handlers PrivateLogFileHandlers(
+    const std::filesystem::path& path, uint64_t max_files) {
+  // Match the rotating sink's limit before inspecting retained files.
+  if (max_files > 200000)
+    throw spdlog::spdlog_ex("rotating sink: max_files cannot exceed 200000");
+  // Supervisor inherits Craned's identity. Keep its logs private to that
+  // identity, including when Craned uses a permissive umask in daemon mode.
+  auto result = util::os::EnsureServiceDirectory(path.parent_path(), 0700);
+  if (!result)
+    throw spdlog::spdlog_ex(
+        "Failed to secure log directory " + path.parent_path().string(),
+        result.error().value());
+
+  // Repair retained files from previous supervisor runs before rotation can
+  // rename them. Older files beyond the configured count remain protected by
+  // the private directory.
+  for (uint64_t i = 1; i <= max_files; ++i)
+    SecureLogFile(spdlog::sinks::rotating_file_sink_mt::calc_filename(path, i),
+                  false);
+
+  spdlog::file_event_handlers handlers;
+  handlers.before_open = [](const spdlog::filename_t& filename) {
+    // Pre-create each file privately before spdlog opens it, also on rotation.
+    // Do not change the process-wide umask inherited by user tasks.
+    SecureLogFile(filename, true);
+  };
+  return handlers;
+}
+}  // namespace
 
 std::optional<spdlog::level::level_enum> StrToLogLevel(
     const std::string& level) {
@@ -45,10 +99,13 @@ void InitLogger(spdlog::level::level_enum level,
                 const std::string& log_file_path, bool enable_console,
                 uint64_t max_file_size, uint64_t max_file_num,
                 size_t async_queue_size, size_t async_thread_count,
-                bool async_block_when_full) {
+                bool async_block_when_full, bool private_file) {
   std::vector<spdlog::sink_ptr> sinks;
+  auto handlers = private_file
+                      ? PrivateLogFileHandlers(log_file_path, max_file_num)
+                      : spdlog::file_event_handlers{};
   auto file_sink = std::make_shared<spdlog::sinks::rotating_file_sink_mt>(
-      log_file_path, max_file_size, max_file_num);
+      log_file_path, max_file_size, max_file_num, false, handlers);
   file_sink->set_level(level);
   file_sink->set_pattern(kLogPattern);
   default_sinks.file_sink = file_sink;

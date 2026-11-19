@@ -218,6 +218,48 @@ bool CreateFolders(std::string const& p) {
   return ok;
 }
 
+std::expected<void, std::error_code> EnsureServiceDirectory(
+    const std::filesystem::path& path, mode_t permissions) {
+  std::string normalized_path = path.string();
+  while (normalized_path.size() > 1 && normalized_path.back() == '/')
+    normalized_path.pop_back();
+  if (normalized_path.empty())
+    return std::unexpected(std::make_error_code(std::errc::invalid_argument));
+
+  const std::filesystem::path target{normalized_path};
+  const uid_t owner = geteuid();
+  const gid_t group = getegid();
+  const mode_t ancestor_permissions = 0755;
+  std::filesystem::path current;
+  for (const auto& component : target) {
+    current /= component;
+    const bool is_root = current == current.root_path();
+    const bool is_target = current == target;
+    bool created = false;
+    if (!is_root) {
+      if (mkdir(current.c_str(),
+                is_target ? permissions : ancestor_permissions) == 0) {
+        created = true;
+      } else if (errno != EEXIST) {
+        return std::unexpected(std::error_code(errno, std::generic_category()));
+      }
+    }
+
+    int open_flags = O_RDONLY | O_DIRECTORY | O_CLOEXEC;
+    if (is_target) open_flags |= O_NOFOLLOW;
+    int fd = open(current.c_str(), open_flags);
+    if (fd == -1)
+      return std::unexpected(std::error_code(errno, std::generic_category()));
+    absl::Cleanup close_fd = [fd] { close(fd); };
+    if (!is_root && (created || is_target) &&
+        (fchown(fd, owner, group) != 0 ||
+         fchmod(fd, is_target ? permissions : ancestor_permissions) != 0)) {
+      return std::unexpected(std::error_code(errno, std::generic_category()));
+    }
+  }
+  return {};
+}
+
 bool CreateFoldersForFile(std::string const& p) {
   try {
     std::filesystem::path log_path{p};

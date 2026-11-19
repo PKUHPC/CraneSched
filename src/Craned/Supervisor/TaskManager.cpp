@@ -18,6 +18,7 @@
 
 #include "TaskManager.h"
 
+#include <absl/cleanup/cleanup.h>
 #include <google/protobuf/util/delimited_message_util.h>
 #include <grp.h>
 #include <pty.h>
@@ -136,20 +137,39 @@ CraneErrCode StepInstance::Prepare() {
         g_config.CraneScriptDir /
         fmt::format("Crane-{}.{}.sh", g_config.JobId, g_config.StepId);
 
-    FILE* fptr = fopen(sh_path.c_str(), "w");
-    if (fptr == nullptr) {
-      CRANE_ERROR("Failed write the script");
+    // Write privately, then publish the completed script atomically. In
+    // particular, never truncate a leftover user-owned script in place.
+    auto tmp_path = sh_path.string() + ".XXXXXX";
+    int fd = mkostemp(tmp_path.data(), O_CLOEXEC);
+    if (fd == -1) {
+      CRANE_ERROR("Failed to create script {}: {}", sh_path, strerror(errno));
       return CraneErrCode::ERR_SYSTEM_ERR;
     }
+    absl::Cleanup cleanup = [&] {
+      if (fd != -1) close(fd);
+      unlink(tmp_path.c_str());
+    };
 
-    fputs(m_step_to_supv_.sh_script().c_str(), fptr);
-
-    fclose(fptr);
-
-    chmod(sh_path.c_str(), strtol("0755", nullptr, 8));
-    if (chown(sh_path.c_str(), m_step_to_supv_.uid(), gids[0]) != 0) {
-      CRANE_ERROR("Failed to change ownership of script file:{}",
-                  strerror(errno));
+    std::string_view remaining = m_step_to_supv_.sh_script();
+    while (!remaining.empty()) {
+      ssize_t written = write(fd, remaining.data(), remaining.size());
+      if (written < 0 && errno == EINTR) continue;
+      if (written <= 0) {
+        CRANE_ERROR("Failed to write script {}: {}", sh_path, strerror(errno));
+        return CraneErrCode::ERR_SYSTEM_ERR;
+      }
+      remaining.remove_prefix(written);
+    }
+    if (gids.empty() || fchown(fd, m_step_to_supv_.uid(), gids[0]) != 0 ||
+        fchmod(fd, 0700) != 0) {
+      CRANE_ERROR("Failed to set script ownership/permissions for {}", sh_path);
+      return CraneErrCode::ERR_SYSTEM_ERR;
+    }
+    int close_result = close(fd);
+    fd = -1;
+    if (close_result != 0 || rename(tmp_path.c_str(), sh_path.c_str()) != 0) {
+      CRANE_ERROR("Failed to publish script {}: {}", sh_path, strerror(errno));
+      return CraneErrCode::ERR_SYSTEM_ERR;
     }
     script_path = sh_path;
   }

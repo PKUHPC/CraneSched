@@ -116,6 +116,11 @@ bool CreateFile(std::string const& p);
 
 bool CreateFolders(std::string const& p);
 
+// Create or repair a service-owned directory, including existing permissions.
+// Ancestors must be trusted; the final component must not be a symlink.
+std::expected<void, std::error_code> EnsureServiceDirectory(
+    const std::filesystem::path& path, mode_t permissions);
+
 bool CreateFoldersForFile(std::string const& p);
 
 bool CreateFoldersForFileEx(const std::filesystem::path& file_path, uid_t owner,
