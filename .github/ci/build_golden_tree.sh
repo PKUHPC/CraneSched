@@ -29,7 +29,7 @@ generation_root="$CI_GOLDEN_ROOT/trees/$generation"
 product_checkout="$PWD"
 source_sha=$(git rev-parse HEAD)
 [[ -d "$workspace" && -z "$(find "$workspace" -mindepth 1 -print -quit)" ]]
-[[ -d "$generation_root/workspace" && ! -e "$generation_root/source.sha" ]]
+[[ -d "$generation_root/workspace" ]]
 
 export CCACHE_DIR=/ci/cache/ccache
 export CCACHE_TEMPDIR=/tmp/ccache
@@ -54,6 +54,5 @@ run_with_proxy cmake --build --preset ci-debug --target crane_unit_tests --paral
 ctest --test-dir cmake-build-ci-debug --output-on-failure
 run_with_proxy cmake --build --preset ci-debug --parallel "${BUILD_JOBS:-6}"
 
-printf '%s\n' "$source_sha" > "$generation_root/source.sha"
 ln -s "trees/$generation/workspace" "$CI_GOLDEN_ROOT/latest-$generation"
 mv -Tf "$CI_GOLDEN_ROOT/latest-$generation" "$CI_GOLDEN_ROOT/latest"
