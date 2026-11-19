@@ -54,5 +54,16 @@ run_with_proxy cmake --build --preset ci-debug --target crane_unit_tests --paral
 ctest --test-dir cmake-build-ci-debug --output-on-failure
 run_with_proxy cmake --build --preset ci-debug --parallel "${BUILD_JOBS:-6}"
 
+touch "$generation_root"
+previous=$(readlink -e "$CI_GOLDEN_ROOT/latest" || true)
 ln -s "trees/$generation/workspace" "$CI_GOLDEN_ROOT/latest-$generation"
 mv -Tf "$CI_GOLDEN_ROOT/latest-$generation" "$CI_GOLDEN_ROOT/latest"
+
+latest=$(readlink -e "$CI_GOLDEN_ROOT/latest")
+for old_path in "$CI_GOLDEN_ROOT"/trees/*; do
+  [[ -d "$old_path" ]] || continue
+  old_workspace="$old_path/workspace"
+  if [[ "$old_workspace" != "$latest" && "$old_workspace" != "$previous" ]]; then
+    rm -rf -- "$old_path"
+  fi
+done
