@@ -68,6 +68,11 @@ if [[ -e "$golden_root/latest" ]]; then
     if mountpoint -q /workspace; then
       fusermount3 -u /workspace
     fi
+    if [[ -n "$overlay_pid" ]]; then
+      kill "$overlay_pid" 2>/dev/null || true
+      wait "$overlay_pid" 2>/dev/null || true
+      overlay_pid=
+    fi
     echo '::warning::fuse-overlayfs did not mount; using a private cold build.'
     git init /workspace
   fi
