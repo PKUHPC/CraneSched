@@ -21,11 +21,18 @@ incremental links and memory use predictable. Start with a clean build tree
 when switching from the previous GCC configuration; the compiler version
 remains determined by the pinned Dev image.
 
+Build mounts the compatible published C++ tree at `/workspace` using
+`fuse-overlayfs` and a private disk-backed upper/work pair. The nightly
+producer creates each generation from a clean source/build directory, reuses
+ccache, and switches `latest` only after all C++ native checks pass. A missing
+compatible tree falls back to a private cold build; Build never writes into a
+published generation.
+
 ## Source selection and checks
 
 `source_ref` optionally selects a product branch, tag or commit; blank uses the
-workflow commit. The checkout SHA is frozen before checks and used by the persistent
-build tree. An explicit `harness_ref` selects the test suite ref. Otherwise the
+workflow commit. The checkout SHA is frozen before checks and checked out in the
+golden tree's private overlay or a cold workspace. An explicit `harness_ref` selects the test suite ref. Otherwise the
 launcher selects the suite branch matching the selected product branch, then
 `master` only if that branch does not exist. For a PR, the product branch is the
 head branch; for manual dispatch it is the selected workflow branch. An explicit
@@ -111,12 +118,11 @@ remain inline.
 
 ## Persistent build state
 
-`/ci/workspaces/native-rhel10-amd64/<dev-digest>/ci-debug` preserves the source and
-complete CMake/Ninja tree across product commits. One flock covers source update,
-generation, native tests, build and packaging. Runner checkout is independent;
-cleaning it does not remove this tree. ccache is shared and Go caches are local
-to the build Pod. Only `go/build/bin`, `plugin`, and `tool` are cleared before
-rebuilding package inputs, preventing removed modules from reusing stale files.
+`/ci/golden/native-rhel10-amd64/<dev-digest>/ci-debug` stores published source and
+complete CMake/Ninja generations. Each Build owns an ephemeral upper/work pair;
+ccache is shared and Go caches are local to the build Pod. Only `go/build/bin`,
+`plugin`, and `tool` are cleared before rebuilding package inputs, preventing
+removed modules from reusing stale files.
 
 Each attempt owns `/ci/attempts/<run-id>-<attempt>/build`. Final RPMs go under
 `packages/rpm/`; CPack's temporary tree is elsewhere. Build validates five package

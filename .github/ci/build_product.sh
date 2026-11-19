@@ -9,22 +9,54 @@ getent group 1001 >/dev/null
 
 source_sha="$CI_SOURCE_SHA"
 source_checkout="$PWD"
-state="/ci/workspaces/native-rhel10-amd64/${CI_DEV_IMAGE##*@sha256:}/ci-debug"
+golden_root="/ci/golden/native-rhel10-amd64/${CI_DEV_IMAGE##*@sha256:}/ci-debug"
 artifact_dir="/ci/attempts/${GITHUB_RUN_ID}-${GITHUB_RUN_ATTEMPT}/build"
+overlay_root=/run/ci-overlay
+overlay_pid=
 
-mkdir -p "$state" "$(dirname "$artifact_dir")"
+mkdir -p "$(dirname "$artifact_dir")" "$overlay_root/upper" "$overlay_root/work" /workspace
 mkdir "$artifact_dir"
-exec 9>"$state/build.lock"
-flock 9
 
-if [[ ! -d "$state/source/.git" ]]; then
-  git init "$state/source"
+cleanup_overlay() {
+  local status=$?
+  trap - EXIT
+  if mountpoint -q /workspace; then
+    fusermount3 -u /workspace || status=1
+  fi
+  if [[ -n "$overlay_pid" ]]; then
+    kill "$overlay_pid" 2>/dev/null || true
+    wait "$overlay_pid" 2>/dev/null || true
+  fi
+  exit "$status"
+}
+trap cleanup_overlay EXIT
+trap 'exit 130' INT
+trap 'exit 143' TERM
+
+if [[ -e "$golden_root/latest" ]]; then
+  lower=$(readlink -e "$golden_root/latest")
+  [[ -d "$lower/.git" ]]
+  fuse-overlayfs -f -o "lowerdir=$lower,upperdir=$overlay_root/upper,workdir=$overlay_root/work" /workspace &
+  overlay_pid=$!
+  for attempt in {1..100}; do
+    if mountpoint -q /workspace; then
+      break
+    fi
+    if ! kill -0 "$overlay_pid" 2>/dev/null; then
+      wait "$overlay_pid"
+      exit 1
+    fi
+    sleep 0.1
+  done
+  mountpoint -q /workspace
+else
+  git init /workspace
 fi
 
-git -C "$state/source" config remote.origin.url "$(git -C "$source_checkout" remote get-url origin)"
-git -C "$state/source" fetch --no-tags --update-shallow "$source_checkout" "$source_sha"
-git -C "$state/source" checkout --force --detach "$source_sha"
-cd -P "$state/source"
+git -C /workspace config remote.origin.url "$(git -C "$source_checkout" remote get-url origin)"
+git -C /workspace fetch --no-tags "$source_checkout" "$source_sha"
+git -C /workspace checkout --force --detach "$source_sha"
+cd -P /workspace
 [[ "$(git rev-parse HEAD)" == "$source_sha" ]]
 [[ -z "$(git status --porcelain --untracked-files=no)" ]]
 
