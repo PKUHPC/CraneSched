@@ -9,15 +9,14 @@ target_link_libraries(dedicated_resource_test
         )
 gtest_discover_tests(dedicated_resource_test)
 
-add_executable(public_header_test
+add_executable(utilities_test
         AccountingTime_test.cpp
-        LogPermissions_test.cpp
-        PublicHeader_test.cpp)
-target_link_libraries(public_header_test
+        Utilities_test.cpp)
+target_link_libraries(utilities_test
         GTest::gtest
         GTest::gtest_main
         absl::strings
 
         Utility_PublicHeader
         )
-gtest_discover_tests(public_header_test)
+gtest_discover_tests(utilities_test)

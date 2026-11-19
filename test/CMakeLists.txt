@@ -9,11 +9,11 @@ set(CRANE_UNIT_TEST_TARGETS
     job_query_test
     vault_client_test
     execution_groups_test
-    container_identity_test
+    task_manager_test
     embedded_db_client_test
     ctld_public_defs_test
     dedicated_resource_test
-    public_header_test
+    utilities_test
     misc_unqlite_test
     misc_cgroup_v2_fs_test
     misc_pam_util_test
