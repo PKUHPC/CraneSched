@@ -10,10 +10,10 @@ Automatic triggers remain disabled until full workflow acceptance is complete.
 | `publish` | `crane-ci` | Upload the build's RPM directory in parallel with integration |
 | `summary` | `crane-ci` | Enforce successful build, complete integration and requested publication |
 
-Dev inherits its matching Base toolchain and adds formatting, workload and CI
-client tools. The same Dev digest runs build and is the parent of the Test image.
-Integration's Actions container uses CI tools; product Pods in test environments
-use Test. Integration does not compile attachments, unpack RPMs or push images.
+Dev inherits its matching Base toolchain and formatting tools, and adds workload
+and CI client tools. All four Actions jobs use the same configured Dev digest,
+which is also the parent of Test. Product Pods in test environments use Test.
+Integration does not compile attachments, unpack RPMs or push images.
 
 ## Source selection and checks
 
@@ -37,7 +37,7 @@ require manual review and infrastructure testing; CI never upgrades shared servi
 C++/protocol formatting runs in build using the Dev image's clang-format. It
 checks `src/`, `test/` and shared `.proto` files, preserves their separate style
 and uploads an applicable `format-diff` on failure. `.clang-format` explicitly sets
-`DerivePointerAlignment` to preserve existing style with clang-format 21.
+`DerivePointerAlignment` to preserve existing style with clang-format 21 and later.
 Go fmt reports unformatted files; protocol generation precedes `go vet -mod=readonly
 ./...`, including tests with default tags. These checks do not run `go mod tidy`.
 Any check/native-test failure stops build and its downstream jobs.
@@ -88,8 +88,7 @@ CI helper scripts use `snake_case` regardless of language. `ci.yaml` retains Git
 
 | Repository variable | Purpose |
 | --- | --- |
-| `CRANE_CI_DEV_IMAGE` | Immutable Dev digest with the inherited toolchain, clang-format, Open MPI, kubectl and Docker CLI/Buildx |
-| `CRANE_CI_TOOLS_IMAGE` | Immutable CI execution-tools digest for downstream jobs |
+| `CRANE_CI_DEV_IMAGE` | Immutable Dev digest for all jobs, with the inherited toolchain, clang-format, Open MPI, kubectl and Docker CLI/Buildx |
 | `CRANE_CI_TEST_IMAGE` | Stable Test repository/tag to push; consumers use the returned digest |
 | `CRANE_CI_GOPROXY` | Optional module proxy, default `https://goproxy.cn,direct` |
 

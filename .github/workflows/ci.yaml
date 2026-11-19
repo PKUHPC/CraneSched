@@ -135,7 +135,7 @@ jobs:
       cancel-in-progress: false
       queue: max
     container:
-      image: ${{ vars.CRANE_CI_TOOLS_IMAGE }}
+      image: ${{ vars.CRANE_CI_DEV_IMAGE }}
     outputs:
       complete: ${{ steps.integration.outputs.complete }}
       expected: ${{ steps.integration.outputs.expected }}
@@ -161,7 +161,7 @@ jobs:
     runs-on: crane-ci
     timeout-minutes: 20
     container:
-      image: ${{ vars.CRANE_CI_TOOLS_IMAGE }}
+      image: ${{ vars.CRANE_CI_DEV_IMAGE }}
     env:
       PACKAGE_DIR: ${{ needs.build.outputs.rpm_dir }}
       NEXUS_URL: ${{ secrets.CCREPO_URL }}
@@ -189,7 +189,7 @@ jobs:
     runs-on: crane-ci
     timeout-minutes: 5
     container:
-      image: ${{ vars.CRANE_CI_TOOLS_IMAGE }}
+      image: ${{ vars.CRANE_CI_DEV_IMAGE }}
     env:
       JOB_RESULTS: ${{ toJSON(needs) }}
       PUBLISH_REQUESTED: ${{ inputs.publish_packages }}
