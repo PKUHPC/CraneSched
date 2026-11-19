@@ -11,6 +11,8 @@ product_ref=${CI_PRODUCT_REF:-master}
 workspace=/workspace
 generation="$CI_POD_UID"
 generation_root="$CI_GOLDEN_ROOT/trees/$generation"
+product_checkout="$PWD"
+source_sha=$(git rev-parse HEAD)
 [[ -d "$workspace" && -z "$(find "$workspace" -mindepth 1 -print -quit)" ]]
 [[ -d "$generation_root/workspace" && ! -e "$generation_root/source.sha" ]]
 
@@ -26,9 +28,8 @@ export SOURCE_DATE_EPOCH="$(git log -1 --format=%ct)"
 mkdir -p "$generation_root" "$CCACHE_DIR" "$CCACHE_TEMPDIR" "$CPM_SOURCE_CACHE"
 
 git -C "$workspace" init
-git -C "$workspace" remote add origin "$CI_PRODUCT_REPOSITORY"
-git -C "$workspace" fetch --depth=1 origin "refs/heads/$product_ref"
-source_sha=$(git -C "$workspace" rev-parse FETCH_HEAD)
+git -C "$workspace" remote add origin "$(git -C "$product_checkout" remote get-url origin)"
+git -C "$workspace" fetch --no-tags "$product_checkout" "$source_sha"
 git -C "$workspace" checkout --force --detach "$source_sha"
 [[ "$(git -C "$workspace" rev-parse HEAD)" == "$source_sha" ]]
 
