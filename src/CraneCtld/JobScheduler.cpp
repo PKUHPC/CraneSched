@@ -26,6 +26,7 @@
 #include <algorithm>
 #include <iterator>
 #include <map>
+#include <numeric>
 
 #include "Account/AccountManager.h"
 #include "Accounting/AccountMetaContainer.h"
@@ -9329,8 +9330,8 @@ CraneExpected<void> JobScheduler::AcquireStepAttributes(StepInCtld* step) {
       return std::unexpected(CraneErrCode::ERR_INVALID_EX_NODE_LIST);
     }
 
-    bool user_set_mem_per_cpu = step->StepToCtld().has_mem_per_cpu();
-    bool user_set_mem_per_node = step->StepToCtld().has_mem_per_node();
+    const bool user_set_mem_per_cpu = step->StepToCtld().has_mem_per_cpu();
+    const bool user_set_mem_per_node = step->StepToCtld().has_mem_per_node();
 
     if (user_set_mem_per_cpu && user_set_mem_per_node) {
       CRANE_ERROR(
@@ -9348,7 +9349,6 @@ CraneExpected<void> JobScheduler::AcquireStepAttributes(StepInCtld* step) {
         step->req_node_res_view.SetMemoryBytes(part_meta.default_mem_per_node);
         step->req_node_res_view.SetMemorySwBytes(
             part_meta.default_mem_per_node);
-        user_set_mem_per_node = true;
       } else if (part_meta.default_mem_per_cpu != 0) {
         auto mem_per_cpu = part_meta.default_mem_per_cpu;
         step->req_task_res_view.SetMemoryBytes(
@@ -9357,7 +9357,6 @@ CraneExpected<void> JobScheduler::AcquireStepAttributes(StepInCtld* step) {
         step->req_task_res_view.SetMemorySwBytes(
             static_cast<double>(step->req_task_res_view.GetCpuCount()) *
             mem_per_cpu);
-        user_set_mem_per_cpu = true;
       } else {
         CRANE_ERROR(
             "Step #{}.{}: neither mem_per_cpu nor mem_per_node is "
@@ -9367,62 +9366,45 @@ CraneExpected<void> JobScheduler::AcquireStepAttributes(StepInCtld* step) {
       }
     }
 
-    if (part_meta.max_mem_per_cpu != 0) {
-      if (user_set_mem_per_cpu) {
-        auto max_job_mem =
-            static_cast<double>(step->req_task_res_view.CpuCountDouble()) *
-            part_meta.max_mem_per_cpu;
-        if (step->req_task_res_view.GetMemoryBytes() > max_job_mem) {
-          step->req_task_res_view.SetMemoryBytes(max_job_mem);
-          step->req_task_res_view.SetMemorySwBytes(max_job_mem);
-        }
-      } else if (user_set_mem_per_node) {
-        double cpus_per_task = step->req_task_res_view.CpuCountDouble();
-        if (cpus_per_task > 0) {
-          auto required_min = static_cast<uint32_t>(std::ceil(
-              static_cast<double>(step->req_node_res_view.GetMemoryBytes()) /
-              (part_meta.max_mem_per_cpu * cpus_per_task)));
-          step->ntasks_per_node_min =
-              std::max(step->ntasks_per_node_min, required_min);
-        }
-      }
-    }
-
-    if (part_meta.max_mem_per_node != 0) {
-      if (user_set_mem_per_node) {
-        if (step->req_node_res_view.GetMemoryBytes() >
-            part_meta.max_mem_per_node) {
-          step->req_node_res_view.SetMemoryBytes(part_meta.max_mem_per_node);
-          step->req_node_res_view.SetMemorySwBytes(part_meta.max_mem_per_node);
-        }
-      } else if (user_set_mem_per_cpu) {
-        auto job_mem = step->req_task_res_view.GetMemoryBytes();
-        if (job_mem > 0) {
-          auto required_max = static_cast<uint32_t>(
-              static_cast<double>(part_meta.max_mem_per_node) / job_mem);
-          if (step->ntasks_per_node_max == 0 ||
-              step->ntasks_per_node_max > required_max) {
-            step->ntasks_per_node_max = required_max;
-          }
-        }
-      }
-    }
+    // Partition memory limits apply when allocating the parent job. A step
+    // may use that allocation with fewer CPUs without changing its task count
+    // or truncating its memory request. CheckStepValidity checks the job's
+    // resource bounds; SchedulePendingSteps accounts for other steps' usage.
   }
 
   {
+    if (step->node_num == 0 || step->ntasks == 0 ||
+        step->ntasks < step->node_num) {
+      CRANE_ERROR(
+          "Step #{}.{} has invalid task topology: {} tasks on {} nodes.",
+          step->job_id, step->StepId(), step->ntasks, step->node_num);
+      return std::unexpected(CraneErrCode::ERR_INVALID_RESOURCE);
+    }
+
     uint32_t dist_max = step->ntasks - step->node_num + 1;
     if (step->ntasks_per_node_max == 0)
       step->ntasks_per_node_max = dist_max;
     else
       step->ntasks_per_node_max = std::min(step->ntasks_per_node_max, dist_max);
 
-    step->ntasks_per_node_min = std::max(
-        step->ntasks_per_node_min,
-        step->ntasks - (step->node_num - 1) * step->ntasks_per_node_max);
+    // Keep at least one task on every node and avoid unsigned wraparound.
+    const uint64_t max_tasks_on_other_nodes =
+        static_cast<uint64_t>(step->node_num - 1) * step->ntasks_per_node_max;
+    const uint32_t required_min =
+        max_tasks_on_other_nodes >= step->ntasks
+            ? 1
+            : static_cast<uint32_t>(step->ntasks - max_tasks_on_other_nodes);
+    step->ntasks_per_node_min =
+        std::max(step->ntasks_per_node_min, required_min);
 
-    step->ntasks_per_node_max = std::min(
-        step->ntasks_per_node_max,
-        step->ntasks - (step->node_num - 1) * step->ntasks_per_node_min);
+    const uint64_t min_tasks_on_other_nodes =
+        static_cast<uint64_t>(step->node_num - 1) * step->ntasks_per_node_min;
+    const uint32_t required_max =
+        min_tasks_on_other_nodes >= step->ntasks
+            ? 0
+            : static_cast<uint32_t>(step->ntasks - min_tasks_on_other_nodes);
+    step->ntasks_per_node_max =
+        std::min(step->ntasks_per_node_max, required_max);
   }
 
   if (step->ntasks_per_node_min > step->ntasks_per_node_max) {
@@ -9460,25 +9442,51 @@ CraneExpected<void> JobScheduler::CheckStepValidity(StepInCtld* step) {
     return std::unexpected{CraneErrCode::ERR_PERMISSION_DENIED};
   }
 
-  std::unordered_set<std::string> avail_nodes;
+  // Check the full parent allocation. Temporarily occupied resources are
+  // handled by SchedulePendingSteps, so feasible steps may still wait.
+  const auto& job_res = job->AllocatedRes();
+  std::vector<uint64_t> node_task_capacities;
+  node_task_capacities.reserve(job->CranedIds().size());
   for (const auto& craned_id : job->CranedIds()) {
-    const auto& job_res = job->AllocatedRes();
-    if (step->req_node_res_view + step->req_task_res_view <=
-            job_res.At(craned_id) &&
-        (step->included_nodes.empty() ||
-         step->included_nodes.contains(craned_id)) &&
-        (step->excluded_nodes.empty() ||
-         !step->excluded_nodes.contains(craned_id)))
-      avail_nodes.emplace(craned_id);
+    if ((!step->included_nodes.empty() &&
+         !step->included_nodes.contains(craned_id)) ||
+        step->excluded_nodes.contains(craned_id))
+      continue;
 
-    if (avail_nodes.size() >= step->node_num) break;
+    ResourceInNodeV3 node_res;
+    if (!step->req_node_res_view.GetFeasibleResourceInNode(
+            job_res.At(craned_id), &node_res))
+      continue;
+
+    ResourceInNodeV3 remaining_res = job_res.At(craned_id);
+    remaining_res -= node_res;
+    const uint64_t task_capacity =
+        remaining_res.ToResourceView() / step->req_task_res_view;
+    if (task_capacity < step->ntasks_per_node_min) continue;
+    node_task_capacities.push_back(
+        std::min<uint64_t>(task_capacity, step->ntasks_per_node_max));
   }
 
-  if (step->node_num > avail_nodes.size()) {
+  if (node_task_capacities.size() < step->node_num) {
     CRANE_TRACE(
         "Resource not enough. Step #{}.{} needs {} nodes, while only {} "
         "nodes in job satisfy its requirement.",
-        step->job_id, step->StepId(), step->node_num, avail_nodes.size());
+        step->job_id, step->StepId(), step->node_num,
+        node_task_capacities.size());
+    return std::unexpected(CraneErrCode::ERR_NO_ENOUGH_NODE);
+  }
+
+  // Only the requested number of nodes may contribute task capacity.
+  std::ranges::sort(node_task_capacities, std::greater<>());
+  const auto capacity_sum = std::accumulate(
+      node_task_capacities.begin(),
+      node_task_capacities.begin() + step->node_num, uint64_t{0});
+  if (capacity_sum < step->ntasks) {
+    CRANE_TRACE(
+        "Resource not enough. Step #{}.{} needs {} tasks on {} nodes, "
+        "while those nodes can fit only {} tasks.",
+        step->job_id, step->StepId(), step->ntasks, step->node_num,
+        capacity_sum);
     return std::unexpected(CraneErrCode::ERR_NO_ENOUGH_NODE);
   }
 

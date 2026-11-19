@@ -22,6 +22,17 @@ target_precompile_headers(job_query_test PRIVATE
         ${PROJECT_SOURCE_DIR}/src/CraneCtld/CtldPreCompiledHeader.h)
 gtest_discover_tests(job_query_test)
 
+# Exercise step admission and allocation using the controller implementation.
+add_executable(step_resource_test StepResourceTest.cpp ${job_query_sources}
+        ${PROJECT_SOURCE_DIR}/src/CraneCtld/RpcService/CtldGrpcServer.cpp)
+target_link_libraries(step_resource_test PRIVATE
+        GTest::gtest GTest::gtest_main ${job_query_libraries})
+target_compile_definitions(step_resource_test PRIVATE ${job_query_definitions})
+target_include_directories(step_resource_test PRIVATE ${job_query_includes})
+target_precompile_headers(step_resource_test PRIVATE
+        ${PROJECT_SOURCE_DIR}/src/CraneCtld/CtldPreCompiledHeader.h)
+gtest_discover_tests(step_resource_test)
+
 # Exercises the production VaultClient against an in-process fake Vault.
 add_executable(vault_client_test VaultClientTest.cpp
         ${PROJECT_SOURCE_DIR}/src/CraneCtld/Security/VaultClient.cpp)
