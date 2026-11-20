@@ -274,17 +274,21 @@ func TestRunOutputBuffering(t *testing.T) {
 			readVisible := func(want int) {
 				t.Helper()
 				poll := []unix.PollFd{{Fd: int32(reader.Fd()), Events: unix.POLLIN}}
-				if want > 0 {
+				for remaining := want; ; {
+					pending, err := unix.IoctlGetInt(int(reader.Fd()), unix.TIOCINQ)
+					if err != nil || pending > remaining {
+						t.Fatalf("readable=%d remaining=%d err=%v", pending, remaining, err)
+					}
+					if _, err := io.CopyN(&out, reader, int64(pending)); err != nil {
+						t.Fatal(err)
+					}
+					remaining -= pending
+					if remaining == 0 {
+						break
+					}
 					if n, err := unix.Poll(poll, 1000); err != nil || n != 1 {
 						t.Fatalf("output not readable: n=%d err=%v", n, err)
 					}
-				}
-				pending, err := unix.IoctlGetInt(int(reader.Fd()), unix.TIOCINQ)
-				if err != nil || pending != want {
-					t.Fatalf("readable=%d want=%d err=%v", pending, want, err)
-				}
-				if _, err := io.CopyN(&out, reader, int64(pending)); err != nil {
-					t.Fatal(err)
 				}
 			}
 			iterations := 0
