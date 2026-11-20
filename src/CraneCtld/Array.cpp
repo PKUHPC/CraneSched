@@ -153,11 +153,14 @@ std::unique_ptr<JobInCtld> ArrayMeta::BuildChild(
   }
 
   auto child = std::make_unique<JobInCtld>();
-  child->SetFieldsByJobToCtld(parent_job_->JobToCtld());
-  child->MutableJobToCtld()->clear_array_spec();
-  // The parent's hold is a scheduling gate. Once the parent is eligible for
-  // materialization, the child must not inherit a submit-time hold flag.
-  child->SetHeld(false);
+  auto child_job_to_ctld = parent_job_->JobToCtld();
+  // Parent-only scheduling gates must be cleared before initializing both
+  // the child's in-memory fields and its persisted submission. Otherwise a
+  // requeued child waits for dependency events already consumed by the parent.
+  child_job_to_ctld.clear_dependencies();
+  child_job_to_ctld.set_hold(false);
+  child_job_to_ctld.clear_array_spec();
+  child->SetFieldsByJobToCtld(child_job_to_ctld);
   child->SetStatus(crane::grpc::Pending);
   child->SetArrayTaskIdentity(parent_job_->JobId(), task_id);
   child->SetUsername(parent_job_->Username());
@@ -694,8 +697,27 @@ std::vector<ArrayManager::FinalizedArrayParent> ArrayManager::OnChildTerminal(
   return final_parents;
 }
 
+void ArrayManager::RequestParentTerminalStatus(job_id_t array_job_id,
+                                               crane::grpc::JobStatus status,
+                                               uint32_t exit_code,
+                                               absl::Time request_time) {
+  auto* meta = FindMeta_(array_job_id);
+  if (meta == nullptr) return;
+  meta->FinishForTerminalStatus(status, exit_code, request_time);
+}
+
 bool ArrayManager::IsRegisteredParent(job_id_t array_job_id) const {
   return FindMeta_(array_job_id) != nullptr;
+}
+
+void ArrayManager::RequestCancelChildren(job_id_t array_job_id) {
+  if (auto* meta = FindMeta_(array_job_id))
+    meta->cancel_children_requested_ = true;
+}
+
+bool ArrayManager::CancelChildrenRequested(job_id_t array_job_id) const {
+  const auto* meta = FindMeta_(array_job_id);
+  return meta != nullptr && meta->cancel_children_requested_;
 }
 
 // ----------------------------------------------------------------------------

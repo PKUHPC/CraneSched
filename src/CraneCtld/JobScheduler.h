@@ -1431,6 +1431,8 @@ class JobScheduler {
  private:
   void RequeueRecoveredJobIntoPendingQueueLock_(std::unique_ptr<JobInCtld> job);
 
+  friend class ArrayRequeueCancellationTest;
+
   void PutRecoveredJobIntoRunningQueueLock_(std::unique_ptr<JobInCtld> job);
   void HandleFailToRecoverRngJob_(job_id_t job_id);
 
@@ -1466,6 +1468,9 @@ class JobScheduler {
       std::unordered_set<JobInCtld*> const& jobs);
 
   void PersistAndRequeueJobs_(std::vector<std::unique_ptr<JobInCtld>>& jobs);
+  void EnqueueRequeuedJobs_(std::vector<std::unique_ptr<JobInCtld>>& jobs);
+  std::vector<job_id_t> CancelArrayChildrenNoLock_(job_id_t parent_job_id)
+      ABSL_EXCLUSIVE_LOCKS_REQUIRED(m_pending_job_map_mtx_);
 
   CraneErrCode TerminateRunningStepNoLock_(
       CommonStepInCtld* step, crane::grpc::TerminateSource terminate_source =
