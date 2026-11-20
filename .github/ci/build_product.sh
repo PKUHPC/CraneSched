@@ -12,6 +12,7 @@ source_checkout="$PWD"
 golden_root="/ci/golden/native-rhel10-amd64/${CI_DEV_IMAGE##*@sha256:}/ci-debug"
 artifact_dir="/ci/attempts/${GITHUB_RUN_ID}-${GITHUB_RUN_ATTEMPT}/build"
 overlay_root=/run/ci-overlay
+package_dir=
 
 mkdir -p "$(dirname "$artifact_dir")" "$overlay_root/upper" "$overlay_root/work" /workspace
 mkdir "$artifact_dir"
@@ -27,6 +28,9 @@ cleanup_overlay() {
   cd /
   if overlay_mounted; then
     fusermount3 -u /workspace || status=1
+  fi
+  if [[ -n "$package_dir" ]]; then
+    rm -rf -- "$package_dir"
   fi
   exit "$status"
 }
@@ -56,7 +60,6 @@ cd -P /workspace
 [[ "$(git rev-parse HEAD)" == "$source_sha" ]]
 [[ -z "$(git status --porcelain --untracked-files=no)" ]]
 
-export ARTIFACT_DIR="$artifact_dir"
 export SOURCE_DATE_EPOCH="$(git log -1 --format=%ct)"
 export CPM_SOURCE_CACHE=/ci/cache/cpm
 mkdir -p "$CPM_SOURCE_CACHE" "$CCACHE_DIR" "$CCACHE_TEMPDIR"
@@ -80,19 +83,17 @@ cmake --build --preset ci-debug --parallel "${BUILD_JOBS:-6}"
 make -C go clean
 make -C go all tool PREFIX=/usr STRIP=true CHECK_GPU=0
 
-mkdir -p "$artifact_dir/packages/rpm" "$artifact_dir/cpack-backend"
-(cd cmake-build-ci-debug && cpack -G RPM -B "$artifact_dir/cpack-backend")
-mapfile -t backend_rpms < <(find "$artifact_dir/cpack-backend" -maxdepth 1 -type f -name '*.rpm' -print)
-[[ "${#backend_rpms[@]}" == 2 ]]
-cp "${backend_rpms[@]}" "$artifact_dir/packages/rpm/"
+package_dir=$(mktemp -d /tmp/crane-packages.XXXXXXXX)
+
+(cd cmake-build-ci-debug && cpack -G RPM -B "$package_dir")
 
 GITHUB_TOKEN="$CI_PACKAGING_TOKEN" make -C go package SKIP_REBUILD=true CHECK_GPU=0 \
   GORELEASER_SNAPSHOT=false GORELEASER_RELEASE_ARGS=--skip=publish,validate
-cp go/build/dist/*.rpm "$artifact_dir/packages/rpm/"
+shopt -s nullglob
+packages=("$package_dir"/*.rpm go/build/dist/*.rpm)
 
 expected_version="$(< VERSION)"
 expected_names=(cranesched-cranectld cranesched-craned cranesched-client cranesched-plugin cranesched-slurm-compat)
-mapfile -t packages < <(find "$artifact_dir/packages/rpm" -maxdepth 1 -type f -name '*.rpm' -print | sort)
 [[ "${#packages[@]}" == "${#expected_names[@]}" ]]
 declare -A actual_names=()
 for package in "${packages[@]}"; do
@@ -106,4 +107,6 @@ for name in "${expected_names[@]}"; do
   [[ -n "${actual_names[$name]:-}" ]]
 done
 
+mkdir -p "$artifact_dir/packages/rpm"
+cp "${packages[@]}" "$artifact_dir/packages/rpm/"
 printf 'rpm_dir=%s\n' "$artifact_dir/packages/rpm" >> "$GITHUB_OUTPUT"

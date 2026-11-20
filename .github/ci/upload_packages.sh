@@ -12,7 +12,6 @@ unset HTTP_PROXY HTTPS_PROXY ALL_PROXY http_proxy https_proxy all_proxy
 : "${RPM_ARCH:?RPM_ARCH is required}"
 
 [[ -d "$PACKAGE_DIR" ]]
-[[ "$PACKAGE_DIR" == /ci/attempts/*/build/packages/rpm ]]
 
 max_retries=3
 retry_delay=5

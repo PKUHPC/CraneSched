@@ -78,37 +78,21 @@ jobs:
           fi
           echo "source_branch=$source_branch" >> "$GITHUB_OUTPUT"
 
+      - name: Check C++ and proto formatting
+        run: |
+          clang-format --version
+          find src test -type f \( -name '*.c' -o -name '*.cc' -o -name '*.cpp' -o -name '*.cxx' \
+            -o -name '*.h' -o -name '*.hh' -o -name '*.hpp' -o -name '*.hxx' \) \
+            -exec clang-format --dry-run --Werror --style=file {} +
+          find protos -type f -name '*.proto' \
+            -exec clang-format --dry-run --Werror --style=file:.clang-format-proto {} +
+
       - name: Select and freeze the integration suite
         id: suite
         env:
           CI_TEST_REF: ${{ inputs.harness_ref }}
           CI_PRODUCT_BRANCH: ${{ steps.source.outputs.source_branch }}
         run: python3 /etc/ci-launcher/launch.py --select-suite
-
-      - name: Report the image's clang-format version
-        run: clang-format --version
-
-      - name: Check clang-format and prepare patch
-        id: format
-        continue-on-error: true
-        shell: bash
-        run: python3 .ci-tools/.github/ci/check_format.py
-
-      - name: Upload format patch
-        if: always() && steps.format.outputs.changed == 'true'
-        uses: actions/upload-artifact@b7c566a772e6b6bfb58ed0dc250532a479d7789f # v6
-        with:
-          name: format-diff
-          path: format.patch
-          if-no-files-found: error
-          retention-days: 3
-
-      - name: Fail when formatting is required
-        id: format_gate
-        if: always() && steps.format.outcome == 'failure'
-        run: |
-          echo 'Clang-format failed; a format-diff artifact is available when a patch could be prepared.'
-          exit 1
 
       - name: Build, run native tests and package RPMs
         id: build

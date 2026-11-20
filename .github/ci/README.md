@@ -2,7 +2,7 @@
 
 `ci.yaml` runs manually through `workflow_dispatch`. It checks formatting and native tests,
 builds RPMs and test assets, then runs full integration tests and optional package publication
-in parallel. The final job reports the combined result. Automatic triggers remain disabled.
+in parallel. The final job reports the combined result. Fix formatting diagnostics locally using the repository’s C++ and proto styles.
 
 ## Inputs and outputs
 
@@ -26,7 +26,6 @@ compilation and native tests run without HTTP proxy variables. Publication requi
 
 | Script | Purpose |
 | --- | --- |
-| `check_format.py` | Check C++/proto formatting and produce a correction patch |
 | `build_product.sh` | Check, build, test and package the selected product revision |
 | `build_golden_tree.sh` | Produce a checked C++ build baseline |
 | `upload_packages.sh` | Upload this build's final RPMs |
