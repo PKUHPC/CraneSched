@@ -1,139 +1,35 @@
 # Build, Test and Publish
 
-`ci.yaml` uses repository-scoped ARC scale sets with explicit container images.
-Automatic triggers remain disabled until full workflow acceptance is complete.
+`ci.yaml` runs manually through `workflow_dispatch`. It checks formatting and native tests,
+builds RPMs and test assets, then runs full integration tests and optional package publication
+in parallel. The final job reports the combined result. Automatic triggers remain disabled.
 
-| Job | Runner | Responsibility |
-| --- | --- | --- |
-| `build` | `crane-build` | In one pinned Dev image: freeze product/suite commits, check formatting and vet, build and run native tests, package RPMs, prepare full-suite assets and push Test |
-| `integration` | `crane-ci` | Consume Test digest, prepared assets and frozen suite commit; create environments, run the full suite, collect evidence and reclaim |
-| `publish` | `crane-ci` | Upload the build's RPM directory in parallel with integration |
-| `summary` | `crane-ci` | Enforce successful build, complete integration and requested publication |
+## Inputs and outputs
 
-Dev inherits its matching Base toolchain and formatting tools, and adds workload
-and CI client tools. All four Actions jobs use the same configured Dev digest,
-which is also the parent of Test. Product Pods in test environments use Test.
-Integration does not compile attachments, unpack RPMs or push images.
+- `source_ref`: product revision; blank uses the selected workflow revision.
+- `harness_ref`: optional test-suite revision; blank uses the matching branch, then master.
+- `integration_shards`: number of independent integration environments.
+- `publish_packages`: enable RPM publication; default is false.
 
-The `ci-debug` preset explicitly selects `clang` and `clang++` from the image.
-Clang uses LLD, while IPO/LTO remains disabled for Debug builds to keep
-incremental links and memory use predictable. Start with a clean build tree
-when switching from the previous GCC configuration; the compiler version
-remains determined by the pinned Dev image.
+Build returns `rpm_dir`, `harness_sha`, `asset_dir` and `test_image` for downstream jobs.
+Integration reports completion and expected/passed counts.
 
-## Source selection and checks
+## Configuration
 
-`source_ref` optionally selects a product branch, tag or commit; blank uses the
-workflow commit. The checkout SHA is frozen before checks and used by the persistent
-build tree. An explicit `harness_ref` selects the test suite ref. Otherwise the
-launcher selects the suite branch matching the selected product branch, then
-`master` only if that branch does not exist. For a PR, the product branch is the
-head branch; for manual dispatch it is the selected workflow branch. An explicit
-`source_ref` branch overrides it. A tag or detached commit has no branch to match.
-Access errors and invalid explicit refs fail preparation rather than fall back.
+The configured runner pools use the pinned `CRANE_CI_DEV_IMAGE`; `CRANE_CI_TEST_IMAGE`
+selects the Test push target. `CRANE_CI_GOPROXY` optionally overrides the Go module proxy.
+The optional `HTTPS_PROXY` secret is passed by the workflow for CMake dependency downloads;
+compilation and native tests run without HTTP proxy variables. Publication requires
+`CCREPO_URL`, `CCREPO_USERNAME` and `CCREPO_PASSWORD`. Deployment configuration is maintained separately.
 
-Build freezes the suite once. Test cases, executor, CLI, fixtures, attachment
-sources and Test recipe come from that commit. Downstream jobs do not resolve the
-branch again, and the next build sees new commits without workflow edits.
-Changes from the deployed Operator source revision produce a warning in the
-build log/summary; selected cases still run against the existing Operator.
-An unknown deployment revision also warns. Results involving Operator changes
-require manual review and infrastructure testing; CI never upgrades shared services.
+## Script entrypoints
 
-C++/protocol formatting runs in build using the Dev image's clang-format. It
-checks `src/`, `test/` and shared `.proto` files, preserves their separate style
-and uploads an applicable `format-diff` on failure. `.clang-format` explicitly sets
-`DerivePointerAlignment` to preserve existing style with clang-format 21 and later.
-Go fmt reports unformatted files; protocol generation precedes `go vet -mod=readonly
-./...`, including tests with default tags. These checks do not run `go mod tidy`.
-Any check/native-test failure stops build and its downstream jobs.
-
-## Outputs and integration
-
-Build outputs are `rpm_dir`, `harness_sha`, `asset_dir` and
-`test_image` (a repository digest). Job dependencies and outputs join stages;
-there is no custom build manifest or general site-configuration file.
-
-`integration_shards` selects one or four environments. The executor discovers every
-top-level `TestTC...` in the frozen suite and checks the prepared binaries expose
-the same inventory. It does not consume a separately maintained list or subset.
-Cases run serially within a Run and concurrently across Runs. Panic, timeout or
-abort stops that shard; other shards finish and all results are collected.
-Actions reports case names, terminal results and counts; detailed assertions,
-private source and diagnostic evidence stay in internal storage.
-
-The shared integration concurrency group admits one job at a time. Kubernetes
-labels record each resource's execution Pod UID, attempt and shard; API discovery
-and UID-checked deletion drive cleanup. CI does not scan local CLI receipts to
-find resources. Unfinished reclamation blocks new integration admission. Each
-attempt writes independent results and preserves previous failures.
-Integration writes `complete`, `expected`, and `passed` to `GITHUB_OUTPUT`;
-summary requires a nonempty complete pass plus successful cleanup.
-
-## Publication
-
-`publish_packages` defaults to false. Required secrets are `CCREPO_URL`,
-`CCREPO_USERNAME`, and `CCREPO_PASSWORD`. Missing credentials or upload failure
-fails publish/summary while integration continues. The uploader uses the existing
-`crane` RPM repository, distro `10`, `x86_64` and version-directory convention.
-Only the final RPM directory is passed to it; CPack intermediate RPMs, DEBs and
-the retired bin path are excluded. DEB support awaits a matching build target.
-Uploads to the shared destination queue without cancelling an in-progress upload.
-Internal package DNS is maintained by cluster DNS, without Pod host aliases.
-
-## Scripts and images
-
-| Script | Responsibility |
+| Script | Purpose |
 | --- | --- |
-| `check_format.py` | Check C++/proto style and produce an applicable patch |
-| `build_product.sh` | Hold the persistent tree lock through Go checks, native tests, builds, packaging and RPM validation |
-| `upload_packages.sh` | Upload final RPMs, retry failures, and fail after trying every package |
-| `summarize_ci.py` | Enforce job results and integration completeness |
+| `check_format.py` | Check C++/proto formatting and produce a correction patch |
+| `build_product.sh` | Check, build, test and package the selected product revision |
+| `upload_packages.sh` | Upload this build's final RPMs |
+| `summarize_ci.py` | Report required job results and integration completeness |
 
-CI helper scripts use `snake_case` regardless of language. `ci.yaml` retains GitHub's required workflow extension.
-
-| Repository variable | Purpose |
-| --- | --- |
-| `CRANE_CI_DEV_IMAGE` | Immutable Dev digest for all jobs, with the inherited toolchain, clang-format, Open MPI, kubectl and Docker CLI/Buildx |
-| `CRANE_CI_TEST_IMAGE` | Stable Test repository/tag to push; consumers use the returned digest |
-| `CRANE_CI_GOPROXY` | Optional module proxy, default `https://goproxy.cn,direct` |
-
-Hooks provide UID/GID 1001, shared storage, Pod identity, CA and narrowly scoped
-API credentials. Only build mounts source-read and registry-push credentials.
-The launcher is mounted at `/etc/ci-launcher/launch.py`; build calls
-`--select-suite` then `--prepare`, and integration calls `--integration`.
-Run templates and platform metadata are maintained through Kubernetes objects.
-No private repository URL or source is stored in the product workflow.
-The workflow keeps GitHub-specific triggers, permissions, runner/container selection,
-job dependencies, outputs and conditions. Product build, format, upload and result
-logic lives in directly runnable scripts; short Actions-only setup and gate commands
-remain inline.
-
-## Persistent build state
-
-`/ci/workspaces/native-rhel10-amd64/<dev-digest>/ci-debug` preserves the source and
-complete CMake/Ninja tree across product commits. One flock covers source update,
-generation, native tests, build and packaging. Runner checkout is independent;
-cleaning it does not remove this tree. ccache is shared and Go caches are local
-to the build Pod. Only `go/build/bin`, `plugin`, and `tool` are cleared before
-rebuilding package inputs, preventing removed modules from reusing stale files.
-
-Each attempt owns `/ci/attempts/<run-id>-<attempt>/build`. Final RPMs go under
-`packages/rpm/`; CPack's temporary tree is elsewhere. Build validates five package
-identities, architecture and product `VERSION` before test assembly/publication.
-GoReleaser disables snapshot mode and skips publish/tag validation; the product
-Makefile supplies the version. Its read-only GitHub token is scoped to that
-packaging command. RPM payload extraction and Test push run in the same Dev job.
-BuildKit handles layer caching; prepared test assets use compatible immutable
-cache directories on shared storage.
-
-## Validation
-
-Check workflow syntax with actionlint configured for ARC labels, and run `bash -n`
-on the directly invoked shell scripts when editing them.
-The pinned actionlint predates `concurrency.queue`; only that field is omitted
-from a temporary lint copy. A real workflow attempt must still validate hooks,
-identities, shared storage and the complete DAG before automatic triggers.
-Local static checks do not prove ARC routing, live RBAC, Registry access or a real
-Actions DAG. The actual Actions workflow remains the acceptance check for the
-combined build, publish and integration path.
+CI helper filenames use underscores. Check shell changes with `bash -n` and workflow
+changes with a compatible `actionlint` version.

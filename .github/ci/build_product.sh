@@ -1,5 +1,6 @@
 #!/usr/bin/env bash
 set -euo pipefail
+download_proxy=${HTTPS_PROXY:-}
 unset HTTP_PROXY HTTPS_PROXY ALL_PROXY http_proxy https_proxy all_proxy
 
 [[ "$CI_DEV_IMAGE" =~ @sha256:[a-f0-9]{64}$ ]]
@@ -44,7 +45,7 @@ make -C go protos
 (cd go && go vet -mod=readonly ./...)
 make -C go test
 
-cmake --preset ci-debug
+HTTPS_PROXY="$download_proxy" cmake --preset ci-debug
 cmake --build --preset ci-debug --target crane_unit_tests --parallel "${BUILD_JOBS:-6}"
 ctest --test-dir cmake-build-ci-debug --output-on-failure
 cmake --build --preset ci-debug --parallel "${BUILD_JOBS:-6}"

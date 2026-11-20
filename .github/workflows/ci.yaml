@@ -115,6 +115,7 @@ jobs:
         env:
           CI_SOURCE_SHA: ${{ steps.source.outputs.source_sha }}
           CI_PACKAGING_TOKEN: ${{ github.token }}
+          HTTPS_PROXY: ${{ secrets.HTTPS_PROXY }}
         run: bash .ci-tools/.github/ci/build_product.sh
 
       - name: Prepare full-suite assets and push the Test image
