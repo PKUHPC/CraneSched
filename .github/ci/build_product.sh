@@ -42,11 +42,11 @@ fi
 
 make -C go protos
 (cd go && go vet -mod=readonly ./...)
+make -C go test
 
 cmake --preset ci-debug
 cmake --build --preset ci-debug --target crane_unit_tests --parallel "${BUILD_JOBS:-6}"
 ctest --test-dir cmake-build-ci-debug --output-on-failure
-make -C go test
 cmake --build --preset ci-debug --parallel "${BUILD_JOBS:-6}"
 
 make -C go clean
