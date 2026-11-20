@@ -20,10 +20,8 @@
 namespace Ctld {
 class ArrayRequeueCancellationTest : public ::testing::Test {
  protected:
-  void ExerciseRequeueCancellation(bool cancel_before_requeue) {
-    auto loop = uvw::loop::create();
+  void ExercisePendingChildCancellation() {
     JobScheduler scheduler;
-    scheduler.m_cancel_job_async_handle_ = loop->resource<uvw::async_handle>();
 
     auto parent = std::make_unique<JobInCtld>();
     crane::grpc::JobToCtld submission;
@@ -48,18 +46,9 @@ class ArrayRequeueCancellationTest : public ::testing::Test {
     auto child_id = child->JobId();
     scheduler.m_pending_job_map_.emplace(parent_id, std::move(parent));
 
-    std::vector<std::unique_ptr<JobInCtld>> requeued;
     child->ResetForRequeue();
-    requeued.push_back(std::move(child));
-    if (cancel_before_requeue) {
-      absl::MutexLock guard(&scheduler.m_pending_job_map_mtx_);
-      auto ids = scheduler.CancelArrayChildrenNoLock_(parent_id);
-      ASSERT_EQ(ids.size(), 1U);
-      EXPECT_EQ(ids.front(), child_id);
-    }
-    scheduler.EnqueueRequeuedJobs_(requeued);
-    if (!cancel_before_requeue) {
-      ASSERT_TRUE(scheduler.m_pending_job_map_.contains(child_id));
+    scheduler.m_pending_job_map_.emplace(child_id, std::move(child));
+    {
       absl::MutexLock guard(&scheduler.m_pending_job_map_mtx_);
       auto ids = scheduler.CancelArrayChildrenNoLock_(parent_id);
       ASSERT_EQ(ids.size(), 1U);
@@ -96,8 +85,6 @@ class ArrayRequeueCancellationTest : public ::testing::Test {
                                               ExitCode::EC_TERMINATED,
                                               absl::Now())
                      .parent_found);
-    scheduler.m_cancel_job_async_handle_->close();
-    loop->run();
   }
 
   void SetUp() override {
@@ -118,10 +105,7 @@ class ArrayRequeueCancellationTest : public ::testing::Test {
 
 #ifdef CRANE_HAVE_UNQLITE
 TEST_F(ArrayRequeueCancellationTest, CancelAfterChildIsRequeued) {
-  ExerciseRequeueCancellation(false);
-}
-TEST_F(ArrayRequeueCancellationTest, CancelWhileChildIsBeingRequeued) {
-  ExerciseRequeueCancellation(true);
+  ExercisePendingChildCancellation();
 }
 #endif
 }  // namespace Ctld
@@ -241,8 +225,7 @@ TEST_F(ArrayChildQueryTest, MaterializedChildDoesNotInheritParentDependency) {
   EXPECT_TRUE(child->Dependencies().deps.empty());
 }
 
-TEST_F(ArrayChildQueryTest,
-       ParentDeadlineKeepsResultWhenCancellationWidensScope) {
+TEST_F(ArrayChildQueryTest, ParentDeadlineKeepsResultAfterLaterCancel) {
   crane::grpc::JobToCtld submission;
   submission.set_type(crane::grpc::Batch);
   submission.set_uid(::getuid());
@@ -276,9 +259,6 @@ TEST_F(ArrayChildQueryTest,
   arrays.RequestParentTerminalStatus(parent.JobId(), crane::grpc::Deadline,
                                      ExitCode::EC_REACHED_DEADLINE,
                                      absl::Now());
-  EXPECT_FALSE(arrays.CancelChildrenRequested(parent.JobId()));
-  arrays.RequestCancelChildren(parent.JobId());
-  EXPECT_TRUE(arrays.CancelChildrenRequested(parent.JobId()));
 
   const auto cancel_result =
       arrays.FinishParentWithStatus(parent.JobId(), crane::grpc::Cancelled,

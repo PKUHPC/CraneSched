@@ -710,16 +710,6 @@ bool ArrayManager::IsRegisteredParent(job_id_t array_job_id) const {
   return FindMeta_(array_job_id) != nullptr;
 }
 
-void ArrayManager::RequestCancelChildren(job_id_t array_job_id) {
-  if (auto* meta = FindMeta_(array_job_id))
-    meta->cancel_children_requested_ = true;
-}
-
-bool ArrayManager::CancelChildrenRequested(job_id_t array_job_id) const {
-  const auto* meta = FindMeta_(array_job_id);
-  return meta != nullptr && meta->cancel_children_requested_;
-}
-
 // ----------------------------------------------------------------------------
 // ArrayManager: scheduler-loop entry points
 // ----------------------------------------------------------------------------
