@@ -133,6 +133,8 @@ The Build container uses privileged mode with `/dev/fuse`, a writable `/workspac
 volume and a separate disk upper/work volume. The producer and other jobs do not
 need this permission. Source acquisition preserves shallow boundaries; CMake
 input changes clear incompatible build/generated directories in the private view.
+Git explicitly trusts the private `/workspace` mount, whose emptyDir root may be
+owned by root even when the Build user has group write permission.
 
 Each attempt owns `/ci/attempts/<run-id>-<attempt>/build`. Final RPMs go under
 `packages/rpm/`; CPack's temporary tree is elsewhere. Build validates five package
