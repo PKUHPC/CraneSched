@@ -6,24 +6,16 @@ unset HTTP_PROXY HTTPS_PROXY ALL_PROXY http_proxy https_proxy all_proxy
 [[ "$(id -u)" == 1001 && "$(id -g)" == 1001 ]]
 [[ "$CI_DEV_IMAGE" =~ @sha256:[a-f0-9]{64}$ ]]
 [[ "$CI_POD_UID" =~ ^[a-f0-9-]{36}$ ]]
-product_ref=${CI_PRODUCT_REF:-master}
-[[ "$(git branch --show-current)" == "$product_ref" ]]
 
 workspace=/workspace
 generation="$CI_POD_UID"
-generation_root="$CI_GOLDEN_ROOT/trees/$generation"
+golden_root="/ci/golden/native-rhel10-amd64/${CI_DEV_IMAGE##*@sha256:}/ci-debug"
+generation_root="$golden_root/trees/$generation"
 product_checkout="$PWD"
 source_sha=$(git rev-parse HEAD)
 [[ -d "$workspace" && -z "$(find "$workspace" -mindepth 1 -print -quit)" ]]
 [[ -d "$generation_root/workspace" ]]
 
-export CCACHE_DIR=/ci/cache/ccache
-export CCACHE_TEMPDIR=/tmp/ccache
-export CCACHE_COMPILERCHECK=content
-export CCACHE_NOHARDLINK=true
-export CCACHE_NOFILECLONE=true
-export CCACHE_NOINODECACHE=true
-export CPM_SOURCE_CACHE=/ci/cache/cpm
 export SOURCE_DATE_EPOCH="$(git log -1 --format=%ct)"
 
 mkdir -p "$generation_root" "$CCACHE_DIR" "$CCACHE_TEMPDIR" "$CPM_SOURCE_CACHE"
@@ -42,9 +34,8 @@ cmake --build --preset ci-debug --parallel "${BUILD_JOBS:-6}"
 
 [[ "$(git rev-parse HEAD)" == "$source_sha" ]]
 [[ -z "$(git status --porcelain --untracked-files=no)" ]]
-touch "$generation_root"
-previous=$(readlink -e "$CI_GOLDEN_ROOT/latest" || true)
-for old_path in "$CI_GOLDEN_ROOT"/trees/*; do
+previous=$(readlink -e "$golden_root/latest" || true)
+for old_path in "$golden_root"/trees/*; do
   [[ -d "$old_path" ]] || continue
   old_workspace="$old_path/workspace"
   if [[ "$old_workspace" != "$generation_root/workspace" && "$old_workspace" != "$previous" ]]; then
@@ -52,5 +43,5 @@ for old_path in "$CI_GOLDEN_ROOT"/trees/*; do
   fi
 done
 
-ln -s "trees/$generation/workspace" "$CI_GOLDEN_ROOT/latest-$generation"
-mv -Tf "$CI_GOLDEN_ROOT/latest-$generation" "$CI_GOLDEN_ROOT/latest"
+ln -s "trees/$generation/workspace" "$golden_root/latest-$generation"
+mv -Tf "$golden_root/latest-$generation" "$golden_root/latest"
