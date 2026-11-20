@@ -7,6 +7,8 @@ add_library(craned_common STATIC
     CgroupManager.cpp
     CgroupV2Fs.h
     CgroupV2Fs.cpp
+    OomMonitor.h
+    OomMonitor.cpp
 )
 
 # Set the precompiled header for the common library
