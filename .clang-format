@@ -23,6 +23,8 @@ EmptyLineBeforeAccessModifier: LogicalBlock
 IndentPPDirectives: AfterHash
 IndentCaseLabels: false
 
+# Preserve the per-file style inherited from Google before clang-format 21.
+DerivePointerAlignment: true
 PointerAlignment: Left
 ReferenceAlignment: Left
 

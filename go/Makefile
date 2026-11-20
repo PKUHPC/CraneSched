@@ -59,6 +59,8 @@ endif
 
 # Debug info control
 STRIP ?= false
+GORELEASER_SNAPSHOT ?= true
+GORELEASER_RELEASE_ARGS ?=
 
 # LDFLAGS adjustments based on STRIP
 ifeq ($(STRIP), true)
@@ -246,7 +248,8 @@ endif
 	@$(MAKE) PREFIX=/usr service
 	@echo "- Building packages with GoReleaser..."
 	@export GORELEASER_CURRENT_TAG=$(PKG_VERSION) && \
-	goreleaser release --snapshot --clean --skip=archive
+	goreleaser release $(if $(filter true,$(GORELEASER_SNAPSHOT)),--snapshot,) \
+		--clean --skip=archive $(GORELEASER_RELEASE_ARGS)
 	@echo "  - Summary:"
 	@echo "    - Packages are in ./build/dist/"
 	@echo "    - Version: $(PKG_VERSION)"
