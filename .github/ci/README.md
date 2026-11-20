@@ -97,7 +97,8 @@ Internal package DNS is maintained by cluster DNS, without Pod host aliases.
 | Script | Responsibility |
 | --- | --- |
 | `check_format.py` | Check C++/proto style and produce an applicable patch |
-| `build_product.sh` | Hold the persistent tree lock through Go checks, native tests, builds, packaging and RPM validation |
+| `build_product.sh` | Use a private overlay or cold workspace for Go checks, native tests, builds, packaging and RPM validation |
+| `build_golden_tree.sh` | Build, check and publish an immutable C++ generation from a nightly Kubernetes CronJob |
 | `upload_packages.sh` | Upload final RPMs, retry failures, and fail after trying every package |
 | `summarize_ci.py` | Enforce job results and integration completeness |
 
@@ -124,9 +125,14 @@ remain inline.
 
 `/ci/golden/native-rhel10-amd64/<dev-digest>/ci-debug` stores published source and
 complete CMake/Ninja generations. Each Build owns an ephemeral upper/work pair;
-ccache is shared and Go caches are local to the build Pod. Only `go/build/bin`,
-`plugin`, and `tool` are cleared before rebuilding package inputs, preventing
-removed modules from reusing stale files.
+ccache is shared and Go caches are local to the build Pod. `make -C go clean`
+clears generated Go protocols and build outputs before rebuilding package inputs,
+preventing removed modules from reusing stale files.
+
+The Build container uses privileged mode with `/dev/fuse`, a writable `/workspace`
+volume and a separate disk upper/work volume. The producer and other jobs do not
+need this permission. Source acquisition preserves shallow boundaries; CMake
+input changes clear incompatible build/generated directories in the private view.
 
 Each attempt owns `/ci/attempts/<run-id>-<attempt>/build`. Final RPMs go under
 `packages/rpm/`; CPack's temporary tree is elsewhere. Build validates five package
