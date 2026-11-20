@@ -169,7 +169,7 @@ func assertForwardedInput(t *testing.T, requests <-chan *protos.StreamCrunReques
 				return
 			}
 			got = append(got, input.Msg...)
-			if closeAfterRead && !writerClosed && len(got) == len(want) {
+			if closeAfterRead && !writerClosed && len(got) > 0 {
 				closeWriter()
 				writerClosed = true
 			}
