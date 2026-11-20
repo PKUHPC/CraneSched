@@ -1469,7 +1469,6 @@ class JobScheduler {
       std::unordered_set<JobInCtld*> const& jobs);
 
   void PersistAndRequeueJobs_(std::vector<std::unique_ptr<JobInCtld>>& jobs);
-  void EnqueueRequeuedJobs_(std::vector<std::unique_ptr<JobInCtld>>& jobs);
   std::vector<job_id_t> CancelArrayChildrenNoLock_(job_id_t parent_job_id)
       ABSL_EXCLUSIVE_LOCKS_REQUIRED(m_pending_job_map_mtx_);
 

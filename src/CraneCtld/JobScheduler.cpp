@@ -4101,7 +4101,6 @@ void JobScheduler::CancelRunningJobNoLock_(
 std::vector<job_id_t> JobScheduler::CancelArrayChildrenNoLock_(
     job_id_t parent_job_id) {
   m_pending_job_map_mtx_.AssertHeld();
-  m_array_manager_->RequestCancelChildren(parent_job_id);
   m_array_manager_->RequestParentTerminalStatus(
       parent_job_id, crane::grpc::Cancelled, ExitCode::EC_TERMINATED,
       absl::Now());
@@ -4263,8 +4262,8 @@ crane::grpc::CancelJobReply JobScheduler::CancelPendingOrRunningJob(
           .terminate_running_children = terminate_running_children});
       if (terminate_running_children) {
         for (job_id_t child_id : CancelArrayChildrenNoLock_(job_id)) {
-          // The parent request owns child cancellation, including children
-          // still being archived for requeue. Avoid cancelling them twice.
+          // The parent request owns Pending and running child cancellation.
+          // Avoid cancelling them twice.
           job_steps.erase(child_id);
           not_found_job_ids.erase(child_id);
         }
@@ -8612,35 +8611,22 @@ void JobScheduler::PersistAndRequeueJobs_(
 
   if (!drop_ids.empty()) g_embedded_db_client->PurgeEndedJobs(drop_ids);
 
-  EnqueueRequeuedJobs_(requeued);
-}
-
-void JobScheduler::EnqueueRequeuedJobs_(
-    std::vector<std::unique_ptr<JobInCtld>>& requeued) {
   if (!requeued.empty()) {
-    LockGuard pending_guard(&m_pending_job_map_mtx_);
     std::vector<DeadlineTimerQueueElem> deadline_timer_vec;
     for (auto& job : requeued) {
-      if (job->IsArrayChild() && job->ArrayJobId().has_value() &&
-          m_array_manager_->CancelChildrenRequested(*job->ArrayJobId())) {
-        m_cancel_job_queue_.enqueue(CancelPendingJobQueueElem{
-            .job = std::move(job),
-            .finish_status = crane::grpc::JobStatus::Cancelled});
-        m_cancel_job_async_handle_->send();
-        continue;
-      }
       if (job->deadline_time != absl::FromUnixSeconds(kJobMaxTimeStampSec))
         deadline_timer_vec.emplace_back(
             job->JobId(), absl::ToUnixSeconds(job->deadline_time));
-      m_pending_job_map_.emplace(job->JobId(), std::move(job));
     }
     if (!deadline_timer_vec.empty()) {
       m_job_deadline_timer_create_queue_.enqueue_bulk(
           deadline_timer_vec.data(), deadline_timer_vec.size());
       m_job_deadline_timer_create_async_handle_->send();
     }
-    m_pending_map_cached_size_.store(m_pending_job_map_.size(),
-                                     std::memory_order_release);
+
+    LockGuard pending_guard(&m_pending_job_map_mtx_);
+    for (auto& job : requeued)
+      m_pending_job_map_.emplace(job->JobId(), std::move(job));
   }
 }
 

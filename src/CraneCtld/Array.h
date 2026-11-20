@@ -110,7 +110,6 @@ class ArrayMeta {
   absl::flat_hash_map<array_task_id_t, job_id_t> child_job_id_by_task_id_;
   absl::flat_hash_set<job_id_t> running_child_job_ids_;
   bool parent_start_event_triggered_{false};
-  bool cancel_children_requested_{false};
   std::optional<std::pair<crane::grpc::JobStatus, uint32_t>>
       terminal_status_override_;
 };
@@ -187,10 +186,6 @@ class ArrayManager {
   void RequestParentTerminalStatus(job_id_t array_job_id,
                                    crane::grpc::JobStatus status,
                                    uint32_t exit_code, absl::Time request_time);
-  // Explicit parent cancellation also covers children temporarily outside the
-  // scheduler maps while their previous attempt is being archived for requeue.
-  void RequestCancelChildren(job_id_t array_job_id);
-  bool CancelChildrenRequested(job_id_t array_job_id) const;
 
   // Sweeps all registered parents and finalizes those whose materialization
   // and child execution have both completed. Used at recovery end to surface
