@@ -16,6 +16,92 @@
 #include "google/protobuf/util/message_differencer.h"
 #include "protos/Crane.pb.h"
 
+namespace Ctld {
+class RequeueCancellationTest : public ::testing::Test {
+ protected:
+  void ExerciseHandoff(int cancel_phase, bool array_child) {
+    auto loop = uvw::loop::create();
+    JobScheduler scheduler;
+    scheduler.m_cancel_job_async_handle_ = loop->resource<uvw::async_handle>();
+    auto job = std::make_unique<JobInCtld>();
+    job->SetJobId(42);
+    job->type = crane::grpc::Batch;
+    job->SetStatus(crane::grpc::Failed);
+    job->SetExitCode(ExitCode::EC_RPC_ERR);
+    if (array_child) job->SetArrayTaskIdentity(40, 1);
+    scheduler.m_requeueing_jobs_.emplace(
+        42, JobScheduler::RequeueingJob{job.get()});
+    const auto archived = job->RuntimeAttr().SerializeAsString();
+    if (cancel_phase == 0) {
+      absl::MutexLock guard(&scheduler.m_pending_job_map_mtx_);
+      ASSERT_TRUE(scheduler.CancelPendingJobNoLock_(42));
+      // Cancelling must not mutate the attempt being written to accounting.
+      EXPECT_EQ(job->RuntimeAttr().SerializeAsString(), archived);
+    }
+    job->ResetForRequeue();
+    if (cancel_phase == 1) {
+      absl::MutexLock guard(&scheduler.m_pending_job_map_mtx_);
+      ASSERT_TRUE(scheduler.CancelPendingJobNoLock_(42));
+    }
+    std::vector<std::unique_ptr<JobInCtld>> jobs;
+    jobs.push_back(std::move(job));
+    scheduler.EnqueueRequeuedJobs_(jobs);
+    if (cancel_phase == 2) {
+      ASSERT_TRUE(scheduler.m_pending_job_map_.contains(42));
+      absl::MutexLock guard(&scheduler.m_pending_job_map_mtx_);
+      ASSERT_TRUE(scheduler.CancelPendingJobNoLock_(42));
+    }
+    EXPECT_TRUE(scheduler.m_requeueing_jobs_.empty());
+    EXPECT_FALSE(scheduler.m_pending_job_map_.contains(42));
+    JobScheduler::CancelJobQueueElem queued;
+    ASSERT_TRUE(scheduler.m_cancel_job_queue_.try_dequeue(queued));
+    auto* cancelled =
+        std::get_if<JobScheduler::CancelPendingJobQueueElem>(&queued);
+    ASSERT_NE(cancelled, nullptr);
+    EXPECT_EQ(cancelled->job->JobId(), 42U);
+    EXPECT_EQ(cancelled->finish_status, crane::grpc::Cancelled);
+    EXPECT_FALSE(scheduler.m_cancel_job_queue_.try_dequeue(queued));
+    scheduler.m_cancel_job_async_handle_->close();
+    loop->run();
+  }
+
+  void ExerciseRunningCancellation(crane::grpc::JobStatus status) {
+    JobScheduler scheduler;
+    JobInCtld job;
+    job.type = crane::grpc::Batch;
+    job.requeue_if_failed = true;
+    job.SetStatus(status);
+    job.SetRequeueRequested(true);
+    job.SetCancelRequested(status == crane::grpc::Configuring);
+    ASSERT_TRUE(job.ShouldRequeue());
+    scheduler.CancelRunningJobNoLock_(&job);
+    job.SetStatus(crane::grpc::Cancelled);
+    job.SetExitCode(ExitCode::EC_RPC_ERR);
+    EXPECT_FALSE(job.ShouldRequeue());
+    EXPECT_FALSE(job.RequeueRequested());
+  }
+};
+
+TEST_F(RequeueCancellationTest, CancelDuringHandoff) {
+  ExerciseHandoff(0, false);
+}
+TEST_F(RequeueCancellationTest, CancelAfterResetBeforeEnqueue) {
+  ExerciseHandoff(1, false);
+}
+TEST_F(RequeueCancellationTest, CancelAfterRequeue) {
+  ExerciseHandoff(2, false);
+}
+TEST_F(RequeueCancellationTest, ArrayChildUsesSameHandoff) {
+  ExerciseHandoff(0, true);
+}
+TEST_F(RequeueCancellationTest, CancelOverridesRequeueWhileCompleting) {
+  ExerciseRunningCancellation(crane::grpc::Completing);
+}
+TEST_F(RequeueCancellationTest, CancelOverridesConfiguringRequeue) {
+  ExerciseRunningCancellation(crane::grpc::Configuring);
+}
+}  // namespace Ctld
+
 namespace {
 using crane::grpc::JobInfo;
 using crane::grpc::QUERY_VISIBILITY_DETAILS;
