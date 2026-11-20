@@ -29,6 +29,7 @@ overlay_pid=
 
 mkdir -p "$(dirname "$artifact_dir")" "$overlay_root/upper" "$overlay_root/work" /workspace
 mkdir "$artifact_dir"
+git config --global --add safe.directory /workspace
 
 overlay_mounted() {
   findmnt -rn -t fuse.fuse-overlayfs --mountpoint /workspace >/dev/null
