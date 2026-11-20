@@ -54,6 +54,7 @@ trap 'exit 143' TERM
 if [[ -e "$golden_root/latest" ]]; then
   lower=$(readlink -e "$golden_root/latest")
   [[ -d "$lower/.git" ]]
+  echo "Using golden tree: $lower"
   fuse-overlayfs -f -o "lowerdir=$lower,upperdir=$overlay_root/upper,workdir=$overlay_root/work" /workspace &
   overlay_pid=$!
   mounted=false
@@ -82,6 +83,7 @@ if [[ -e "$golden_root/latest" ]]; then
     git init /workspace
   fi
 else
+  echo 'No compatible golden tree; using a private cold build.'
   git init /workspace
 fi
 
