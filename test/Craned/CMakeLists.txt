@@ -13,12 +13,11 @@ target_link_libraries(oom_monitor_test PRIVATE
         GTest::gtest GTest::gtest_main craned_common)
 gtest_discover_tests(oom_monitor_test)
 
-add_executable(task_manager_test
-        TaskManagerTest.cpp
-        OomCgroupIntegrationTest.cpp
+set(task_manager_test_support
         ../../src/Craned/Supervisor/CranedClient.cpp
         ../../src/Craned/Supervisor/CforedClient.cpp
         ../../src/Craned/Supervisor/SupervisorServer.cpp)
+add_executable(task_manager_test TaskManagerTest.cpp ${task_manager_test_support})
 target_link_libraries(task_manager_test
         GTest::gtest
         GTest::gtest_main
@@ -41,3 +40,16 @@ add_executable(job_manager_test
 target_link_libraries(job_manager_test PRIVATE
         GTest::gtest GTest::gtest_main ${job_manager_libraries})
 gtest_discover_tests(job_manager_test)
+
+option(CRANE_ENABLE_KERNEL_TESTS "Build tests requiring a delegated memory cgroup" OFF)
+if (CRANE_ENABLE_KERNEL_TESTS)
+    add_executable(oom_cgroup_integration_test
+            OomCgroupIntegrationTest.cpp
+            ../../src/Craned/Supervisor/TaskManager.cpp
+            ${task_manager_test_support})
+    target_link_libraries(oom_cgroup_integration_test PRIVATE
+            GTest::gtest GTest::gtest_main
+            craned_common Utility_CriClient Utility_BindFs Utility_Pmix)
+    gtest_discover_tests(oom_cgroup_integration_test
+            PROPERTIES LABELS "kernel" RUN_SERIAL TRUE TIMEOUT 40)
+endif ()
