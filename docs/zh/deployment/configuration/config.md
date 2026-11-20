@@ -211,7 +211,14 @@ CranedListenPort: 10010
 Craned:
   PingInterval: 15        # 每 15 秒 ping cranectld
   CraneCtldTimeout: 5     # cranectld 连接超时时间
+  SupervisorCompletionTimeout: 30  # Supervisor 收尾等待时间，单位秒
 ```
+
+`Craned.SupervisorCompletionTimeout` 必须为正整数，单位为秒，默认为 `30`。
+从 Craned 开始等待正在收尾的 Supervisor 退出时计时，超时后向 Supervisor
+发送 SIGKILL。若已收到步骤终态，Craned 保留其状态、退出码、原因和完成时间，
+避免因清理缓慢将已完成作业改判为可自动重排队的 RPC 失败；未收到终态时仍报告失败。
+修改此配置后需重启 Craned 生效。
 
 ## 高级选项
 

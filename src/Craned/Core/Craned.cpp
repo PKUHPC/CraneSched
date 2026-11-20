@@ -329,6 +329,13 @@ void ParseCranedConfig(const YAML::Node& config) {
         YamlValueOr<uint32_t>(craned_config["ThreadPoolSize"], 0);
     conf.CgroupOpConcurrency =
         YamlValueOr<uint32_t>(craned_config["CgroupOpConcurrency"], 0);
+    conf.SupervisorCompletionTimeoutSec =
+        YamlValueOr<uint32_t>(craned_config["SupervisorCompletionTimeout"],
+                              conf.SupervisorCompletionTimeoutSec);
+    if (conf.SupervisorCompletionTimeoutSec == 0) {
+      CRANE_ERROR("Craned.SupervisorCompletionTimeout must be positive.");
+      std::exit(1);
+    }
     conf.CgroupV2FastPath =
         YamlValueOr<bool>(craned_config["CgroupV2FastPath"], true);
     conf.CgroupV2CleanupMode = YamlValueOr<std::string>(

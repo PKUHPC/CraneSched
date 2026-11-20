@@ -31,7 +31,6 @@
 
 namespace Craned {
 
-constexpr int kMaxSupervisorCheckRetryCount = 10;
 constexpr int kMaxStatusWaitRetryCount = 50;  // 50 * 200ms = 10s
 
 using StepKey = std::pair<job_id_t, step_id_t>;
@@ -42,7 +41,8 @@ using JobCleanupFutureMap =
 
 struct CompletingStepState {
   StepInstance* step = nullptr;
-  int alive_check_count = 0;
+  std::chrono::steady_clock::time_point completion_started_at{
+      std::chrono::steady_clock::now()};
   int status_wait_count = 0;
   bool sigkill_sent = false;
 };

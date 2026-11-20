@@ -213,7 +213,17 @@ CranedListenPort: 10010
 Craned:
   PingInterval: 15        # Ping cranectld every 15 seconds
   CraneCtldTimeout: 5     # Timeout for cranectld connection
+  SupervisorCompletionTimeout: 30  # Seconds allowed for Supervisor cleanup
 ```
+
+`Craned.SupervisorCompletionTimeout` is a positive number of seconds (default:
+`30`). It starts when Craned begins waiting for a completing Supervisor to exit.
+After this timeout, Craned sends SIGKILL to the Supervisor. If the step has
+already reported its terminal status, Craned preserves that status, exit code,
+reason, and completion timestamp; slow cleanup does not turn a completed job
+into an RPC failure eligible for automatic requeue. If no terminal status was
+received, the timeout is still reported as a failure. Restart Craned to apply
+changes to this setting.
 
 ## Advanced Options
 
