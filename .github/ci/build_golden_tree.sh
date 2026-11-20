@@ -54,6 +54,8 @@ run_with_proxy cmake --build --preset ci-debug --target crane_unit_tests --paral
 ctest --test-dir cmake-build-ci-debug --output-on-failure
 run_with_proxy cmake --build --preset ci-debug --parallel "${BUILD_JOBS:-6}"
 
+[[ "$(git rev-parse HEAD)" == "$source_sha" ]]
+[[ -z "$(git status --porcelain --untracked-files=no)" ]]
 touch "$generation_root"
 previous=$(readlink -e "$CI_GOLDEN_ROOT/latest" || true)
 for old_path in "$CI_GOLDEN_ROOT"/trees/*; do

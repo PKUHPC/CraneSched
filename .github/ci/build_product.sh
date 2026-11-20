@@ -30,10 +30,15 @@ overlay_pid=
 mkdir -p "$(dirname "$artifact_dir")" "$overlay_root/upper" "$overlay_root/work" /workspace
 mkdir "$artifact_dir"
 
+overlay_mounted() {
+  findmnt -rn -t fuse.fuse-overlayfs --mountpoint /workspace >/dev/null
+}
+
 cleanup_overlay() {
   local status=$?
   trap - EXIT
-  if mountpoint -q /workspace; then
+  cd /
+  if overlay_mounted; then
     fusermount3 -u /workspace || status=1
   fi
   if [[ -n "$overlay_pid" ]]; then
@@ -53,7 +58,7 @@ if [[ -e "$golden_root/latest" ]]; then
   overlay_pid=$!
   mounted=false
   for attempt in {1..100}; do
-    if mountpoint -q /workspace; then
+    if overlay_mounted; then
       mounted=true
       break
     fi
@@ -65,7 +70,7 @@ if [[ -e "$golden_root/latest" ]]; then
     sleep 0.1
   done
   if [[ "$mounted" != true ]]; then
-    if mountpoint -q /workspace; then
+    if overlay_mounted; then
       fusermount3 -u /workspace
     fi
     if [[ -n "$overlay_pid" ]]; then
@@ -82,6 +87,10 @@ fi
 
 git -C /workspace config remote.origin.url "$(git -C "$source_checkout" remote get-url origin)"
 git -C /workspace fetch --no-tags "$source_checkout" "$source_sha"
+if git -C /workspace rev-parse --verify HEAD >/dev/null 2>&1 &&
+  [[ -n "$(git -C /workspace diff --name-only HEAD "$source_sha" -- CMakePresets.json ':(glob)**/CMakeLists.txt' ':(glob)**/*.cmake')" ]]; then
+  rm -rf /workspace/cmake-build-ci-debug /workspace/generated
+fi
 git -C /workspace checkout --force --detach "$source_sha"
 cd -P /workspace
 [[ "$(git rev-parse HEAD)" == "$source_sha" ]]
