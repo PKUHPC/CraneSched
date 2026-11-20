@@ -4,16 +4,14 @@ download_proxy=${HTTPS_PROXY:-}
 unset HTTP_PROXY HTTPS_PROXY ALL_PROXY http_proxy https_proxy all_proxy
 
 [[ "$CI_DEV_IMAGE" =~ @sha256:[a-f0-9]{64}$ ]]
-[[ "$(id -u)" == 1001 && "$(id -g)" == 1001 ]]
-getent passwd 1001 >/dev/null
-getent group 1001 >/dev/null
+getent passwd "$(id -u)" >/dev/null
+getent group "$(id -g)" >/dev/null
 
 source_sha="$CI_SOURCE_SHA"
 source_checkout="$PWD"
 golden_root="/ci/golden/native-rhel10-amd64/${CI_DEV_IMAGE##*@sha256:}/ci-debug"
 artifact_dir="/ci/attempts/${GITHUB_RUN_ID}-${GITHUB_RUN_ATTEMPT}/build"
 overlay_root=/run/ci-overlay
-overlay_pid=
 
 mkdir -p "$(dirname "$artifact_dir")" "$overlay_root/upper" "$overlay_root/work" /workspace
 mkdir "$artifact_dir"
@@ -30,49 +28,21 @@ cleanup_overlay() {
   if overlay_mounted; then
     fusermount3 -u /workspace || status=1
   fi
-  if [[ -n "$overlay_pid" ]]; then
-    kill "$overlay_pid" 2>/dev/null || true
-    wait "$overlay_pid" 2>/dev/null || true
-  fi
   exit "$status"
 }
 trap cleanup_overlay EXIT
 trap 'exit 130' INT
 trap 'exit 143' TERM
 
-if [[ -e "$golden_root/latest" ]]; then
-  lower=$(readlink -e "$golden_root/latest")
-  [[ -d "$lower/.git" ]]
+if lower=$(readlink -e "$golden_root/latest") && [[ -d "$lower/.git" ]]; then
+  fuse-overlayfs -o "lowerdir=$lower,upperdir=$overlay_root/upper,workdir=$overlay_root/work" /workspace ||
+    echo '::warning::fuse-overlayfs failed to mount the golden tree.'
+fi
+
+if overlay_mounted; then
   echo "Using golden tree: $lower"
-  fuse-overlayfs -f -o "lowerdir=$lower,upperdir=$overlay_root/upper,workdir=$overlay_root/work" /workspace &
-  overlay_pid=$!
-  mounted=false
-  for attempt in {1..100}; do
-    if overlay_mounted; then
-      mounted=true
-      break
-    fi
-    if ! kill -0 "$overlay_pid" 2>/dev/null; then
-      wait "$overlay_pid" || true
-      overlay_pid=
-      break
-    fi
-    sleep 0.1
-  done
-  if [[ "$mounted" != true ]]; then
-    if overlay_mounted; then
-      fusermount3 -u /workspace
-    fi
-    if [[ -n "$overlay_pid" ]]; then
-      kill "$overlay_pid" 2>/dev/null || true
-      wait "$overlay_pid" 2>/dev/null || true
-      overlay_pid=
-    fi
-    echo '::warning::fuse-overlayfs did not mount; using a private cold build.'
-    git init /workspace
-  fi
 else
-  echo 'No compatible golden tree; using a private cold build.'
+  echo 'Using a private cold build.'
   git init /workspace
 fi
 
