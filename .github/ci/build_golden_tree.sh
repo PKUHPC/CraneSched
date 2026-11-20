@@ -44,7 +44,7 @@ mkdir -p "$generation_root" "$CCACHE_DIR" "$CCACHE_TEMPDIR" "$CPM_SOURCE_CACHE"
 
 git -C "$workspace" init
 git -C "$workspace" remote add origin "$(git -C "$product_checkout" remote get-url origin)"
-git -C "$workspace" fetch --no-tags "$product_checkout" "$source_sha"
+git -C "$workspace" fetch --update-shallow --depth=1 --no-tags "$product_checkout" "$source_sha"
 git -C "$workspace" checkout --force --detach "$source_sha"
 [[ "$(git -C "$workspace" rev-parse HEAD)" == "$source_sha" ]]
 
