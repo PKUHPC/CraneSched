@@ -88,6 +88,7 @@ fi
 git -C /workspace config remote.origin.url "$(git -C "$source_checkout" remote get-url origin)"
 git -C /workspace fetch --update-shallow --depth=1 --no-tags "$source_checkout" "$source_sha"
 if previous_sha=$(git -C /workspace rev-parse --verify HEAD 2>/dev/null); then
+  git -C /workspace update-index --refresh
   cmake_changes=$(git -C /workspace diff --name-only "$previous_sha^{tree}" "$source_sha^{tree}" -- CMakeLists.txt CMakePresets.json ':(glob)**/CMakeLists.txt' ':(glob)**/*.cmake')
   if [[ -n "$cmake_changes" ]]; then
     rm -rf /workspace/cmake-build-ci-debug /workspace/generated
