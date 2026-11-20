@@ -1469,6 +1469,12 @@ class JobScheduler {
       std::unordered_set<JobInCtld*> const& jobs);
 
   void PersistAndRequeueJobs_(std::vector<std::unique_ptr<JobInCtld>>& jobs);
+  static uint32_t QosSubmitReserveCount_(const JobInCtld& job);
+  void EnqueueArrayParentTerminationNoLock_(job_id_t parent_job_id,
+                                            crane::grpc::JobStatus status,
+                                            uint32_t exit_code,
+                                            bool terminate_running_children)
+      ABSL_EXCLUSIVE_LOCKS_REQUIRED(m_pending_job_map_mtx_);
   // Queue Pending children for cancellation; return all tracked child IDs so
   // the caller can also deduplicate the asynchronous running-child cancel.
   std::vector<job_id_t> CancelPendingArrayChildrenNoLock_(
@@ -1632,8 +1638,6 @@ class JobScheduler {
 
   struct CancelArrayParentQueueElem {
     job_id_t parent_job_id;
-    uint32_t exit_code;
-    crane::grpc::JobStatus finish_status;
     bool terminate_running_children;
   };
 
