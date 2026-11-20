@@ -276,6 +276,7 @@ void StepInstance::CleanUp() {
       ++cnt;
       std::this_thread::sleep_for(100ms);
     }
+    oom_monitor.Stop();
     step_user_cg->Destroy();
 
     step_user_cg.reset();
@@ -599,61 +600,54 @@ bool StepInstance::AllTaskMainProcessesExited() const {
   return true;
 }
 
-void StepInstance::InitOomBaseline() {
-  // Use the step-level workload cgroup selected by Supervisor.
-  if (!step_user_cg) {
-    CRANE_ERROR("[OOM] No workload cgroup path selected for OOM monitoring");
-    return;
+void StepInstance::InitOomMonitor() {
+  if (!step_user_cg) return;
+  if (!oom_monitor.Start(
+          Common::CgroupManager::MemoryCgroupPath(step_user_cg->CgroupName()),
+          Common::CgroupManager::MemoryCgroupPath(g_config.JobCgStr),
+          Common::CgroupManager::IsCgV2())) {
+    CRANE_WARN("[Step #{}.{}] OOM monitoring is incomplete", job_id, step_id);
   }
-
-  auto cgroup_path = step_user_cg->CgroupPath();
-  uint64_t oom_kill = 0, oom = 0;
-  if (!Common::CgroupManager::ReadOomCountsFromCgroupPath(cgroup_path, oom_kill,
-                                                          oom)) {
-    CRANE_ERROR("[OOM] Failed to read OOM counts from cgroup path , path={}",
-                cgroup_path);
-    return;
-  }
-  baseline_oom_kill_count = oom_kill;
-  if (Common::CgroupManager::IsCgV2()) baseline_oom_count = oom;
-  oom_baseline_inited = true;
-  CRANE_DEBUG("[OOM] Baseline inited: v2={}, path={}, oom={}, oom_kill={}",
-              Common::CgroupManager::IsCgV2(), cgroup_path, baseline_oom_count,
-              baseline_oom_kill_count);
 }
 
-bool StepInstance::EvaluateOomOnExit() {
-  if (!oom_baseline_inited || !step_user_cg) {
-    CRANE_TRACE(
-        "[OOM] Skip evaluation: baseline_inited={} or no cgroup "
-        "created.",
-        oom_baseline_inited);
-    return false;
+void StepInstance::RecordTaskResult(StepStatus new_status, uint32_t exit_code,
+                                    std::optional<std::string> reason,
+                                    const TaskFinalInfo& final_info) {
+  // Explicit termination and startup errors retain their own classification.
+  // Sample after task cleanup has saved counters/events from the task cgroup.
+  if (final_info.cause == TaskFinalizeCause::NORMAL && final_info.raw_exit &&
+      !IsCalloc()) {
+    const auto& evidence = oom_monitor.Sample();
+    if (!evidence.workload.empty()) {
+      new_status = StepStatus::OutOfMemory;
+      reason = evidence.workload;
+    } else if (!evidence.ancestor.empty()) {
+      // An old-v1 parent event can reach every sibling. A batch primary owns
+      // the allocation's result, but a common step must not claim a local kill.
+      if (IsBatch() && IsPrimary()) new_status = StepStatus::OutOfMemory;
+      if (!reason || reason->empty()) reason = evidence.ancestor;
+    }
   }
 
-  auto cgroup_path = step_user_cg->CgroupPath();
-  uint64_t oom_kill = 0, oom = 0;
-  if (!Common::CgroupManager::ReadOomCountsFromCgroupPath(cgroup_path, oom_kill,
-                                                          oom))
-    return false;
-  if (Common::CgroupManager::IsCgV2()) {
-    CRANE_DEBUG(
-        "[OOM] Evaluate v2 path={} baseline(oom={},oom_kill={}) "
-        "current(oom={},oom_kill={})",
-        cgroup_path, baseline_oom_count, baseline_oom_kill_count, oom,
-        oom_kill);
-    if (oom_kill > baseline_oom_kill_count) return true;
-    if (oom > baseline_oom_count && oom_kill == baseline_oom_kill_count)
-      CRANE_DEBUG(
-          "[OOM] v2: detected oom growth (delta_oom={}) but no oom_kill growth "
-          "(delta_kill=0) -> not classified as OOM",
-          oom - baseline_oom_count);
-    return false;
+  int priority = new_status == StepStatus::Completed ? 0 : 1;
+  if (new_status == StepStatus::OutOfMemory) priority = 2;
+  if (final_info.cause == TaskFinalizeCause::CANCELLED_BY_USER ||
+      final_info.cause == TaskFinalizeCause::TIMEOUT ||
+      final_info.cause == TaskFinalizeCause::DEADLINE ||
+      final_info.cause == TaskFinalizeCause::CFORED_DISCONNECTED)
+    priority = 3;
+
+  auto& result = final_termination_status;
+  result.max_exit_code = std::max(result.max_exit_code, exit_code);
+  if (priority > result.priority ||
+      (priority == result.priority && new_status != StepStatus::Completed)) {
+    result.priority = priority;
+    result.final_status_on_termination = new_status;
+    result.final_reason_on_termination = reason.value_or("");
+  } else if (priority == result.priority &&
+             result.final_reason_on_termination.empty() && reason) {
+    result.final_reason_on_termination = *reason;
   }
-  CRANE_DEBUG(
-      "[OOM] Evaluate v1 path={} baseline(oom_kill={}) current(oom_kill={})",
-      cgroup_path, baseline_oom_kill_count, oom_kill);
-  return oom_kill > baseline_oom_kill_count;
 }
 
 void ITaskInstance::InitEnvMap() {
@@ -2439,6 +2433,10 @@ CraneErrCode ProcInstance::Prepare() {
       return cg_expt.error();
     }
     m_task_cg_ = std::move(cg_expt.value());
+    if (!m_parent_step_inst_->oom_monitor.AddTask(
+            CgroupManager::MemoryCgroupPath(m_task_cg_->CgroupName()))) {
+      CRANE_WARN("[Task #{}] OOM monitoring is incomplete", task_id);
+    }
   }
 
   // Write m_meta_
@@ -2793,6 +2791,10 @@ CraneErrCode ProcInstance::Cleanup() {
       std::this_thread::sleep_for(100ms);
     }
 
+    // Drain and unregister before removal: removing a v1 cgroup can itself
+    // signal its eventfd, which must not be recorded as an OOM.
+    m_parent_step_inst_->oom_monitor.FinishTask(
+        CgroupManager::MemoryCgroupPath(m_task_cg_->CgroupName()));
     m_task_cg_->Destroy();
     m_task_cg_.reset();
   }
@@ -3078,7 +3080,8 @@ void TaskManager::ResolveFinishedTask_(task_id_t task_id, StepStatus new_status,
                                        uint32_t exit_code,
                                        std::optional<std::string> reason) {
   CRANE_TRACE(
-      "[Task #{}] Task status changed to {} (exit code: {}, reason: {}).",
+      "[Task #{}] Result before OOM evaluation: {} (exit code: {}, reason: "
+      "{}).",
       task_id, new_status, exit_code, reason.value_or(""));
 
   auto task = m_step_.RemoveTaskInstance(task_id);
@@ -3102,21 +3105,16 @@ void TaskManager::ResolveFinishedTask_(task_id_t task_id, StepStatus new_status,
                static_cast<int>(err));
   }
 
+  if (m_step_.AllTaskFinished()) m_step_.oom_monitor.Stop();
+  m_step_.RecordTaskResult(new_status, exit_code, std::move(reason),
+                           *task->GetFinalInfo());
   auto& status = m_step_.final_termination_status;
-  if (status.max_exit_code < exit_code) {
-    // Bigger exit code always mean a FAILED status cased by a none zero exit
-    // code, signal or crane error.
-    status.max_exit_code = exit_code;
-    status.final_status_on_termination = new_status;
-    status.final_reason_on_termination = reason.value_or("");
-  }
-
-  // Error status has higher priority than success status.
-  if (new_status != StepStatus::Completed)
-    status.final_status_on_termination = new_status;
 
   if (m_step_.AllTaskFinished()) {
-    m_step_.oom_baseline_inited = false;
+    CRANE_DEBUG("[Step #{}.{}] Final result: {} (exit code: {}, reason: {}).",
+                m_step_.job_id, m_step_.step_id,
+                status.final_status_on_termination, status.max_exit_code,
+                status.final_reason_on_termination);
     m_step_.GotNewStatus(StepStatus::Completing);
     DelTerminationTimer_();
     DelSignalTimers_();
@@ -3124,9 +3122,9 @@ void TaskManager::ResolveFinishedTask_(task_id_t task_id, StepStatus new_status,
 
     // End the execute span now that all tasks have finished
     if (m_step_.ExecuteSpan().IsActive()) {
-      if (status.max_exit_code != 0)
+      if (status.final_status_on_termination != StepStatus::Completed)
         m_step_.ExecuteSpan().SetStatus(crane::StatusCode::kError,
-                                        "nonzero_exit");
+                                        "task_failed");
       m_step_.ExecuteSpan().End();
     }
 
@@ -3137,8 +3135,8 @@ void TaskManager::ResolveFinishedTask_(task_id_t task_id, StepStatus new_status,
       finish_span.SetAttribute("step_id", m_step_.step_id);
       finish_span.SetAttribute("exit_code",
                                static_cast<int64_t>(status.max_exit_code));
-      if (status.max_exit_code != 0)
-        finish_span.SetStatus(crane::StatusCode::kError, "nonzero_exit");
+      if (status.final_status_on_termination != StepStatus::Completed)
+        finish_span.SetStatus(crane::StatusCode::kError, "task_failed");
     }
     g_craned_client->StepStatusChangeAsync(
         StepStatus::Completing, status.max_exit_code,
@@ -3287,7 +3285,7 @@ void TaskManager::EvExecuteDaemonPodCb_() {
     // NOTE: This assumes the job's cgroup is created before the pod step
     // starts.
     m_step_.step_user_cg = nullptr;
-    // m_step_.InitOomBaseline(); No need to init oom for pod step.
+    // m_step_.InitOomMonitor(); No need to init oom for pod step.
 
     // Launch execution for pod.
     err = LaunchExecution_(instance);
@@ -3688,28 +3686,13 @@ void TaskManager::EvCleanFinalizingTaskQueueCb_() {
     const auto& raw_exit = fi->raw_exit.value();
 
     if (!m_step_.IsCalloc()) {
-      bool oom_detected = m_step_.EvaluateOomOnExit();
-
-      if (raw_exit.is_terminated_by_signal) {
-        uint32_t exit_code = raw_exit_code(raw_exit);
-        if (oom_detected) {
-          ResolveFinishedTask_(task_id, crane::grpc::JobStatus::OutOfMemory,
-                               exit_code, "Detected by oom_kill counter delta");
-        } else {
-          ResolveFinishedTask_(task_id, crane::grpc::JobStatus::Failed,
-                               exit_code, std::nullopt);
-        }
-      } else if (raw_exit.value == 0) {
-        ResolveFinishedTask_(task_id, crane::grpc::JobStatus::Completed, 0,
-                             std::nullopt);
-      } else if (oom_detected) {
-        ResolveFinishedTask_(task_id, crane::grpc::JobStatus::OutOfMemory,
-                             raw_exit.value,
-                             "Detected by oom_kill counter delta (no signal)");
-      } else {
-        ResolveFinishedTask_(task_id, crane::grpc::JobStatus::Failed,
-                             raw_exit.value, std::nullopt);
-      }
+      // OOM evidence is applied in RecordTaskResult after cleanup has sampled
+      // the task cgroup. Preserve the actual wait status, including exit(0).
+      auto status = !raw_exit.is_terminated_by_signal && raw_exit.value == 0
+                        ? StepStatus::Completed
+                        : StepStatus::Failed;
+      ResolveFinishedTask_(task_id, status, raw_exit_code(raw_exit),
+                           std::nullopt);
     } else /* Calloc */ {
       // For a COMPLETING Calloc task with a process running,
       // the end of this process means that this task is done.
@@ -4172,7 +4155,7 @@ void TaskManager::EvGrpcExecuteStepCb_() {
                            m_step_.step_user_cg->CgroupPath().string());
     }
 
-    m_step_.InitOomBaseline();
+    m_step_.InitOomMonitor();
     // Single threaded here, it is always safe to ask TaskManager to
     // operate (Like terminate due to cfored conn err for crun task) any task.
     CRANE_TRACE_CHILD_NAMED(launch_span, m_step_.ExecuteSpan(),

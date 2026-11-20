@@ -122,13 +122,6 @@ constexpr int kParsedSystemFlagIdx = 2;
 constexpr int kParsedTaskIdIdx = 3;
 constexpr int kParsedOverflowIdx = 4;
 
-// Common cgroup filename constants
-// cgroup v2 memory events file used to read OOM and OOM_KILL counters
-inline constexpr std::string_view kMemoryEventsFileV2 = "memory.events";
-// cgroup v1 memory oom control file used to read OOM_KILL counter
-inline constexpr std::string_view kMemoryOomControlFileV1 =
-    "memory.oom_control";
-
 #ifdef CRANE_ENABLE_BPF
 inline const char* kBpfObjectFilePath = "/usr/local/lib64/bpf/cgroup_dev_bpf.o";
 inline const char* kBpfDeviceMapFilePath = "/sys/fs/bpf/craned_dev_map";
@@ -697,12 +690,8 @@ class CgroupManager {
 
   static CraneExpected<CgroupStrParsedIds> GetIdsByPid(pid_t pid);
 
-  // Read OOM related counters from a cgroup path. For cgroup v2, both
-  // oom_kill and oom are read from memory.events. For cgroup v1, only
-  // oom_kill is read from memory.oom_control and 'oom' will stay 0.
-  // Returns false on any failure.
-  static bool ReadOomCountsFromCgroupPath(const std::string& cg_path,
-                                          uint64_t& oom_kill, uint64_t& oom);
+  // Absolute path in the memory controller (v1 has separate mounts).
+  static std::filesystem::path MemoryCgroupPath(const std::string& cgroup_name);
 
   // Freeze/Thaw cgroup by absolute cgroup path.
   // For cgroup v1: writes "FROZEN"/"THAWED" to freezer.state
