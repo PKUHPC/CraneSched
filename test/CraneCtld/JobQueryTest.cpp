@@ -53,7 +53,12 @@ class ArrayRequeueCancellationTest : public ::testing::Test {
     scheduler.m_pending_job_map_.emplace(child_id, std::move(child));
     {
       absl::MutexLock guard(&scheduler.m_pending_job_map_mtx_);
-      auto ids = scheduler.CancelArrayChildrenNoLock_(parent_id);
+      // The cancel entry point records the parent result before queueing
+      // children. The Pending-child helper does not set the parent result.
+      scheduler.m_array_manager_->RequestParentTerminalStatus(
+          parent_id, crane::grpc::Cancelled, ExitCode::EC_TERMINATED,
+          absl::Now());
+      auto ids = scheduler.CancelPendingArrayChildrenNoLock_(parent_id);
       ASSERT_EQ(ids.size(), 1U);
       EXPECT_EQ(ids.front(), child_id);
     }
@@ -70,7 +75,7 @@ class ArrayRequeueCancellationTest : public ::testing::Test {
     EXPECT_FALSE(scheduler.m_cancel_job_queue_.try_dequeue(queued));
     {
       absl::MutexLock guard(&scheduler.m_pending_job_map_mtx_);
-      scheduler.CancelArrayChildrenNoLock_(parent_id);
+      scheduler.CancelPendingArrayChildrenNoLock_(parent_id);
     }
     EXPECT_FALSE(scheduler.m_cancel_job_queue_.try_dequeue(queued));
     EXPECT_TRUE(g_account_meta_container->UserHasJob(parent_ptr->Username()));
@@ -388,7 +393,6 @@ TEST_F(ArrayChildQueryTest, ParentDeadlineKeepsResultAfterLaterCancel) {
   EXPECT_TRUE(g_account_meta_container->UserHasJob(parent.Username()));
 
   child->SetStatus(crane::grpc::Cancelled);
-  child->SetExitCode(ExitCode::EC_TERMINATED);
   EXPECT_TRUE(arrays.OnChildTerminal(child.get(), {}).empty());
   EXPECT_TRUE(arrays.IsRegisteredParent(parent.JobId()));
   EXPECT_TRUE(g_account_meta_container->UserHasJob(parent.Username()));

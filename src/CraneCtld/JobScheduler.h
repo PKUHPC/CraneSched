@@ -1469,7 +1469,10 @@ class JobScheduler {
       std::unordered_set<JobInCtld*> const& jobs);
 
   void PersistAndRequeueJobs_(std::vector<std::unique_ptr<JobInCtld>>& jobs);
-  std::vector<job_id_t> CancelArrayChildrenNoLock_(job_id_t parent_job_id)
+  // Queue Pending children for cancellation; return all tracked child IDs so
+  // the caller can also deduplicate the asynchronous running-child cancel.
+  std::vector<job_id_t> CancelPendingArrayChildrenNoLock_(
+      job_id_t parent_job_id)
       ABSL_EXCLUSIVE_LOCKS_REQUIRED(m_pending_job_map_mtx_);
 
   CraneErrCode TerminateRunningStepNoLock_(

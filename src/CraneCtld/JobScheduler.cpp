@@ -4098,12 +4098,9 @@ void JobScheduler::CancelRunningJobNoLock_(
   TerminateRunningStepNoLock_(primary_step, terminate_source);
 }
 
-std::vector<job_id_t> JobScheduler::CancelArrayChildrenNoLock_(
+std::vector<job_id_t> JobScheduler::CancelPendingArrayChildrenNoLock_(
     job_id_t parent_job_id) {
   m_pending_job_map_mtx_.AssertHeld();
-  m_array_manager_->RequestParentTerminalStatus(
-      parent_job_id, crane::grpc::Cancelled, ExitCode::EC_TERMINATED,
-      absl::Now());
   auto child_ids = m_array_manager_->RunningChildJobIdsForParent(parent_job_id);
   for (job_id_t child_id : child_ids) {
     // Requeued children retain their array membership while waiting for a
@@ -4261,7 +4258,7 @@ crane::grpc::CancelJobReply JobScheduler::CancelPendingOrRunningJob(
           .finish_status = crane::grpc::JobStatus::Cancelled,
           .terminate_running_children = terminate_running_children});
       if (terminate_running_children) {
-        for (job_id_t child_id : CancelArrayChildrenNoLock_(job_id)) {
+        for (job_id_t child_id : CancelPendingArrayChildrenNoLock_(job_id)) {
           // The parent request owns Pending and running child cancellation.
           // Avoid cancelling them twice.
           job_steps.erase(child_id);
@@ -5372,9 +5369,6 @@ void JobScheduler::CleanCancelJobQueueCb_() {
         VariantVisitor{
             [&](CancelPendingJobQueueElem& pd_elem) {
               pd_elem.job->SetStatus(pd_elem.finish_status);
-              if (pd_elem.job->IsArrayChild() &&
-                  pd_elem.finish_status == crane::grpc::Cancelled)
-                pd_elem.job->SetExitCode(ExitCode::EC_TERMINATED);
               pending_job_ptr_vec.emplace_back(std::move(pd_elem.job));
             },
             [&](CancelRunningJobQueueElem& rn_elem) {
