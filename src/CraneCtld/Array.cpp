@@ -153,11 +153,14 @@ std::unique_ptr<JobInCtld> ArrayMeta::BuildChild(
   }
 
   auto child = std::make_unique<JobInCtld>();
-  child->SetFieldsByJobToCtld(parent_job_->JobToCtld());
-  child->MutableJobToCtld()->clear_array_spec();
-  // The parent's hold is a scheduling gate. Once the parent is eligible for
-  // materialization, the child must not inherit a submit-time hold flag.
-  child->SetHeld(false);
+  auto child_job_to_ctld = parent_job_->JobToCtld();
+  // Parent-only scheduling gates must be cleared before initializing both
+  // the child's in-memory fields and its persisted submission. Otherwise a
+  // requeued child waits for dependency events already consumed by the parent.
+  child_job_to_ctld.clear_dependencies();
+  child_job_to_ctld.set_hold(false);
+  child_job_to_ctld.clear_array_spec();
+  child->SetFieldsByJobToCtld(child_job_to_ctld);
   child->SetStatus(crane::grpc::Pending);
   child->SetArrayTaskIdentity(parent_job_->JobId(), task_id);
   child->SetUsername(parent_job_->Username());
@@ -221,24 +224,21 @@ void ArrayMeta::OnChildTerminal(job_id_t child_job_id) {
   running_child_job_ids_.erase(child_job_id);
 }
 
-void ArrayMeta::FinishForTerminalStatus(crane::grpc::JobStatus status,
-                                        uint32_t exit_code,
-                                        absl::Time end_time) {
-  if (parent_job_ == nullptr) return;
-  // Idempotent: a parent may be finished twice (e.g. deadline timer fires
-  // concurrently with an explicit cancel). The first call wins.
+void ArrayMeta::RecordTerminalResult(crane::grpc::JobStatus status,
+                                     uint32_t exit_code) {
+  // Deadline and explicit cancellation may race. The first result wins.
   if (terminal_status_override_.has_value()) return;
   terminal_status_override_ = std::pair{status, exit_code};
+  parent_job_->SetArrayMaterializationComplete(true);
+}
+
+void ArrayMeta::ApplyTerminalResult(absl::Time end_time) {
+  CRANE_ASSERT(terminal_status_override_.has_value());
+  if (IsFinishedStepStatus(parent_job_->Status())) return;
   // Deadline/cancel may finish an array parent before any child starts. Emit
   // the parent's start event first so its timeline is start -> terminal.
-  if (!parent_start_event_triggered_) {
-    parent_job_->SetStartTime(end_time);
-    parent_job_->TriggerDependencyEvents(crane::grpc::DependencyType::AFTER,
-                                         end_time);
-    parent_start_event_triggered_ = true;
-    parent_job_->SetArrayParentStarted(true);
-  }
-  parent_job_->SetArrayMaterializationComplete(true);
+  MarkParentStarted(end_time);
+  auto [status, exit_code] = *terminal_status_override_;
   parent_job_->SetStatus(status);
   parent_job_->SetExitCode(exit_code);
   parent_job_->SetEndTime(end_time);
@@ -248,7 +248,7 @@ bool ArrayMeta::MarkParentStarted(absl::Time start_time) {
   if (parent_job_ == nullptr || parent_start_event_triggered_) return false;
   parent_job_->SetStartTime(start_time);
   parent_job_->TriggerDependencyEvents(crane::grpc::DependencyType::AFTER,
-                                       start_time);
+                                       parent_job_->StartTime());
   parent_start_event_triggered_ = true;
   parent_job_->SetArrayParentStarted(true);
   return true;
@@ -432,13 +432,12 @@ void ArrayManager::RegisterParent(JobInCtld* parent) {
   job_id_t parent_id = parent->JobId();
   auto meta = std::unique_ptr<ArrayMeta>(new ArrayMeta(parent));
 
-  // Recovery path: FinishForTerminalStatus persists Status/ExitCode/EndTime
+  // Recovery path: applying a terminal result persists Status/ExitCode/EndTime
   // and ArrayMaterializationComplete=true, but terminal_status_override_ and
   // parent_start_event_triggered_ are transient. Rebuild them so a later
   // BuildAggregateResult_ doesn't overwrite the persisted terminal status
   // with a child-aggregate. A terminal Status is sufficient: parents stay
-  // Pending while running, and FinishForTerminalStatus is the only path that
-  // sets terminal Status on an array parent.
+  // Pending while running, until a terminal result is applied.
   if (IsFinishedStepStatus(parent->Status())) {
     meta->terminal_status_override_ =
         std::pair{parent->Status(), parent->ExitCode()};
@@ -597,15 +596,12 @@ void ArrayManager::TryFinalizeParentNoLock_(
   parent.SetStatus(final_status);
   parent.SetExitCode(final_exit_code);
   absl::Time end_time = absl::Now();
-  if (!meta->ParentStartEventTriggered() &&
-      final_status == crane::grpc::JobStatus::Cancelled) {
-    parent.SetStartTime(end_time);
-    parent.TriggerDependencyEvents(crane::grpc::DependencyType::AFTER,
-                                   end_time);
-  }
+  if (meta->TerminalStatusOverride().has_value() ||
+      final_status == crane::grpc::JobStatus::Cancelled)
+    meta->MarkParentStarted(end_time);
   parent.SetEndTime(end_time);
 
-  parent.TriggerTerminalDependencyEvents(end_time);
+  parent.TriggerTerminalDependencyEvents(parent.EndTime());
 
   // Array children do not own submit slots; release the parent's reservation
   // only when the whole array parent finalizes.
@@ -622,9 +618,8 @@ void ArrayManager::TryFinalizeParentNoLock_(
   m_metas_.erase(meta_it);
 }
 
-ArrayManager::FinishedParentResult ArrayManager::FinishParentWithStatus(
-    job_id_t parent_job_id, crane::grpc::JobStatus status, uint32_t exit_code,
-    absl::Time end_time) {
+ArrayManager::FinishedParentResult ArrayManager::ApplyParentTerminalResult(
+    job_id_t parent_job_id, absl::Time end_time) {
   FinishedParentResult result;
   auto meta_it = m_metas_.find(parent_job_id);
   if (meta_it == m_metas_.end()) return result;
@@ -638,7 +633,7 @@ ArrayManager::FinishedParentResult ArrayManager::FinishParentWithStatus(
   result.running_child_job_ids.assign(running_child_job_ids.begin(),
                                       running_child_job_ids.end());
 
-  meta->FinishForTerminalStatus(status, exit_code, end_time);
+  meta->ApplyTerminalResult(end_time);
   if (!g_embedded_db_client->UpdateRuntimeAttrOfJobIfExists(
           0, meta->Parent().JobDbId(), meta->Parent().RuntimeAttr())) {
     CRANE_ERROR("Failed to persist finished array parent #{} runtime attr.",
@@ -650,7 +645,7 @@ ArrayManager::FinishedParentResult ArrayManager::FinishParentWithStatus(
   }
 
   auto& parent = meta->MutableParent();
-  parent.TriggerTerminalDependencyEvents(end_time);
+  parent.TriggerTerminalDependencyEvents(parent.EndTime());
 
   g_account_meta_container->FreeMetaSubmitResource(
       parent, ArrayUtil::EffectiveRunLimit(parent.JobToCtld().array_spec()));
@@ -692,6 +687,14 @@ std::vector<ArrayManager::FinalizedArrayParent> ArrayManager::OnChildTerminal(
   meta->OnChildTerminal(child->JobId());
   TryFinalizeParentNoLock_(meta, &final_parents, final_jobs);
   return final_parents;
+}
+
+void ArrayManager::RecordParentTerminalResult(job_id_t array_job_id,
+                                              crane::grpc::JobStatus status,
+                                              uint32_t exit_code) {
+  auto* meta = FindMeta_(array_job_id);
+  if (meta == nullptr) return;
+  meta->RecordTerminalResult(status, exit_code);
 }
 
 bool ArrayManager::IsRegisteredParent(job_id_t array_job_id) const {

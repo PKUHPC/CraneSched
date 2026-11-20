@@ -42,7 +42,9 @@ namespace Ctld {
 //   1. The array parent is the only control entity. It stays in the scheduler
 //      pending map and owns deadline/dependency/summary/final state.
 //   2. A materialized array child is a normal real job with its own
-//      job_id/job_db_id/status and lives in the running map.
+//      job_id/job_db_id/status and lives in the running map, or the pending
+//      map while waiting for requeue. It remains tracked until final
+//      completion.
 //   3. Unmaterialized tasks exist only in ArraySpec. They are not queried,
 //      cancelled, modified, or persisted as virtual jobs.
 //   4. ArrayManager exposes lifecycle events. Scheduler code should not drive
@@ -92,8 +94,8 @@ class ArrayMeta {
   void OnChildTerminal(job_id_t child_job_id);
   // Returns true if the parent start event is triggered by this call.
   bool MarkParentStarted(absl::Time start_time);
-  void FinishForTerminalStatus(crane::grpc::JobStatus status,
-                               uint32_t exit_code, absl::Time end_time);
+  void RecordTerminalResult(crane::grpc::JobStatus status, uint32_t exit_code);
+  void ApplyTerminalResult(absl::Time end_time);
   // Returns nullopt if another child can spawn; otherwise returns the pending
   // reason, which may be empty when no user-facing reason should be shown.
   std::optional<std::string> SpawnBlockReason(absl::Time now) const;
@@ -181,6 +183,11 @@ class ArrayManager {
   void RecoverAccountingForRegisteredParents();
 
   bool IsRegisteredParent(job_id_t array_job_id) const;
+  // Keep the first result and stop materialization, without changing the
+  // parent's visible status/times or emitting dependency events.
+  void RecordParentTerminalResult(job_id_t array_job_id,
+                                  crane::grpc::JobStatus status,
+                                  uint32_t exit_code);
 
   // Sweeps all registered parents and finalizes those whose materialization
   // and child execution have both completed. Used at recovery end to surface
@@ -205,12 +212,10 @@ class ArrayManager {
   std::vector<FinalizedArrayParent> OnChildTerminal(
       JobInCtld* child, const std::unordered_set<JobInCtld*>& final_jobs);
 
-  // Stops further materialization and finalizes immediately if no child is
-  // running; otherwise finalization happens when the last running child exits.
-  FinishedParentResult FinishParentWithStatus(job_id_t parent_job_id,
-                                              crane::grpc::JobStatus status,
-                                              uint32_t exit_code,
-                                              absl::Time end_time);
+  // Apply/persist the recorded result and finalize if no tracked child remains.
+  // Otherwise the last child's completion performs finalization.
+  FinishedParentResult ApplyParentTerminalResult(job_id_t parent_job_id,
+                                                 absl::Time end_time);
   std::vector<FinalizedArrayParent> TryFinalizeParentIfComplete(
       job_id_t parent_job_id);
 

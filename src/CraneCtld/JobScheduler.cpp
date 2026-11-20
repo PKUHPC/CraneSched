@@ -142,11 +142,6 @@ bool SuspendJobOnNodes_(const std::vector<CranedId>& craned_ids,
   return !suspend_failed;
 }
 
-uint32_t QosSubmitReserveCount(const JobInCtld& job) {
-  if (!job.IsArrayParent()) return 1;
-  return ArrayUtil::EffectiveRunLimit(job.JobToCtld().array_spec());
-}
-
 absl::Time EffectiveJobEndTimeAfterTimeConstraintChange_(
     const JobInCtld& job, absl::Duration time_limit, absl::Time deadline_time) {
   absl::Duration suspended_duration =
@@ -179,6 +174,12 @@ void MergeJobSteps(
 }
 
 }  // namespace
+
+uint32_t JobScheduler::QosSubmitReserveCount_(const JobInCtld& job) {
+  if (job.IsArrayChild()) return 0;
+  if (!job.IsArrayParent()) return 1;
+  return ArrayUtil::EffectiveRunLimit(job.JobToCtld().array_spec());
+}
 
 JobScheduler::JobScheduler() {
   if (g_config.PriorityConfig.Type == Config::Priority::Basic) {
@@ -2576,11 +2577,8 @@ void JobScheduler::CancelDeadlineJobCb_() {
   m_pending_job_map_mtx_.Lock();
   while (m_job_deadline_timer_queue_.try_dequeue(job_id)) {
     if (m_array_manager_->IsRegisteredParent(job_id)) {
-      m_cancel_job_queue_.enqueue(CancelArrayParentQueueElem{
-          .parent_job_id = job_id,
-          .exit_code = ExitCode::EC_REACHED_DEADLINE,
-          .finish_status = crane::grpc::JobStatus::Deadline,
-          .terminate_running_children = false});
+      EnqueueArrayParentTerminationNoLock_(
+          job_id, crane::grpc::Deadline, ExitCode::EC_REACHED_DEADLINE, false);
       continue;
     }
 
@@ -3943,7 +3941,7 @@ JobScheduler::SubmitJobToScheduler(std::unique_ptr<JobInCtld> job) {
                           job->Username()));
       }
 
-      uint32_t reserve_count = QosSubmitReserveCount(*job);
+      uint32_t reserve_count = QosSubmitReserveCount_(*job);
       if (reserve_count == 0) {
         return std::unexpected(FormatRichErr(
             CraneErrCode::ERR_INVALID_PARAM,
@@ -4058,6 +4056,39 @@ void JobScheduler::CancelRunningJobNoLock_(
   TerminateRunningStepNoLock_(primary_step, terminate_source);
 }
 
+void JobScheduler::EnqueueArrayParentTerminationNoLock_(
+    job_id_t parent_job_id, crane::grpc::JobStatus status, uint32_t exit_code,
+    bool terminate_running_children) {
+  m_pending_job_map_mtx_.AssertHeld();
+  // Child completion may overtake the queued parent work. Record the result
+  // under the same lock before publishing it; the queue carries only the work.
+  m_array_manager_->RecordParentTerminalResult(parent_job_id, status,
+                                               exit_code);
+  m_cancel_job_queue_.enqueue(CancelArrayParentQueueElem{
+      .parent_job_id = parent_job_id,
+      .terminate_running_children = terminate_running_children});
+}
+
+std::vector<job_id_t> JobScheduler::CancelPendingArrayChildrenNoLock_(
+    job_id_t parent_job_id) {
+  m_pending_job_map_mtx_.AssertHeld();
+  auto child_ids = m_array_manager_->RunningChildJobIdsForParent(parent_job_id);
+  for (job_id_t child_id : child_ids) {
+    // Requeued children retain their array membership while waiting for a
+    // fresh allocation. Running children are handled by the async parent
+    // cancel.
+    auto it = m_pending_job_map_.find(child_id);
+    if (it == m_pending_job_map_.end()) continue;
+    m_cancel_job_queue_.enqueue(CancelPendingJobQueueElem{
+        .job = std::move(it->second),
+        .finish_status = crane::grpc::JobStatus::Cancelled});
+    m_pending_job_map_.erase(it);
+  }
+  m_pending_map_cached_size_.store(m_pending_job_map_.size(),
+                                   std::memory_order_release);
+  return child_ids;
+}
+
 crane::grpc::CancelJobReply JobScheduler::CancelPendingOrRunningJob(
     const crane::grpc::CancelJobRequest& request) {
   crane::grpc::CancelJobReply reply;
@@ -4154,7 +4185,8 @@ crane::grpc::CancelJobReply JobScheduler::CancelPendingOrRunningJob(
     CRANE_TRACE("Cancelling pending job #{}", job_id);
 
     auto it = m_pending_job_map_.find(job_id);
-    CRANE_ASSERT(it != m_pending_job_map_.end());
+    // A parent earlier in this request may already have removed this child.
+    if (it == m_pending_job_map_.end()) return;
     JobInCtld* job = it->second.get();
 
     auto result = g_account_manager->CheckIfUidHasPermOnUser(
@@ -4186,33 +4218,20 @@ crane::grpc::CancelJobReply JobScheduler::CancelPendingOrRunningJob(
       add_cancelled(job_id);
       not_found_job_ids.erase(job_id);
 
-      // Close the spawn window between this enqueue and the async
-      // CancelArrayParentQueueElem handler. ArrayMeta::SpawnBlockReason reads
-      // parent_job_->CancelRequested(); setting it synchronously under
-      // m_pending_job_map_mtx_ guarantees the scheduler's next iteration sees
-      // the cancel and won't materialize another child in the gap.
-      job->SetCancelRequested(true);
-
       bool terminate_running_children = has_explicit_job_filter;
+      EnqueueArrayParentTerminationNoLock_(job_id, crane::grpc::Cancelled,
+                                           ExitCode::EC_TERMINATED,
+                                           terminate_running_children);
       if (terminate_running_children) {
-        for (job_id_t child_id :
-             m_array_manager_->RunningChildJobIdsForParent(job_id)) {
-          if (!m_running_job_map_.contains(child_id)) continue;
-          // Remove the child from both the cancel iteration source and the
-          // not-found tracking. The async CancelArrayParentQueueElem handler
-          // terminates running children; letting fn_cancel_running_job touch
-          // them again would double-cancel.
+        for (job_id_t child_id : CancelPendingArrayChildrenNoLock_(job_id)) {
+          // The parent request owns Pending and running child cancellation.
+          // Avoid cancelling them twice.
           job_steps.erase(child_id);
           not_found_job_ids.erase(child_id);
         }
       }
       m_job_deadline_timer_del_queue_.enqueue(job_id);
       m_job_deadline_timer_del_async_handle_->send();
-      m_cancel_job_queue_.enqueue(CancelArrayParentQueueElem{
-          .parent_job_id = job_id,
-          .exit_code = ExitCode::EC_TERMINATED,
-          .finish_status = crane::grpc::JobStatus::Cancelled,
-          .terminate_running_children = terminate_running_children});
       m_cancel_job_async_handle_->send();
       return;
     }
@@ -5353,9 +5372,8 @@ void JobScheduler::CleanCancelJobQueueCb_() {
 
     absl::Time cancel_time = absl::Now();
     for (const auto& array_elem : array_parents_to_cancel) {
-      auto finish_result = m_array_manager_->FinishParentWithStatus(
-          array_elem.parent_job_id, array_elem.finish_status,
-          array_elem.exit_code, cancel_time);
+      auto finish_result = m_array_manager_->ApplyParentTerminalResult(
+          array_elem.parent_job_id, cancel_time);
       if (!finish_result.parent_found) continue;
 
       if (array_elem.terminate_running_children) {
@@ -5437,7 +5455,7 @@ void JobScheduler::CleanCancelJobQueueCb_() {
       job->SetStartTime(cancel_time);
       job->SetEndTime(cancel_time);
       g_account_meta_container->FreeMetaSubmitResource(
-          *job, QosSubmitReserveCount(*job));
+          *job, QosSubmitReserveCount_(*job));
 
       job->TriggerDependencyEvents(crane::grpc::DependencyType::AFTER,
                                    cancel_time);
@@ -5601,7 +5619,7 @@ void JobScheduler::CleanSubmitJobQueueCb_() {
       CRANE_ERROR("Failed to append a batch of jobs to embedded db queue.");
       for (auto& pair : accepted_jobs) {
         g_account_meta_container->FreeMetaSubmitResource(
-            *pair.first, QosSubmitReserveCount(*pair.first));
+            *pair.first, QosSubmitReserveCount_(*pair.first));
         pair.second /*promise*/.set_value(
             std::unexpected(CraneErrCode::ERR_DB_INSERT_FAILED));
       }
@@ -5645,7 +5663,7 @@ void JobScheduler::CleanSubmitJobQueueCb_() {
         if (missing_deps) {
           CRANE_WARN("Job #{} rejected: missing dependencies.", id);
           g_account_meta_container->FreeMetaSubmitResource(
-              *job, QosSubmitReserveCount(*job));
+              *job, QosSubmitReserveCount_(*job));
           job_id_promise.set_value(
               std::unexpected(CraneErrCode::ERR_MISSING_DEPENDENCY));
           jobs_to_purge[id] = job->JobDbId();
@@ -5710,7 +5728,7 @@ void JobScheduler::CleanSubmitJobQueueCb_() {
     for (size_t i = 0; i < rejected_actual_size; i++) {
       g_account_meta_container->FreeMetaSubmitResource(
           *rejected_jobs[i].first,
-          QosSubmitReserveCount(*rejected_jobs[i].first));
+          QosSubmitReserveCount_(*rejected_jobs[i].first));
       rejected_jobs[i].second.set_value(
           std::unexpected(CraneErrCode::ERR_BEYOND_JOB_ID));
     }
