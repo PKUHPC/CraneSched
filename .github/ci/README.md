@@ -28,6 +28,7 @@ compilation and native tests run without HTTP proxy variables. Publication requi
 | --- | --- |
 | `check_format.py` | Check C++/proto formatting and produce a correction patch |
 | `build_product.sh` | Check, build, test and package the selected product revision |
+| `build_golden_tree.sh` | Produce a checked C++ build baseline |
 | `upload_packages.sh` | Upload this build's final RPMs |
 | `summarize_ci.py` | Report required job results and integration completeness |
 

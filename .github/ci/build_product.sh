@@ -4,28 +4,55 @@ download_proxy=${HTTPS_PROXY:-}
 unset HTTP_PROXY HTTPS_PROXY ALL_PROXY http_proxy https_proxy all_proxy
 
 [[ "$CI_DEV_IMAGE" =~ @sha256:[a-f0-9]{64}$ ]]
-[[ "$(id -u)" == 1001 && "$(id -g)" == 1001 ]]
-getent passwd 1001 >/dev/null
-getent group 1001 >/dev/null
+getent passwd "$(id -u)" >/dev/null
+getent group "$(id -g)" >/dev/null
 
 source_sha="$CI_SOURCE_SHA"
 source_checkout="$PWD"
-state="/ci/workspaces/native-rhel10-amd64/${CI_DEV_IMAGE##*@sha256:}/ci-debug"
+golden_root="/ci/golden/native-rhel10-amd64/${CI_DEV_IMAGE##*@sha256:}/ci-debug"
 artifact_dir="/ci/attempts/${GITHUB_RUN_ID}-${GITHUB_RUN_ATTEMPT}/build"
+overlay_root=/run/ci-overlay
 
-mkdir -p "$state" "$(dirname "$artifact_dir")"
+mkdir -p "$(dirname "$artifact_dir")" "$overlay_root/upper" "$overlay_root/work" /workspace
 mkdir "$artifact_dir"
-exec 9>"$state/build.lock"
-flock 9
+git config --global --add safe.directory /workspace
 
-if [[ ! -d "$state/source/.git" ]]; then
-  git init "$state/source"
+overlay_mounted() {
+  findmnt -rn -t fuse.fuse-overlayfs --mountpoint /workspace >/dev/null
+}
+
+cleanup_overlay() {
+  local status=$?
+  trap - EXIT
+  cd /
+  if overlay_mounted; then
+    fusermount3 -u /workspace || status=1
+  fi
+  exit "$status"
+}
+trap cleanup_overlay EXIT
+trap 'exit 130' INT
+trap 'exit 143' TERM
+
+if lower=$(readlink -e "$golden_root/latest") && [[ -d "$lower/.git" ]]; then
+  fuse-overlayfs -o "lowerdir=$lower,upperdir=$overlay_root/upper,workdir=$overlay_root/work" /workspace ||
+    echo '::warning::fuse-overlayfs failed to mount the golden tree.'
 fi
 
-git -C "$state/source" config remote.origin.url "$(git -C "$source_checkout" remote get-url origin)"
-git -C "$state/source" fetch --no-tags --update-shallow "$source_checkout" "$source_sha"
-git -C "$state/source" checkout --force --detach "$source_sha"
-cd -P "$state/source"
+if overlay_mounted; then
+  echo "Using golden tree: $lower"
+else
+  echo 'Using a private cold build.'
+  git init /workspace
+fi
+
+git -C /workspace config remote.origin.url "$(git -C "$source_checkout" remote get-url origin)"
+git -C /workspace fetch --update-shallow --depth=1 --no-tags "$source_checkout" "$source_sha"
+if git -C /workspace rev-parse --verify HEAD >/dev/null 2>&1; then
+  git -C /workspace update-index --refresh
+fi
+git -C /workspace checkout --force --detach "$source_sha"
+cd -P /workspace
 [[ "$(git rev-parse HEAD)" == "$source_sha" ]]
 [[ -z "$(git status --porcelain --untracked-files=no)" ]]
 
