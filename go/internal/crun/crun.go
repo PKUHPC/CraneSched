@@ -671,16 +671,17 @@ func (m *StateMachineOfCrun) StateForwarding() {
 }
 
 func (m *StateMachineOfCrun) forwardLocalRequests(taskIdWithInput *uint32) {
+	stdinInput := m.chanInputFromLocal
 	var x11Requests <-chan *protos.StreamCrunRequest
 	if m.X11SessionMgr != nil {
 		x11Requests = m.X11SessionMgr.X11RequestChan
 	}
 
-	for {
+	for stdinInput != nil || x11Requests != nil {
 		select {
 		case <-m.stopReadCtx.Done():
 			return
-		case msg, ok := <-m.chanInputFromLocal:
+		case msg, ok := <-stdinInput:
 			eof := !ok || msg == nil
 			request := &protos.StreamCrunRequest{
 				Type: protos.StreamCrunRequest_TASK_IO_FORWARD,
@@ -701,7 +702,10 @@ func (m *StateMachineOfCrun) forwardLocalRequests(taskIdWithInput *uint32) {
 				return
 			}
 			if eof {
-				return
+				// Stdin EOF must not stop independent X11 traffic. Disable this
+				// input after its EOF has been sent, leaving X11 active until
+				// the step ends or forwarding is cancelled.
+				stdinInput = nil
 			}
 		case request := <-x11Requests:
 			if err := m.sendRequest(m.stopReadCtx, request); err != nil {
@@ -1201,75 +1205,59 @@ func (m *StateMachineOfCrun) startStdinReader() {
 func (m *StateMachineOfCrun) StdinReaderRoutine() {
 	defer close(m.chanInputFromLocal)
 	fd := m.stdinFd
-	epfd, err := syscall.EpollCreate1(0)
-	if err != nil {
-		log.Tracef("EpollCreate1: %v", err)
-		return
-	}
-
-	event := &syscall.EpollEvent{
-		Events: syscall.EPOLLIN,
-		Fd:     int32(fd),
-	}
-
-	if err := syscall.EpollCtl(epfd, syscall.EPOLL_CTL_ADD, fd, event); err != nil {
-		log.Tracef("EpollCtl: %v", err)
-		return
-	}
-
-	defer syscall.Close(epfd)
-	events := make([]syscall.EpollEvent, 10)
+	// poll supports regular files and /dev/null as well as pipes and terminals.
+	// Keep a bounded wait so cancellation can stop an idle stdin reader.
+	events := []unix.PollFd{{Fd: int32(fd), Events: unix.POLLIN}}
 	buf := make([]byte, 4096)
-reading:
 	for {
 		select {
 		case <-m.stopReadCtx.Done():
-			break reading
+			return
 		default:
 		}
 
-		n, err := syscall.EpollWait(epfd, events, 100) //100MS timeout
+		_, err := unix.Poll(events, 100)
 		if err != nil {
 			if errors.Is(err, syscall.EINTR) {
-				log.Trace("EpollWait interrupted by signal, retrying")
+				log.Trace("Poll interrupted by signal, retrying")
 				continue
 			}
-			log.Tracef("EpollWait: %v", err)
+			log.Tracef("Poll: %v", err)
 			return
 		}
-		for i := 0; i < n; i++ {
-			if events[i].Fd == int32(fd) && events[i].Events&syscall.EPOLLIN != 0 {
-				nr, err := syscall.Read(fd, buf)
-				if err != nil {
-					if errors.Is(err, syscall.EAGAIN) {
-						log.Trace("Read EAGAIN, no data available now")
-						continue
-					}
-					if errors.Is(err, syscall.EINTR) {
-						log.Trace("Read interrupted by signal, retrying")
-						continue
-					}
-					if errors.Is(err, syscall.EIO) {
-						log.Trace("Read EIO.")
-						continue
-					}
-					return
-				}
-				if nr == 0 {
-					log.Trace("Read 0 bytes (EOF), closing channel and exiting goroutine")
-					return
-				}
-				data := append([]byte(nil), buf[:nr]...)
-				select {
-				case m.chanInputFromLocal <- data:
-				case <-m.stopReadCtx.Done():
-					break reading
-				}
-				log.Tracef("Sent %d bytes to channel", nr)
-			}
+		if events[0].Revents&unix.POLLNVAL != 0 {
+			log.Trace("Stdin fd is no longer valid")
+			return
 		}
+		if events[0].Revents&(unix.POLLIN|unix.POLLHUP|unix.POLLERR) == 0 {
+			continue
+		}
+		// HUP can arrive with unread data. Keep reading until EOF so buffered
+		// bytes are forwarded before the input channel is closed.
+		nr, err := syscall.Read(fd, buf)
+		if err != nil {
+			if errors.Is(err, syscall.EAGAIN) || errors.Is(err, syscall.EINTR) {
+				continue
+			}
+			if errors.Is(err, syscall.EIO) && events[0].Revents&unix.POLLHUP == 0 {
+				log.Trace("Read EIO.")
+				continue
+			}
+			log.Tracef("Read stdin: %v", err)
+			return
+		}
+		if nr == 0 {
+			log.Trace("Read 0 bytes (EOF), closing channel and exiting goroutine")
+			return
+		}
+		data := append([]byte(nil), buf[:nr]...)
+		select {
+		case m.chanInputFromLocal <- data:
+		case <-m.stopReadCtx.Done():
+			return
+		}
+		log.Tracef("Sent %d bytes to channel", nr)
 	}
-
 }
 
 func (m *StateMachineOfCrun) ParseFilePattern(pattern string) (string, bool, error) {
