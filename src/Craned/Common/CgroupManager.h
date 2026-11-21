@@ -468,7 +468,6 @@ class CgroupV1 : public CgroupInterface {
                        bool set_write, bool set_mknod) override;
 
   bool KillAllProcesses(int signum) override;
-
   bool Empty() override;
 
   void Destroy() override;
@@ -530,7 +529,6 @@ class CgroupV2 : public CgroupInterface {
 #endif
   bool KillAllProcesses(int signum) override;
   bool KillSubtree() override;
-
   bool Empty() override;
 
   void Destroy() override;

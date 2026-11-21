@@ -500,6 +500,35 @@ class ResidualTask : public ITaskInstance {
   CraneErrCode result{CraneErrCode::SUCCESS};
 };
 
+class NonRecursiveCgroup : public Common::CgroupInterface {
+ public:
+  NonRecursiveCgroup()
+      : Common::CgroupInterface("non-recursive-test-cgroup", nullptr) {}
+  bool KillAllProcesses(int) override {
+    ++parent_kill_calls;
+    return true;
+  }
+  bool Empty() override { return true; }
+  bool SetCpuCoreLimit(double) override { return false; }
+  bool SetCpuShares(uint64_t) override { return false; }
+  bool SetCpuSet(const std::unordered_set<uint32_t>&) override { return false; }
+  bool SetCpusetMems(const std::string&) override { return false; }
+  bool SetMemoryLimitBytes(uint64_t) override { return false; }
+  bool SetMemorySwLimitBytes(uint64_t) override { return false; }
+  bool SetMemorySoftLimitBytes(uint64_t) override { return false; }
+  bool SetBlockioWeight(uint64_t) override { return false; }
+  bool SetDeviceAccess(const std::unordered_set<SlotId>&, bool, bool,
+                       bool) override {
+    return false;
+  }
+  int parent_kill_calls{0};
+  int subtree_kill_calls{0};
+  bool KillSubtree() override {
+    ++subtree_kill_calls;
+    return false;
+  }
+};
+
 TEST(CrunResidualCleanup, WaitsForLastExitAndRetriesFailedTaskCleanup) {
   StepToSupv spec;
   spec.set_type(crane::grpc::Interactive);
@@ -529,6 +558,26 @@ TEST(CrunResidualCleanup, WaitsForLastExitAndRetriesFailedTaskCleanup) {
   step.CleanResidualProcesses();
   EXPECT_EQ(a.signals, (std::vector<int>{SIGKILL, SIGKILL}));
   EXPECT_EQ(b.signals, (std::vector<int>{SIGKILL, SIGKILL}));
+}
+
+TEST(CrunResidualCleanup, FallsBackWhenCgroupV2BackendIsNotRecursive) {
+  StepToSupv spec;
+  spec.set_type(crane::grpc::Interactive);
+  spec.mutable_interactive_meta()->set_interactive_type(crane::grpc::Crun);
+  StepInstance step(spec);
+  auto task = std::make_unique<ResidualTask>(&step, 0);
+  auto& process = *task;
+  process.GetFinalInfo()->raw_exit.emplace();
+  step.AddTaskInstance(0, std::move(task));
+  auto cgroup = std::make_unique<NonRecursiveCgroup>();
+  auto& parent = *cgroup;
+  step.step_user_cg = std::move(cgroup);
+
+  step.CleanResidualProcesses();
+
+  EXPECT_EQ(parent.subtree_kill_calls, 1);
+  EXPECT_EQ(parent.parent_kill_calls, 0);
+  EXPECT_EQ(process.signals, std::vector<int>{SIGKILL});
 }
 
 }  // namespace
