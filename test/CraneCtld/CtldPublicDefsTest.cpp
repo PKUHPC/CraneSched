@@ -1640,6 +1640,44 @@ TEST_F(StepLifecycleTest, DaemonAcceptsInternalCtldPrologStatus) {
   EXPECT_NE(job.PrimaryStep(), nullptr);
 }
 
+TEST_F(StepLifecycleTest, ZeroExitOomSurvivesPrimaryAndDaemonCompletion) {
+  constexpr job_id_t kJobId = 63;
+  const std::vector<CranedId> craned_ids{"node-a"};
+  Ctld::JobInCtld job;
+  job.type = crane::grpc::Batch;
+  job.SetJobId(kJobId);
+  job.SetStatus(crane::grpc::Configuring);
+  job.SetPrimaryStepStatus(crane::grpc::Invalid);
+  job.time_limit = absl::Hours(1);
+  SetupJobAllocation(job, craned_ids);
+  job.SetDaemonStep(MakeDaemonStep(&job, craned_ids));
+  ASSERT_TRUE(g_embedded_db_client->AppendSteps({job.DaemonStep()}));
+
+  Ctld::StepStatusChangeContext ctx;
+  auto* daemon = job.DaemonStep();
+  daemon->StepStatusChange(crane::grpc::Running, 0, "", "node-a",
+                           TimestampAt(700), &ctx);
+  auto* primary = job.PrimaryStep();
+  ASSERT_NE(primary, nullptr);
+  primary->StepStatusChange(crane::grpc::Starting, 0, "", "node-a",
+                            TimestampAt(701), &ctx);
+  primary->StepStatusChange(crane::grpc::Completing, 0, "OOM notification",
+                            "node-a", TimestampAt(702), &ctx);
+  primary->StepStatusChange(crane::grpc::OutOfMemory, 0, "OOM notification",
+                            "node-a", TimestampAt(703), &ctx);
+  EXPECT_EQ(job.PrimaryStep(), nullptr);
+  EXPECT_EQ(job.PrimaryStepStatus(), crane::grpc::OutOfMemory);
+  EXPECT_EQ(job.PrimaryStepExitCode(), 0);
+  ASSERT_EQ(daemon->Status(), crane::grpc::Completing);
+
+  auto result = daemon->StepStatusChange(crane::grpc::Completed, 0, "",
+                                         "node-a", TimestampAt(704), &ctx);
+  ASSERT_TRUE(result.has_value());
+  EXPECT_EQ(result->first, crane::grpc::OutOfMemory);
+  EXPECT_EQ(result->second, 0);
+  EXPECT_EQ(job.DaemonStep(), nullptr);
+}
+
 TEST_F(StepLifecycleTest, FullJobLifecycleDaemonAndPrimary) {
   constexpr job_id_t kJobId = 61;
   const std::vector<CranedId> craned_ids{"node-a"};

@@ -1196,66 +1196,11 @@ CraneExpected<CgroupStrParsedIds> CgroupManager::GetIdsByPid(pid_t pid) {
   return std::unexpected(CraneErrCode::ERR_NON_EXISTENT);
 }
 
-bool CgroupManager::ReadOomCountsFromCgroupPath(const std::string& cg_path,
-                                                uint64_t& oom_kill,
-                                                uint64_t& oom) {
-  oom_kill = 0;
-  oom = 0;
-  std::error_code ec;
-
-  if (IsCgV2()) {
-    // For cgroup v2, check the provided path directly
-    if (!std::filesystem::exists(cg_path, ec)) {
-      CRANE_TRACE("cgroup path '{}' not exists when read OOM: {}", cg_path,
-                  ec.message());
-      return false;
-    }
-
-    auto events_file =
-        std::filesystem::path(cg_path) / CgConstant::kMemoryEventsFileV2;
-    std::ifstream ifs(events_file);
-    if (!ifs.is_open()) return false;
-
-    std::string key;
-    uint64_t val;
-    while (ifs >> key >> val) {
-      if (key == "oom")
-        oom = val;
-      else if (key == "oom_kill")
-        oom_kill = val;
-    }
-    return true;
-  }
-
-  // For cgroup v1, construct the memory controller specific path
-  auto memory_cgroup_path =
-      CgConstant::kSystemCgPathPrefix /
-      CgConstant::GetControllerStringView(
-          CgConstant::Controller::MEMORY_CONTROLLER) /
-      std::filesystem::relative(cg_path, CgConstant::kSystemCgPathPrefix);
-
-  // Check if the memory controller specific path exists
-  if (!std::filesystem::exists(memory_cgroup_path, ec)) {
-    CRANE_TRACE("cgroup memory path '{}' not exists when read OOM: {}",
-                memory_cgroup_path.string(), ec.message());
-    return false;
-  }
-
-  auto v1_file = memory_cgroup_path / CgConstant::kMemoryOomControlFileV1;
-  std::ifstream ifs(v1_file);
-  if (!ifs.is_open()) return false;
-
-  std::string line;
-  while (std::getline(ifs, line)) {
-    std::istringstream iss(line);
-    std::string k;
-    uint64_t v;
-    if (iss >> k >> v && k == "oom_kill") {
-      oom_kill = v;
-      break;
-    }
-  }
-  return true;
+std::filesystem::path CgroupManager::MemoryCgroupPath(
+    const std::string& cgroup_name) {
+  auto root = CgConstant::kSystemCgPathPrefix;
+  if (!IsCgV2()) root /= "memory";
+  return root / cgroup_name;
 }
 
 namespace {
