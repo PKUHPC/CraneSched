@@ -233,8 +233,8 @@ class StepInstance {
   std::unique_ptr<ITaskInstance> RemoveTaskInstance(task_id_t task_id);
 
   bool AllTaskFinished() const;
-
   bool AllTaskMainProcessesExited() const;
+  void CleanResidualProcesses();
 
   EnvMap GetStepProcessEnv() const;
 
@@ -250,6 +250,7 @@ class StepInstance {
   bool EvaluateOomOnExit();
 
  private:
+  bool m_residual_processes_cleaned_{false};
   std::atomic<StepStatus> m_status_{StepStatus::Configuring};
   crane::grpc::StepToD m_step_to_supv_;
   std::unique_ptr<cri::CriClient> m_cri_client_;
@@ -294,6 +295,9 @@ class ITaskInstance {
   }
 
   [[nodiscard]] TaskFinalInfo* GetFinalInfo() { return &m_final_info_; }
+  [[nodiscard]] const TaskFinalInfo* GetFinalInfo() const {
+    return &m_final_info_;
+  }
 
   // Interfaces must be implemented.
   virtual CraneErrCode Prepare() = 0;
@@ -806,8 +810,6 @@ class TaskManager {
   // are finished till Shutdown is called in gRPC, where ActivelyShutdown is set
   // to true.
   std::atomic_bool m_allow_daemon_shutdown_{false};
-
-  bool m_residual_processes_killed_{false};
 
   StepInstance m_step_;
   std::unordered_map<TaskExecId, task_id_t> m_exec_id_task_id_map_;
