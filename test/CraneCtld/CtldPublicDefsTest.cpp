@@ -1640,43 +1640,6 @@ TEST_F(StepLifecycleTest, DaemonAcceptsInternalCtldPrologStatus) {
   EXPECT_NE(job.PrimaryStep(), nullptr);
 }
 
-TEST(CtldOomDependencyTest, ZeroExitOomReleasesOnlyFailureAndAnyDependents) {
-  const auto end = absl::FromUnixSeconds(100);
-  for (auto type : {crane::grpc::AFTER_OK, crane::grpc::AFTER_NOT_OK,
-                    crane::grpc::AFTER_ANY}) {
-    Ctld::DependenciesInJob dependent;
-    dependent.deps.emplace(42, std::pair{type, 0U});
-    dependent.update(42, Ctld::TerminalDependencyEventTime(
-                             type, crane::grpc::OutOfMemory, 0, end));
-    EXPECT_EQ(dependent.is_met(end), type != crane::grpc::AFTER_OK);
-    EXPECT_EQ(dependent.is_failed(), type == crane::grpc::AFTER_OK);
-  }
-}
-
-TEST(CtldOomDependencyTest, SuccessRequiresCompletedStatusAndZeroExit) {
-  const auto end = absl::FromUnixSeconds(100);
-  const std::vector<std::tuple<crane::grpc::JobStatus, uint32_t, bool>> cases{
-      {crane::grpc::Completed, 0, true},
-      {crane::grpc::Completed, 1, false},
-      {crane::grpc::Failed, 1, false},
-      {crane::grpc::Failed, 0, false},
-      {crane::grpc::Cancelled, 0, false},
-      {crane::grpc::ExceedTimeLimit, 0, false},
-      {crane::grpc::OutOfMemory, 137, false}};
-  for (const auto& [status, code, success] : cases) {
-    SCOPED_TRACE(crane::grpc::JobStatus_Name(status));
-    EXPECT_EQ(Ctld::TerminalDependencyEventTime(crane::grpc::AFTER_OK, status,
-                                                code, end),
-              success ? end : absl::InfiniteFuture());
-    EXPECT_EQ(Ctld::TerminalDependencyEventTime(crane::grpc::AFTER_NOT_OK,
-                                                status, code, end),
-              success ? absl::InfiniteFuture() : end);
-    EXPECT_EQ(Ctld::TerminalDependencyEventTime(crane::grpc::AFTER_ANY, status,
-                                                code, end),
-              end);
-  }
-}
-
 TEST_F(StepLifecycleTest, ZeroExitOomSurvivesPrimaryAndDaemonCompletion) {
   constexpr job_id_t kJobId = 63;
   const std::vector<CranedId> craned_ids{"node-a"};

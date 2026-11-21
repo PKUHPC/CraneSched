@@ -17,9 +17,7 @@ CraneSched jobs have the following statuses:
 
 Job status and exit code are separate. OOM detection preserves the main
 process's actual exit code, including zero; it does not synthesize an exit code
-of 137. Only `Completed` with exit code zero satisfies `afterok`.
-`OutOfMemory` with exit code zero satisfies `afternotok` and `afterany`, including
-when dependencies are recovered after a controller restart.
+of 137.
 
 On older cgroup v1 kernels without an OOM-kill counter, notifications identify
 an OOM condition rather than a particular victim. A job-level notification can

@@ -2100,29 +2100,13 @@ void JobInCtld::TriggerDependencyEvents(
   }
 }
 
-absl::Time TerminalDependencyEventTime(crane::grpc::DependencyType type,
-                                       crane::grpc::JobStatus status,
-                                       uint32_t exit_code,
-                                       absl::Time end_time) {
-  // An OOM-killed child can leave its batch shell's exit code at zero.
-  const bool success = status == crane::grpc::Completed && exit_code == 0;
-  switch (type) {
-  case crane::grpc::AFTER_ANY:
-    return end_time;
-  case crane::grpc::AFTER_OK:
-    return success ? end_time : absl::InfiniteFuture();
-  case crane::grpc::AFTER_NOT_OK:
-    return success ? absl::InfiniteFuture() : end_time;
-  default:
-    return absl::InfiniteFuture();
-  }
-}
-
 void JobInCtld::TriggerTerminalDependencyEvents(absl::Time end_time) {
-  for (auto type : {crane::grpc::AFTER_ANY, crane::grpc::AFTER_OK,
-                    crane::grpc::AFTER_NOT_OK})
-    TriggerDependencyEvents(type, TerminalDependencyEventTime(
-                                      type, Status(), ExitCode(), end_time));
+  uint32_t exit_code = ExitCode();
+  TriggerDependencyEvents(crane::grpc::DependencyType::AFTER_ANY, end_time);
+  TriggerDependencyEvents(crane::grpc::DependencyType::AFTER_OK,
+                          exit_code == 0 ? end_time : absl::InfiniteFuture());
+  TriggerDependencyEvents(crane::grpc::DependencyType::AFTER_NOT_OK,
+                          exit_code != 0 ? end_time : absl::InfiniteFuture());
 }
 
 void JobInCtld::SetFieldsByJobToCtld(crane::grpc::JobToCtld const& val) {
