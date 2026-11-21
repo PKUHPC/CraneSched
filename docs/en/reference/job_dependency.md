@@ -33,9 +33,14 @@ Use the `--dependency` or `-d` parameter when submitting a job to specify depend
 | Type | Description | Trigger Condition |
 |------|-------------|-------------------|
 | `after` | Start after specified job begins or is cancelled | Dependent job leaves Pending state |
-| `afterok` | Start after specified job succeeds | Dependent job completes with exit code 0 |
-| `afternotok` | Start after specified job fails | Dependent job completes with non-zero exit code (including timeout, node errors, etc.) |
+| `afterok` | Start after specified job succeeds | Referenced job has status `Completed` and exit code 0 |
+| `afternotok` | Start after specified job fails | Referenced job ends with a status other than `Completed`, or a non-zero exit code |
 | `afterany` | Start after specified job completes | Dependent job ends (regardless of success or failure) |
+
+Terminal dependencies use both job status and exit code, during live completion
+and when restoring dependencies on archived jobs after a controller restart.
+For example, `OutOfMemory` with exit code 0 satisfies `afternotok` and `afterany`,
+but not `afterok`; the recorded exit code remains unchanged.
 
 ### Delay Time
 

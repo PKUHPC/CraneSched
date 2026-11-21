@@ -888,14 +888,9 @@ bool JobScheduler::Init() {
               }
               break;
             case crane::grpc::DependencyType::AFTER_OK:
-              if (status == crane::grpc::Completed && exit_code == 0) {
-                event_time = absl::FromUnixSeconds(time_end);
-              }
-              break;
             case crane::grpc::DependencyType::AFTER_NOT_OK:
-              if (exit_code != 0) {
-                event_time = absl::FromUnixSeconds(time_end);
-              }
+              event_time = TerminalDependencyEventTime(
+                  dep_type, status, exit_code, absl::FromUnixSeconds(time_end));
               break;
             default:
               std::unreachable();
