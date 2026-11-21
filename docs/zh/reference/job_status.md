@@ -16,8 +16,6 @@ CraneSched 作业包含以下状态：
 | **Completing** | 作业正在结束过程中（例如运行 epilog 脚本）。 |
 
 作业状态与退出码分别记录。OOM 检测保留主进程的实际退出码，包括 0，不会伪造退出码 137。
-仅 `Completed` 且退出码为 0 满足 `afterok`；`OutOfMemory` 且退出码为 0 满足
-`afternotok` 和 `afterany`，控制器重启后恢复依赖时也遵循这一规则。
 
 缺少 OOM-kill 计数器的旧版 cgroup v1 内核只能通知 OOM 状况，不能准确定位被杀进程。
 作业级通知可将批处理主步骤标记为 `OutOfMemory`，不会据此把所有兄弟步骤标为 OOM 受害者。

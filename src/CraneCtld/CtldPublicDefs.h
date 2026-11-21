@@ -580,11 +580,6 @@ struct ContainerMetaInJob {
   explicit operator crane::grpc::ContainerJobAdditionalMeta() const;
 };
 
-// Shared by live completion and recovery of dependencies on archived jobs.
-absl::Time TerminalDependencyEventTime(crane::grpc::DependencyType type,
-                                       crane::grpc::JobStatus status,
-                                       uint32_t exit_code, absl::Time end_time);
-
 struct DependenciesInJob {
   std::unordered_map<job_id_t, std::pair<crane::grpc::DependencyType, uint64_t>>
       deps;
