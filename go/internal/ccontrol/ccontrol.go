@@ -603,6 +603,7 @@ func CreateReservation() error {
 	req := &protos.CreateReservationRequest{
 		Uid:                  uint32(os.Getuid()),
 		ReservationName:      FlagReservationName,
+		Flex:                 FlagReservationFlex,
 		StartTimeUnixSeconds: start_time.Unix(),
 		DurationSeconds:      duration,
 	}

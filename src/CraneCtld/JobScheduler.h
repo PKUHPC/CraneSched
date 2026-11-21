@@ -21,6 +21,7 @@
 #include "CtldPublicDefs.h"
 // Precompiled header comes first!
 
+#include <array>
 #include <atomic>
 #include <deque>
 
@@ -36,6 +37,94 @@ class PrologEpilogExecutor;
 }  // namespace util::os
 
 namespace Ctld {
+
+using TimeAvailResMap = std::map<absl::Time, ResourceView>;
+
+class TimeAvailResView {
+ public:
+  class Iterator {
+   public:
+    using iterator_category = std::forward_iterator_tag;
+    using value_type = std::pair<absl::Time, ResourceView>;
+    using difference_type = std::ptrdiff_t;
+    using pointer = const value_type*;
+    using reference = const value_type&;
+
+    Iterator() = default;
+    reference operator*() const { return m_value_; }
+    pointer operator->() const { return &m_value_; }
+    Iterator& operator++() {
+      Advance_();
+      return *this;
+    }
+    Iterator operator++(int) {
+      auto previous = *this;
+      ++*this;
+      return previous;
+    }
+    bool operator==(const Iterator& other) const {
+      if (m_done_ || other.m_done_) return m_done_ == other.m_done_;
+      return m_maps_ == other.m_maps_ && m_value_.first == other.m_value_.first;
+    }
+
+   private:
+    friend class TimeAvailResView;
+    explicit Iterator(std::array<const TimeAvailResMap*, 2> maps)
+        : m_maps_(maps) {
+      for (size_t i = 0; i < m_maps_.size(); ++i)
+        if (m_maps_[i]) m_next_[i] = m_maps_[i]->begin();
+      Advance_();
+    }
+    void Advance_() {
+      std::optional<absl::Time> next_time;
+      for (size_t i = 0; i < m_maps_.size(); ++i) {
+        if (!m_maps_[i] || m_next_[i] == m_maps_[i]->end()) continue;
+        if (!next_time || m_next_[i]->first < *next_time)
+          next_time = m_next_[i]->first;
+      }
+      m_done_ = !next_time.has_value();
+      if (m_done_) return;
+      for (size_t i = 0; i < m_maps_.size(); ++i) {
+        if (!m_maps_[i] || m_next_[i] == m_maps_[i]->end() ||
+            m_next_[i]->first != *next_time)
+          continue;
+        m_resources_[i] = m_next_[i]->second;
+        ++m_next_[i];
+      }
+      m_value_ = {*next_time, m_resources_[0] + m_resources_[1]};
+    }
+
+    std::array<const TimeAvailResMap*, 2> m_maps_{};
+    std::array<TimeAvailResMap::const_iterator, 2> m_next_{};
+    std::array<ResourceView, 2> m_resources_{};
+    value_type m_value_{};
+    bool m_done_{true};
+  };
+
+  explicit TimeAvailResView(const TimeAvailResMap& primary,
+                            const TimeAvailResMap* extra = nullptr)
+      : m_maps_{&primary, extra} {}
+
+  Iterator begin() const { return Iterator(m_maps_); }
+  Iterator end() const { return {}; }
+  size_t EstimatedSize() const {
+    return m_maps_[0]->size() + (m_maps_[1] ? m_maps_[1]->size() : 0);
+  }
+
+  absl::Time EndTime() const {
+    absl::Time end_time = absl::InfinitePast();
+    for (const auto* map : m_maps_) {
+      if (!map || map->empty()) continue;
+      const auto& [last_time, last_res] = *map->rbegin();
+      if (!last_res.IsZero()) return absl::InfiniteFuture();
+      end_time = std::max(end_time, last_time);
+    }
+    return end_time;
+  }
+
+ private:
+  std::array<const TimeAvailResMap*, 2> m_maps_;
+};
 
 class IUpdateNodeCostPolicy {
  public:
@@ -133,6 +222,7 @@ struct PdJobInScheduler {
   absl::Time end_time;
   NodeResourceViewMap planned_res;
   ResourceV3 allocated_res;
+  ResourceV3 resv_allocated_res;
   std::vector<CranedId> craned_ids;
   std::vector<std::variant<PdJobInScheduler*, RnJobInScheduler*>>
       preempted_jobs;
@@ -309,6 +399,25 @@ class SchedulerAlgo {
     absl::Time earliest_reservation_start{absl::InfiniteFuture()};
 
     TimeAvailResMap time_avail_res_map;
+    NodeState* part_node_state{nullptr};
+    std::vector<NodeState*> resv_node_states;
+    absl::Time resv_start_time;
+    absl::Time resv_end_time;
+    bool flex{false};
+
+    NodeState* PhysicalNode() {
+      return part_node_state ? part_node_state : this;
+    }
+    const NodeState* PhysicalNode() const {
+      return part_node_state ? part_node_state : this;
+    }
+    TimeAvailResView GetTimeAvailResView() const {
+      return TimeAvailResView(
+          time_avail_res_map,
+          flex ? &part_node_state->time_avail_res_map : nullptr);
+    }
+    void UpdateResource(absl::Time start_time, absl::Time end_time,
+                        const ResourceView& res, bool is_release = false);
 
     absl::flat_hash_map<
         std::string,
@@ -513,7 +622,8 @@ class SchedulerAlgo {
                             bool is_release = false) = 0;
 
     virtual NodeState* GetNodeState(const CranedId& craned_id) const = 0;
-    virtual NodeState* GetNodeStateOrNull(const CranedId& craned_id) const = 0;
+    virtual NodeState* GetPhysicalNodeStateOrNull(
+        const CranedId& craned_id) const = 0;
     virtual const std::set<std::pair<double, NodeState*>>& GetOrderedNodesSet()
         const = 0;
 
@@ -530,21 +640,23 @@ class SchedulerAlgo {
   class NodeSelector : public INodeSelector {
    public:
     explicit NodeSelector(
-        std::unique_ptr<const IUpdateNodeCostPolicy> update_cost_policy)
-        : m_update_cost_policy_(std::move(update_cost_policy)) {}
+        std::unique_ptr<const IUpdateNodeCostPolicy> update_cost_policy,
+        absl::flat_hash_map<CranedId, NodeState>& node_state_map)
+        : m_update_cost_policy_(std::move(update_cost_policy)),
+          m_node_state_map_(node_state_map) {}
 
     struct NodeRater {
       NodeRater(const IUpdateNodeCostPolicy* policy, const absl::Time& now,
                 NodeState* node_state, double initial_cost = 0.0)
           : node_state(node_state), cost(initial_cost) {
-        for (const auto& [start_time, end_time, res] :
-             node_state->reserved_res) {
-          policy->UpdateCost(cost, start_time, end_time, res,
+        auto view = node_state->GetTimeAvailResView();
+        for (auto it = view.begin(); it != view.end(); ++it) {
+          auto next = std::next(it);
+          if (next == view.end() || next->first == absl::InfiniteFuture())
+            break;
+          policy->UpdateCost(cost, it->first, next->first,
+                             node_state->res_total - it->second,
                              node_state->res_total);
-        }
-
-        for (const auto& [end_time, res] : node_state->allocated_res) {
-          policy->UpdateCost(cost, now, end_time, res, node_state->res_total);
         }
       }
 
@@ -591,10 +703,10 @@ class SchedulerAlgo {
       return m_node_info_map_.at(craned_id).node_state;
     }
 
-    NodeState* GetNodeStateOrNull(const CranedId& craned_id) const override {
-      auto it = m_node_info_map_.find(craned_id);
-      if (it == m_node_info_map_.end()) return nullptr;
-      return it->second.node_state;
+    NodeState* GetPhysicalNodeStateOrNull(
+        const CranedId& craned_id) const override {
+      auto it = m_node_state_map_.find(craned_id);
+      return it == m_node_state_map_.end() ? nullptr : &it->second;
     }
 
     const std::set<std::pair<double, NodeState*>>& GetOrderedNodesSet()
@@ -608,16 +720,13 @@ class SchedulerAlgo {
                           const ResourceV3* concrete_res) override {
       for (const auto& [craned_id, res_in_node] : res) {
         NodeState* node_state = m_node_info_map_.at(craned_id).node_state;
-        node_state->UpdateResourceInNode(start_time, end_time, res_in_node);
-        for (INodeSelector* selector : node_state->selectors) {
-          selector->UpdateCost(craned_id, start_time, end_time, res_in_node);
-        }
+        node_state->PhysicalNode()->UpdateResource(start_time, end_time,
+                                                   res_in_node);
       }
       if (concrete_res != nullptr) {
         for (const auto& [craned_id, res_in_node] :
              concrete_res->EachNodeResMap()) {
-          m_node_info_map_.at(craned_id).node_state->res_avail_v3 -=
-              res_in_node;
+          m_node_state_map_.at(craned_id).res_avail_v3 -= res_in_node;
         }
       }
     }
@@ -627,27 +736,23 @@ class SchedulerAlgo {
                                   const NodeResourceViewMap& res,
                                   const ResourceV3* concrete_res) override {
       for (const auto& [craned_id, res_in_node] : res) {
-        if (!m_node_info_map_.contains(craned_id)) continue;
-        NodeState* node_state = m_node_info_map_.at(craned_id).node_state;
-        node_state->UpdateResourceInNode(start_time, end_time, res_in_node,
-                                         /*is_release=*/true);
-        for (INodeSelector* selector : node_state->selectors) {
-          selector->UpdateCost(craned_id, start_time, end_time, res_in_node,
-                               /*is_release=*/true);
-        }
+        auto* node_state = GetPhysicalNodeStateOrNull(craned_id);
+        if (!node_state) continue;
+        node_state->UpdateResource(start_time, end_time, res_in_node,
+                                   /*is_release=*/true);
       }
       if (concrete_res != nullptr) {
         for (const auto& [craned_id, res_in_node] :
              concrete_res->EachNodeResMap()) {
-          if (!m_node_info_map_.contains(craned_id)) continue;
-          m_node_info_map_.at(craned_id).node_state->res_avail_v3 +=
-              res_in_node;
+          auto* node_state = GetPhysicalNodeStateOrNull(craned_id);
+          if (node_state) node_state->res_avail_v3 += res_in_node;
         }
       }
     }
 
    private:
     std::unique_ptr<const IUpdateNodeCostPolicy> m_update_cost_policy_;
+    absl::flat_hash_map<CranedId, NodeState>& m_node_state_map_;
     absl::flat_hash_map<CranedId, NodeRater> m_node_info_map_;
     // Nodes are sorted by cost, store NodeState* rather than CranedId to reduce
     // memory usage and improve performance.
@@ -665,9 +770,10 @@ class SchedulerAlgo {
     template <typename Policy, typename... Args>
     void InitializeNodeSelector(const absl::Time& now,
                                 const std::vector<NodeState*>& node_info_vec,
+                                absl::flat_hash_map<CranedId, NodeState>& nodes,
                                 Args&&... args) {
       m_node_selector_ = std::make_unique<NodeSelector>(
-          std::make_unique<const Policy>(std::forward<Args>(args)...));
+          std::make_unique<const Policy>(std::forward<Args>(args)...), nodes);
       for (const auto& node_state : node_info_vec) {
         m_node_selector_->AddNode(now, node_state);
       }
@@ -704,6 +810,7 @@ class SchedulerAlgo {
           job->start_time == now ? &job->allocated_res : nullptr);
       for (const CranedId& craned_id : job->craned_ids) {
         m_node_selector_->GetNodeState(craned_id)
+            ->PhysicalNode()
             ->qos_job_map[job->qos]
             .emplace(job);
       }
@@ -723,7 +830,8 @@ class SchedulerAlgo {
         m_node_selector_->ReleaseResourceIfPresent(
             now, rn->end_time, allocated_res_view, &rn->allocated_res);
         for (const auto& [craned_id, _] : rn->allocated_res.EachNodeResMap()) {
-          auto* node_state = m_node_selector_->GetNodeStateOrNull(craned_id);
+          auto* node_state =
+              m_node_selector_->GetPhysicalNodeStateOrNull(craned_id);
           if (!node_state) continue;
           node_state->qos_job_map[rn->qos].erase(rn);
         }
@@ -733,7 +841,8 @@ class SchedulerAlgo {
             pd->start_time, pd->end_time, pd->planned_res,
             pd->start_time == now ? &pd->allocated_res : nullptr);
         for (const CranedId& craned_id : pd->craned_ids) {
-          auto* node_state = m_node_selector_->GetNodeStateOrNull(craned_id);
+          auto* node_state =
+              m_node_selector_->GetPhysicalNodeStateOrNull(craned_id);
           if (!node_state) continue;
           node_state->qos_job_map[pd->qos].erase(pd);
         }
@@ -808,8 +917,8 @@ class SchedulerAlgo {
   class TimeAvailResMapIter {
    public:
     TimeAvailResMapIter(const CranedId& craned_id,
-                        const TimeAvailResMap::const_iterator& it,
-                        const TimeAvailResMap::const_iterator& end,
+                        const TimeAvailResView::Iterator& it,
+                        const TimeAvailResView::Iterator& end,
                         ResMapIterList* tracker_list,
                         const PdJobInScheduler* job,
                         const ResourceView* node_total_res)
@@ -937,8 +1046,8 @@ class SchedulerAlgo {
 
     ResMapIterList::ListContainer::iterator m_tracker_list_it_;
 
-    TimeAvailResMap::const_iterator m_entering_it_;
-    const TimeAvailResMap::const_iterator m_end_;
+    TimeAvailResView::Iterator m_entering_it_;
+    const TimeAvailResView::Iterator m_end_;
 
     const CranedId m_craned_id_;
     const absl::Duration m_time_limit_;
@@ -967,7 +1076,7 @@ class SchedulerAlgo {
       CRANE_ASSERT(nodes.size() == job->node_num);
       m_res_map_iters_.reserve(nodes.size());
       for (const NodeState* node : nodes) {
-        const auto& time_avail_res_map = node->time_avail_res_map;
+        const auto time_avail_res_map = node->GetTimeAvailResView();
         m_res_map_iters_.emplace_back(
             node->craned_id, time_avail_res_map.begin(),
             time_avail_res_map.end(), &m_satisfied_iters_, job,
@@ -1206,13 +1315,13 @@ class JobScheduler {
 
   std::future<CraneErrCode> HoldReleaseJobAsync(job_id_t job_id, int64_t secs);
 
-  CraneErrCode ChangeJobTimeConstraint(
+  CraneRichError ChangeJobTimeConstraint(
       job_id_t job_id, std::optional<int64_t> time_limit_seconds,
       std::optional<int64_t> deadline_time);
 
   std::vector<CraneErrCode> SuspendRunningJobs(
       const std::vector<task_id_t>& job_ids);
-  std::vector<CraneErrCode> ResumeSuspendedJobs(
+  std::vector<CraneRichError> ResumeSuspendedJobs(
       const std::vector<task_id_t>& job_ids);
 
   CraneErrCode ChangeJobPriority(job_id_t job_id, double priority);
@@ -1395,7 +1504,8 @@ class JobScheduler {
 
   static CraneExpected<void> HandleUnsetOptionalInJobToCtld(JobInCtld* job);
   static CraneExpectedRich<void> AcquireJobAttributes(JobInCtld* job);
-  static CraneExpectedRich<void> CheckJobValidity(JobInCtld* job);
+  static CraneExpectedRich<void> CheckJobValidity(JobInCtld* job,
+                                                  bool recovering = false);
 
   static CraneExpected<void> HandleUnsetOptionalInStepToCtld(StepInCtld* step);
   static CraneExpected<void> AcquireStepAttributes(StepInCtld* step);
@@ -1495,7 +1605,9 @@ class JobScheduler {
   std::expected<void, std::string> CreateResv_(
       const crane::grpc::CreateReservationRequest& request);
 
-  std::expected<void, std::string> DeleteResvMeta_(const ResvId& resv_id);
+  CraneExpectedRich<void> DeleteResvMeta_(
+      const ResvId& resv_id,
+      std::optional<uint64_t> expected_creation_order = std::nullopt);
 
   std::unique_ptr<SchedulerAlgo> m_node_selection_algo_;
 
@@ -1700,7 +1812,11 @@ class JobScheduler {
   std::unordered_map<ResvId, std::shared_ptr<uvw::timer_handle>>
       m_resv_timer_handles_;
 
-  using ResvTimerQueueElem = std::pair<ResvId, absl::Time>;
+  struct ResvTimerQueueElem {
+    ResvId reservation_id;
+    absl::Time end_time;
+    uint64_t creation_order;
+  };
   ConcurrentQueue<ResvTimerQueueElem> m_resv_timer_queue_;
   std::atomic<uint64_t> m_reservation_creation_order_{0};
 

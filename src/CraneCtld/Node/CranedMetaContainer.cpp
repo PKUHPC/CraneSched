@@ -298,9 +298,103 @@ void CranedMetaContainer::MallocResourceFromResv(ResvId resv_id,
       "resv_rn_jobs={}",
       resv_id, job_id, resv_meta->rn_job_res_map.size());
 
-  resv_meta->res_avail -= res;
+  const auto [it, inserted] = resv_meta->rn_job_res_map.emplace(job_id, res);
+  CRANE_ASSERT(inserted);
+  resv_meta->res_avail -= it->second;
+}
 
-  resv_meta->rn_job_res_map.emplace(job_id, res);
+bool CranedMetaContainer::RestoreReservation(
+    const crane::grpc::CreateReservationRequest& request) {
+  ResvMeta meta;
+  meta.name = request.reservation_name();
+  meta.creation_order = request.creation_order();
+  meta.part_id = request.partition();
+  if (!meta.part_id.empty() && !GetPartitionMetasPtr(meta.part_id)) {
+    CRANE_ERROR("Cannot restore reservation {}: partition {} is missing",
+                meta.name, meta.part_id);
+    return false;
+  }
+  meta.start_time = absl::FromUnixSeconds(request.start_time_unix_seconds());
+  meta.end_time = meta.start_time + absl::Seconds(request.duration_seconds());
+  meta.flex = request.flex();
+  meta.accounts_black_list = request.allowed_accounts().empty();
+  meta.users_black_list = request.allowed_users().empty();
+  const auto& accounts = meta.accounts_black_list ? request.denied_accounts()
+                                                  : request.allowed_accounts();
+  const auto& users =
+      meta.users_black_list ? request.denied_users() : request.allowed_users();
+  meta.accounts.insert(accounts.begin(), accounts.end());
+  meta.users.insert(users.begin(), users.end());
+  std::list<CranedId> nodes;
+  if (!util::ParseHostList(request.craned_regex(), &nodes) || nodes.empty()) {
+    CRANE_ERROR("Reservation {} has no persisted node allocation", meta.name);
+    return false;
+  }
+  CanonicalizeCranedIdList(&nodes);
+  for (const auto& node_id : nodes) {
+    auto node = GetCranedMetaPtr(node_id);
+    if (!node) {
+      CRANE_WARN("Removing missing node {} from restored reservation {}",
+                 node_id, meta.name);
+      continue;
+    }
+    meta.craned_ids.insert(node_id);
+    meta.res_total.AddResourceInNode(node_id, node->static_meta.res);
+  }
+  if (meta.craned_ids.empty()) {
+    CRANE_ERROR("Cannot restore reservation {}: no configured nodes remain",
+                meta.name);
+    return false;
+  }
+  for (const auto& node_id : meta.craned_ids) {
+    auto node = GetCranedMetaPtr(node_id);
+    const auto [_, inserted] = node->resv_in_node_map.emplace(
+        meta.name, std::make_pair(meta.start_time, meta.end_time));
+    CRANE_ASSERT(inserted);
+  }
+  meta.res_avail = meta.res_total;
+  auto reservations = GetResvMetaMapExclusivePtr();
+  const auto [_, inserted] =
+      reservations->emplace(request.reservation_name(), std::move(meta));
+  CRANE_ASSERT(inserted);
+  return true;
+}
+
+CraneRichError CranedMetaContainer::CheckReservationEndTime(
+    const ResvId& reservation, const ResourceV3& allocation, absl::Time old_end,
+    absl::Time new_end) {
+  if (!reservation.empty()) {
+    auto meta = GetResvMetaPtr(reservation);
+    if (!meta)
+      return FormatRichErr(CraneErrCode::ERR_INVALID_PARAM,
+                           "Reservation '{}' does not exist", reservation);
+    if (!meta->flex && new_end > meta->end_time)
+      return FormatRichErr(
+          CraneErrCode::ERR_INVALID_PARAM,
+          "New end time {} exceeds end time {} of non-FLEX reservation '{}'",
+          absl::FormatTime(new_end), absl::FormatTime(meta->end_time),
+          reservation);
+  }
+  if (new_end <= old_end) return FormatRichErr(CraneErrCode::SUCCESS, "");
+  for (const auto& [node_id, _] : allocation.EachNodeResMap()) {
+    auto node = GetCranedMetaPtr(node_id);
+    CRANE_ASSERT(node);
+    for (const auto& [owner, window] : node->resv_in_node_map) {
+      if (owner != reservation && window.first < new_end &&
+          window.second > old_end) {
+        CRANE_DEBUG("Job extension on {} conflicts with reservation {}",
+                    node_id, owner);
+        return FormatRichErr(
+            CraneErrCode::ERR_INVALID_PARAM,
+            "Extended runtime [{}, {}) overlaps reservation '{}' on node '{}' "
+            "[{}, {})",
+            absl::FormatTime(old_end), absl::FormatTime(new_end), owner,
+            node_id, absl::FormatTime(window.first),
+            absl::FormatTime(window.second));
+      }
+    }
+  }
+  return FormatRichErr(CraneErrCode::SUCCESS, "");
 }
 
 void CranedMetaContainer::FreeResourceFromResv(ResvId resv_id,
@@ -550,6 +644,7 @@ void CranedMetaContainer::SetGrpcReservationInfoByResvMeta_(
                                         absl::ToUnixSeconds(meta.start_time));
   info->set_partition(meta.part_id);
   info->set_creation_order(meta.creation_order);
+  info->set_flex(meta.flex);
   std::list<std::string> allocated_nodes;
   for (const auto& [id, resources] : meta.res_total.EachNodeResMap()) {
     allocated_nodes.push_back(id);

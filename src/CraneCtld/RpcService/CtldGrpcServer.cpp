@@ -1094,15 +1094,6 @@ grpc::Status CraneCtldServiceImpl::QueryReservationInfo(
   if (!g_runtime_status.srv_ready.load(std::memory_order_acquire))
     return grpc::Status{grpc::StatusCode::UNAVAILABLE,
                         "CraneCtld Server is not ready"};
-  if (auto msg = CheckCertAndUIDAllowed_(context, request->uid()); msg)
-    return {grpc::StatusCode::UNAUTHENTICATED, msg.value()};
-
-  auto res = g_account_manager->CheckUidIsAdmin(request->uid());
-  if (!res) {
-    response->set_ok(false);
-    response->set_reason(CraneErrStr(res.error()));
-    return grpc::Status::OK;
-  }
 
   if (request->reservation_name().empty()) {
     *response = g_meta_container->QueryAllResvInfo();
@@ -1165,10 +1156,16 @@ grpc::Status CraneCtldServiceImpl::ModifyJob(
             ? std::optional<int64_t>(request->time_limit_seconds())
             : std::nullopt;
     for (auto job_id : job_ids) {
-      err = g_job_scheduler->ChangeJobTimeConstraint(job_id, time_limit_seconds,
-                                                     std::nullopt);
+      auto result = g_job_scheduler->ChangeJobTimeConstraint(
+          job_id, time_limit_seconds, std::nullopt);
+      err = result.code();
       if (err == CraneErrCode::SUCCESS) {
         response->add_modified_jobs(job_id);
+      } else if (!result.description().empty()) {
+        response->add_not_modified_jobs(job_id);
+        response->add_not_modified_reasons(
+            fmt::format("Failed to change the time limit of Job#{}: {}.",
+                        job_id, result.description()));
       } else if (err == CraneErrCode::ERR_NON_EXISTENT) {
         response->add_not_modified_jobs(job_id);
         response->add_not_modified_reasons(fmt::format(
@@ -1205,10 +1202,16 @@ grpc::Status CraneCtldServiceImpl::ModifyJob(
             ? std::optional<int64_t>(request->deadline_time().seconds())
             : std::nullopt;
     for (auto job_id : job_ids) {
-      err = g_job_scheduler->ChangeJobTimeConstraint(job_id, std::nullopt,
-                                                     deadline_time);
+      auto result = g_job_scheduler->ChangeJobTimeConstraint(
+          job_id, std::nullopt, deadline_time);
+      err = result.code();
       if (err == CraneErrCode::SUCCESS) {
         response->add_modified_jobs(job_id);
+      } else if (!result.description().empty()) {
+        response->add_not_modified_jobs(job_id);
+        response->add_not_modified_reasons(
+            fmt::format("Failed to change the deadline of Job#{}: {}.", job_id,
+                        result.description()));
       } else if (err == CraneErrCode::ERR_NON_EXISTENT) {
         response->add_not_modified_jobs(job_id);
         response->add_not_modified_reasons(fmt::format(
@@ -1269,20 +1272,25 @@ grpc::Status CraneCtldServiceImpl::ModifyJob(
     std::vector<task_id_t> vec_ids(job_ids.begin(), job_ids.end());
     auto results = g_job_scheduler->ResumeSuspendedJobs(vec_ids);
     for (size_t i = 0; i < vec_ids.size(); i++) {
-      if (results[i] == CraneErrCode::SUCCESS) {
+      err = results[i].code();
+      if (err == CraneErrCode::SUCCESS) {
         response->add_modified_jobs(vec_ids[i]);
-      } else if (results[i] == CraneErrCode::ERR_NON_EXISTENT) {
+      } else if (!results[i].description().empty()) {
+        response->add_not_modified_jobs(vec_ids[i]);
+        response->add_not_modified_reasons(
+            fmt::format("Job #{}: {}.", vec_ids[i], results[i].description()));
+      } else if (err == CraneErrCode::ERR_NON_EXISTENT) {
         response->add_not_modified_jobs(vec_ids[i]);
         response->add_not_modified_reasons(
             fmt::format("Job #{} does not exist.", vec_ids[i]));
-      } else if (results[i] == CraneErrCode::ERR_INVALID_PARAM) {
+      } else if (err == CraneErrCode::ERR_INVALID_PARAM) {
         response->add_not_modified_jobs(vec_ids[i]);
         response->add_not_modified_reasons(
             fmt::format("Job #{} is not suspended.", vec_ids[i]));
       } else {
         response->add_not_modified_jobs(vec_ids[i]);
         response->add_not_modified_reasons(
-            fmt::format("Job #{}: {}.", vec_ids[i], CraneErrStr(results[i])));
+            fmt::format("Job #{}: {}.", vec_ids[i], CraneErrStr(err)));
       }
     }
   } else {
