@@ -26,7 +26,7 @@
 namespace Craned::Supervisor {
 
 class CforedClient {
-  friend class SupervisorExitTestPeer;
+  friend class CforedExitTest;
 
   struct X11FdInfo {
     int fd;
@@ -82,8 +82,7 @@ class CforedClient {
 
   uint16_t InitUvX11FwdHandler();
 
-  bool TaskProcessStop(task_id_t task_id, uint32_t exit_code, bool signaled);
-  void TaskEnd(task_id_t task_id);
+  void TaskProcessStop(task_id_t task_id, uint32_t exit_code, bool signaled);
 
   const std::string& CforedName() const { return m_cfored_name_; }
 
@@ -136,6 +135,7 @@ class CforedClient {
                                     crane::grpc::StreamStepIOReply>* stream,
       std::atomic<bool>* write_pending);
 
+  bool FinishTaskIO_(task_id_t task_id);
   void HandleOutputStop_(task_id_t task_id, bool is_stdout);
 
   std::atomic<bool> m_stopped_{false};

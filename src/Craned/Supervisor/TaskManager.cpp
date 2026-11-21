@@ -600,12 +600,14 @@ bool StepInstance::AllTaskMainProcessesExited() const {
   return true;
 }
 
-bool StepInstance::KillAllTaskProcesses() {
-  if (step_user_cg &&
-      CgroupManager::GetCgroupVersion() ==
-          Common::CgConstant::CgroupVersion::CGROUP_V2 &&
-      step_user_cg->KillAllProcesses(SIGKILL)) {
-    return true;
+void StepInstance::CleanResidualProcesses() {
+  if (!IsCrun() || m_residual_processes_cleaned_ || AllTaskFinished() ||
+      !AllTaskMainProcessesExited())
+    return;
+
+  if (step_user_cg && step_user_cg->KillSubtree()) {
+    m_residual_processes_cleaned_ = true;
+    return;
   }
 
   bool success = true;
@@ -616,7 +618,7 @@ bool StepInstance::KillAllTaskProcesses() {
       success = false;
     }
   }
-  return success;
+  m_residual_processes_cleaned_ = success;
 }
 
 void StepInstance::InitOomBaseline() {
@@ -3476,12 +3478,8 @@ void TaskManager::EvCleanSigchldQueueCb_() {
       uint32_t exit_code = exit_info->value;
       if (exit_info->is_terminated_by_signal)
         exit_code += ExitCode::KCrunExitCodeStatusNum;
-      auto ok_to_free = m_step_.GetCforedClient()->TaskProcessStop(
-          task_id, exit_code, exit_info.value().is_terminated_by_signal);
-      if (ok_to_free) {
-        CRANE_TRACE("It's ok to unregister task #{}", task_id);
-        m_step_.GetCforedClient()->TaskEnd(task_id);
-      }
+      m_step_.GetCforedClient()->TaskProcessStop(
+          task_id, exit_code, exit_info->is_terminated_by_signal);
     } else /* Batch / Calloc */ {
       FinalizeTaskAsync(task_id);
     }
@@ -3492,27 +3490,7 @@ void TaskManager::EvCleanSigchldQueueCb_() {
     m_sigchld_queue_.enqueue(task);
   }
 
-  MaybeKillResidualTaskProcesses_();
-}
-
-void TaskManager::MaybeKillResidualTaskProcesses_() {
-  if (!m_step_.IsCrun() || m_residual_process_cleanup_started_ ||
-      m_step_.AllTaskFinished() || !m_step_.AllTaskMainProcessesExited()) {
-    return;
-  }
-
-  CRANE_INFO(
-      "[Step #{}.{}] All task processes exited; killing residual task "
-      "processes before waiting for output EOF.",
-      m_step_.job_id, m_step_.step_id);
-  if (m_step_.KillAllTaskProcesses()) {
-    m_residual_process_cleanup_started_ = true;
-  } else {
-    CRANE_WARN(
-        "[Step #{}.{}] Failed to kill all residual task processes; "
-        "cleanup will be retried.",
-        m_step_.job_id, m_step_.step_id);
-  }
+  m_step_.CleanResidualProcesses();
 }
 
 void TaskManager::EvCleanCriEventQueueCb_() {
