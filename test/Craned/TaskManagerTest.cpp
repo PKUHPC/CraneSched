@@ -269,7 +269,7 @@ class CforedExitTest : public testing::Test {
   bool Finish() { return client.FinishTaskIO_(0); }
   std::vector<uint32_t> ExitCodes() {
     std::vector<uint32_t> codes;
-    CforedClient::FwdRequest req;
+    CforedClient::FwdRequest req{.data = CforedClient::TaskFinishStatus{}};
     while (client.m_task_fwd_req_queue_.try_dequeue(req))
       codes.push_back(
           std::get<CforedClient::TaskFinishStatus>(req.data).exit_code);
