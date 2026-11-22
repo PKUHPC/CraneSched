@@ -2288,6 +2288,11 @@ bool CgroupV2::EraseBpfDeviceMap() {
 }
 #endif
 
+bool CgroupV2::KillSubtree() {
+  return m_v2_fs_backend_ && m_v2_fs_backend_->KillAllProcesses(
+                                 m_cgroup_info_.GetCgroupName(), SIGKILL);
+}
+
 bool CgroupV2::KillAllProcesses(int signum) {
   if (m_v2_fs_backend_) {
     return m_v2_fs_backend_->KillAllProcesses(m_cgroup_info_.GetCgroupName(),

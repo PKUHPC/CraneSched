@@ -432,6 +432,7 @@ class CgroupInterface {
                                bool set_mknod) = 0;
 
   virtual bool KillAllProcesses(int signum) = 0;
+  virtual bool KillSubtree() { return false; }
 
   virtual bool Empty() = 0;
 
@@ -467,7 +468,6 @@ class CgroupV1 : public CgroupInterface {
                        bool set_write, bool set_mknod) override;
 
   bool KillAllProcesses(int signum) override;
-
   bool Empty() override;
 
   void Destroy() override;
@@ -528,7 +528,7 @@ class CgroupV2 : public CgroupInterface {
   bool EraseBpfDeviceMap();
 #endif
   bool KillAllProcesses(int signum) override;
-
+  bool KillSubtree() override;
   bool Empty() override;
 
   void Destroy() override;

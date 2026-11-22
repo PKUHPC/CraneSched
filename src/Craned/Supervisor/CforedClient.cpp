@@ -279,10 +279,6 @@ void CforedClient::CleanStdoutFwdHandlerQueueCb_() {
     // This queues the task into m_stop_task_io_queue_ for
     // CleanStopTaskIOQueueCb_ to close handles and (if the process has
     // already exited) enqueue the deferred TASK_EXIT_STATUS.
-    auto on_finish = [this, task_id] {
-      m_stop_task_io_queue_.enqueue(task_id);
-      m_clean_stop_task_io_queue_async_handle_->send();
-    };
     std::shared_ptr<uvw::pipe_handle> ph;
     std::shared_ptr<uvw::tty_handle> th;
     std::shared_ptr<uvw::pipe_handle> err_ph;
@@ -318,38 +314,20 @@ void CforedClient::CleanStdoutFwdHandlerQueueCb_() {
               }
             });
 
-        ph->on<uvw::end_event>([this, tid = task_id, on_finish](
-                                   uvw::end_event&, uvw::pipe_handle& h) {
-          // EOF Received
-          h.close();
-          CRANE_INFO("[Task #{}] Output pipe received EOF.", tid);
-          bool should_finish = false;
-          {
-            absl::MutexLock lock(&m_mtx_);
-            auto it = m_fwd_meta_map.find(tid);
-            if (it != m_fwd_meta_map.end() && !it->second.output_stopped) {
-              it->second.output_stopped = true;
-              should_finish = it->second.err_stopped;
-            }
-          }
-          if (should_finish) on_finish();
-        });
+        ph->on<uvw::end_event>(
+            [this, tid = task_id](uvw::end_event&, uvw::pipe_handle& h) {
+              // EOF Received
+              h.close();
+              CRANE_INFO("[Task #{}] Output pipe received EOF.", tid);
+              HandleOutputStop_(tid, true);
+            });
 
-        ph->on<uvw::error_event>([this, tid = meta.task_id, on_finish](
+        ph->on<uvw::error_event>([this, tid = meta.task_id](
                                      uvw::error_event& e, uvw::pipe_handle& h) {
           CRANE_WARN("[Task #{}] output pipe error: {}. Closing.", tid,
                      e.what());
           h.close();
-          bool should_finish = false;
-          {
-            absl::MutexLock lock(&m_mtx_);
-            auto it = m_fwd_meta_map.find(tid);
-            if (it != m_fwd_meta_map.end() && !it->second.output_stopped) {
-              it->second.output_stopped = true;
-              should_finish = it->second.err_stopped;
-            }
-          }
-          if (should_finish) on_finish();
+          HandleOutputStop_(tid, true);
         });
 
         ph->on<uvw::close_event>(
@@ -389,39 +367,21 @@ void CforedClient::CleanStdoutFwdHandlerQueueCb_() {
               }
             });
 
-        err_ph->on<uvw::end_event>([this, tid = task_id, on_finish](
-                                       uvw::end_event&, uvw::pipe_handle& h) {
-          CRANE_INFO("[Task #{}] Stderr pipe received EOF.", tid);
-          // EOF Received
-          h.close();
-          bool should_finish = false;
-          {
-            absl::MutexLock lock(&m_mtx_);
-            auto it = m_fwd_meta_map.find(tid);
-            if (it != m_fwd_meta_map.end() && !it->second.err_stopped) {
-              it->second.err_stopped = true;
-              should_finish = it->second.output_stopped;
-            }
-          }
-          if (should_finish) on_finish();
-        });
+        err_ph->on<uvw::end_event>(
+            [this, tid = task_id](uvw::end_event&, uvw::pipe_handle& h) {
+              CRANE_INFO("[Task #{}] Stderr pipe received EOF.", tid);
+              // EOF Received
+              h.close();
+              HandleOutputStop_(tid, false);
+            });
 
         err_ph->on<uvw::error_event>(
-            [this, tid = meta.task_id, on_finish](uvw::error_event& e,
-                                                  uvw::pipe_handle& h) {
+            [this, tid = meta.task_id](uvw::error_event& e,
+                                       uvw::pipe_handle& h) {
               CRANE_WARN("[Task #{}] Stderr pipe error: {}. Closing.", tid,
                          e.what());
               h.close();
-              bool should_finish = false;
-              {
-                absl::MutexLock lock(&m_mtx_);
-                auto it = m_fwd_meta_map.find(tid);
-                if (it != m_fwd_meta_map.end() && !it->second.err_stopped) {
-                  it->second.err_stopped = true;
-                  should_finish = it->second.output_stopped;
-                }
-              }
-              if (should_finish) on_finish();
+              HandleOutputStop_(tid, false);
             });
 
         err_ph->on<uvw::close_event>(
@@ -456,37 +416,31 @@ void CforedClient::CleanStdoutFwdHandlerQueueCb_() {
           });
 
       th->on<uvw::end_event>(
-          [this, task_id, on_finish](uvw::end_event&, uvw::tty_handle& h) {
+          [this, task_id](uvw::end_event&, uvw::tty_handle& h) {
             // The remote end is closed, go to EOF process.
             h.close();
-            bool should_finish = false;
             {
               absl::MutexLock lock(&m_mtx_);
               auto it = m_fwd_meta_map.find(task_id);
-              if (it != m_fwd_meta_map.end() && !it->second.output_stopped) {
-                it->second.output_stopped = true;
+              if (it != m_fwd_meta_map.end()) {
                 it->second.input_stopped = true;
-                should_finish = true;
               }
             }
-            if (should_finish) on_finish();
+            HandleOutputStop_(task_id, true);
           });
 
-      th->on<uvw::error_event>([this, tid = meta.task_id, on_finish](
-                                   uvw::error_event& e, uvw::tty_handle& h) {
+      th->on<uvw::error_event>([this, tid = meta.task_id](uvw::error_event& e,
+                                                          uvw::tty_handle& h) {
         CRANE_WARN("[Task #{}] pty read error: {}. Closing.", tid, e.what());
         h.close();
-        bool should_finish = false;
         {
           absl::MutexLock lock(&m_mtx_);
           auto it = m_fwd_meta_map.find(tid);
-          if (it != m_fwd_meta_map.end() && !it->second.output_stopped) {
-            it->second.output_stopped = true;
+          if (it != m_fwd_meta_map.end()) {
             it->second.input_stopped = true;
-            should_finish = true;
           }
         }
-        if (should_finish) on_finish();
+        HandleOutputStop_(tid, true);
       });
 
       th->on<uvw::close_event>(
@@ -508,6 +462,26 @@ void CforedClient::CleanStdoutFwdHandlerQueueCb_() {
   }
 }
 
+void CforedClient::HandleOutputStop_(task_id_t task_id, bool is_stdout) {
+  bool should_finish = false;
+  {
+    absl::MutexLock lock(&m_mtx_);
+    auto it = m_fwd_meta_map.find(task_id);
+    if (it == m_fwd_meta_map.end()) return;
+
+    bool& stopped =
+        is_stdout ? it->second.output_stopped : it->second.err_stopped;
+    if (stopped) return;
+    stopped = true;
+    should_finish = it->second.output_stopped && it->second.err_stopped;
+  }
+
+  if (should_finish) {
+    m_stop_task_io_queue_.enqueue(task_id);
+    m_clean_stop_task_io_queue_async_handle_->send();
+  }
+}
+
 void CforedClient::CleanX11FwdHandlerQueueCb_() {
   CreateX11FwdQueueElem elem;
   while (m_create_x11_fwd_queue_.try_dequeue(elem)) {
@@ -519,49 +493,36 @@ void CforedClient::CleanX11FwdHandlerQueueCb_() {
 void CforedClient::CleanStopTaskIOQueueCb_() {
   task_id_t task_id;
   while (m_stop_task_io_queue_.try_dequeue(task_id)) {
-    bool ok_to_free = false;
-    {
-      absl::MutexLock lock(&m_mtx_);
-      auto it = m_fwd_meta_map.find(task_id);
-      if (it == m_fwd_meta_map.end()) {
-        CRANE_ERROR("[Task #{}] Cannot find fwd meta to stop task io.",
-                    task_id);
-        continue;
-      }
-      auto& meta = it->second;
-      auto& output_handle = it->second.out_handle;
-      if (!meta.pty && output_handle.pipe) output_handle.pipe->close();
-      if (meta.pty && output_handle.tty) output_handle.tty->close();
-      if (meta.err_handle) meta.err_handle->close();
-      output_handle.pipe.reset();
-      output_handle.tty.reset();
-      meta.err_handle.reset();
+    if (FinishTaskIO_(task_id)) g_task_mgr->FinalizeTaskAsync(task_id);
+  }
+}
 
-      if (meta.stdout_read != -1) close(meta.stdout_read);
-      if (meta.stderr_read != -1) close(meta.stderr_read);
+bool CforedClient::FinishTaskIO_(task_id_t task_id) {
+  absl::MutexLock lock(&m_mtx_);
+  auto it = m_fwd_meta_map.find(task_id);
+  if (it == m_fwd_meta_map.end()) return false;
+  auto& meta = it->second;
+  auto& output_handle = it->second.out_handle;
+  if (!meta.pty && output_handle.pipe) output_handle.pipe->close();
+  if (meta.pty && output_handle.tty) output_handle.tty->close();
+  if (meta.err_handle) meta.err_handle->close();
+  output_handle.pipe.reset();
+  output_handle.tty.reset();
+  meta.err_handle.reset();
 
-      CRANE_DEBUG("[Task #{}] Finished its output and err output.", task_id);
+  if (meta.stdout_read != -1) close(std::exchange(meta.stdout_read, -1));
+  if (meta.stderr_read != -1) close(std::exchange(meta.stderr_read, -1));
 
-      auto& m = m_fwd_meta_map[task_id];
-      ok_to_free = m.proc_stopped;
-      if (ok_to_free) {
-        // Output fully drained and process already exited.
-        // Now it is safe to send TASK_EXIT_STATUS — all TASK_OUTPUT
-        // messages have already been enqueued before this point.
-        m_task_fwd_req_queue_.enqueue(FwdRequest{
-            .type = StreamStepIORequest::TASK_EXIT_STATUS,
-            .data = TaskFinishStatus{.task_id = task_id,
-                                     .exit_code = m.exit_code,
-                                     .signaled = m.signaled},
-        });
-      }
-    }
+  CRANE_DEBUG("[Task #{}] Finished its output and err output.", task_id);
 
-    if (ok_to_free) {
-      CRANE_DEBUG("[Task #{}] It's ok to unregister.", task_id);
-      this->TaskEnd(task_id);
-    }
-  };
+  if (!meta.proc_stopped) return false;
+  m_task_fwd_req_queue_.enqueue(
+      FwdRequest{.type = StreamStepIORequest::TASK_EXIT_STATUS,
+                 .data = TaskFinishStatus{.task_id = task_id,
+                                          .exit_code = meta.exit_code,
+                                          .signaled = meta.signaled}});
+  m_fwd_meta_map.erase(it);
+  return true;
 }
 
 void CforedClient::InitChannelAndStub(const std::string& cfored_name) {
@@ -728,7 +689,6 @@ void CforedClient::AsyncSendRecvThread_() {
         }
         CRANE_ERROR("Terminating step due to cfored connection failure.");
         g_task_mgr->TerminateStepAsync(TaskFinalizeCause::CFORED_DISCONNECTED);
-        m_stopped_ = true;
         m_wait_reconn_ = false;
         return;
       }
@@ -1084,36 +1044,20 @@ void CforedClient::AsyncSendRecvThread_() {
   }
 }
 
-bool CforedClient::TaskProcessStop(task_id_t task_id, uint32_t exit_code,
+void CforedClient::TaskProcessStop(task_id_t task_id, uint32_t exit_code,
                                    bool signaled) {
-  CRANE_DEBUG("[Task #{}] Process stopped with exit_code: {}, signaled: {}.",
-              task_id, exit_code, signaled);
-  // Store exit info in meta. TASK_EXIT_STATUS is only enqueued after
-  // output is fully drained, so that all TASK_OUTPUT messages precede it.
   absl::MutexLock lock(&m_mtx_);
-  auto& meta = m_fwd_meta_map[task_id];
+  auto it = m_fwd_meta_map.find(task_id);
+  if (it == m_fwd_meta_map.end()) return;
+  auto& meta = it->second;
   meta.proc_stopped = true;
   meta.exit_code = exit_code;
   meta.signaled = signaled;
   if (meta.output_stopped && meta.err_stopped) {
-    m_task_fwd_req_queue_.enqueue(FwdRequest{
-        .type = StreamStepIORequest::TASK_EXIT_STATUS,
-        .data = TaskFinishStatus{.task_id = task_id,
-                                 .exit_code = exit_code,
-                                 .signaled = signaled},
-    });
+    m_stop_task_io_queue_.enqueue(task_id);
+    m_clean_stop_task_io_queue_async_handle_->send();
   }
-  return meta.output_stopped && meta.err_stopped;
 }
-
-void CforedClient::TaskEnd(task_id_t task_id) {
-  CRANE_DEBUG("[Task #{}] Unregistered from cfored client.", task_id);
-  {
-    absl::MutexLock lock(&m_mtx_);
-    m_fwd_meta_map.erase(task_id);
-  }
-  g_task_mgr->FinalizeTaskAsync(task_id);
-};
 
 void CforedClient::TaskOutPutForward(task_id_t task_id,
                                      std::unique_ptr<char[]>&& data,

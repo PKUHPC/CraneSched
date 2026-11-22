@@ -257,6 +257,39 @@ INSTANTIATE_TEST_SUITE_P(
       return info.param.first == 0 ? "Root" : "ExplicitUser";
     });
 
+class CforedExitTest : public testing::Test {
+ protected:
+  void SetUp() override {
+    client.m_stopped_ = true;
+    client.m_ev_thread_.join();
+    client.m_fwd_meta_map.try_emplace(0);
+  }
+
+  void Eof(bool stdout_stream) { client.HandleOutputStop_(0, stdout_stream); }
+  bool Finish() { return client.FinishTaskIO_(0); }
+  std::vector<uint32_t> ExitCodes() {
+    std::vector<uint32_t> codes;
+    CforedClient::FwdRequest req{.data = CforedClient::TaskFinishStatus{}};
+    while (client.m_task_fwd_req_queue_.try_dequeue(req))
+      codes.push_back(
+          std::get<CforedClient::TaskFinishStatus>(req.data).exit_code);
+    return codes;
+  }
+  void TearDown() override { client.m_fwd_meta_map.clear(); }
+
+  CforedClient client;
+};
+
+TEST_F(CforedExitTest, FinalEofRacingWithProcessExitPublishesOnce) {
+  Eof(true);
+  Eof(false);
+  client.TaskProcessStop(0, 7, false);
+  EXPECT_TRUE(ExitCodes().empty());
+  EXPECT_TRUE(Finish());
+  EXPECT_FALSE(Finish());
+  EXPECT_EQ(ExitCodes(), std::vector<uint32_t>{7});
+}
+
 namespace {
 
 class TaskEnvironmentTest : public ::testing::Test {
@@ -451,6 +484,102 @@ TEST_F(ScriptPermissionsTest, OtherUserInJobGroupCannotReadScript) {
   ASSERT_TRUE(WIFEXITED(status));
   EXPECT_EQ(WEXITSTATUS(status), 0);
 }
+class ResidualTask : public ITaskInstance {
+ public:
+  using ITaskInstance::ITaskInstance;
+  std::optional<TaskExecId> GetExecId() const override { return pid_t{123}; }
+  CraneErrCode Kill(int sig) override {
+    signals.push_back(sig);
+    return result;
+  }
+  CraneErrCode Spawn() override { return CraneErrCode::SUCCESS; }
+  CraneErrCode Prepare() override { return CraneErrCode::SUCCESS; }
+  CraneErrCode Cleanup() override { return CraneErrCode::SUCCESS; }
+
+  std::vector<int> signals;
+  CraneErrCode result{CraneErrCode::SUCCESS};
+};
+
+class NonRecursiveCgroup : public Common::CgroupInterface {
+ public:
+  NonRecursiveCgroup()
+      : Common::CgroupInterface("non-recursive-test-cgroup", nullptr) {}
+  bool KillAllProcesses(int) override {
+    ++parent_kill_calls;
+    return true;
+  }
+  bool Empty() override { return true; }
+  bool SetCpuCoreLimit(double) override { return false; }
+  bool SetCpuShares(uint64_t) override { return false; }
+  bool SetCpuSet(const std::unordered_set<uint32_t>&) override { return false; }
+  bool SetCpusetMems(const std::string&) override { return false; }
+  bool SetMemoryLimitBytes(uint64_t) override { return false; }
+  bool SetMemorySwLimitBytes(uint64_t) override { return false; }
+  bool SetMemorySoftLimitBytes(uint64_t) override { return false; }
+  bool SetBlockioWeight(uint64_t) override { return false; }
+  bool SetDeviceAccess(const std::unordered_set<SlotId>&, bool, bool,
+                       bool) override {
+    return false;
+  }
+  int parent_kill_calls{0};
+  int subtree_kill_calls{0};
+  bool KillSubtree() override {
+    ++subtree_kill_calls;
+    return false;
+  }
+};
+
+TEST(CrunResidualCleanup, WaitsForLastExitAndRetriesFailedTaskCleanup) {
+  StepToSupv spec;
+  spec.set_type(crane::grpc::Interactive);
+  spec.mutable_interactive_meta()->set_interactive_type(crane::grpc::Crun);
+  StepInstance step(spec);
+  auto first = std::make_unique<ResidualTask>(&step, 0);
+  auto last = std::make_unique<ResidualTask>(&step, 1);
+  auto& a = *first;
+  auto& b = *last;
+  step.AddTaskInstance(0, std::move(first));
+  step.AddTaskInstance(1, std::move(last));
+  step.step_user_cg = std::make_unique<Common::CgroupV1>("test", nullptr);
+
+  a.GetFinalInfo()->raw_exit.emplace();
+  step.CleanResidualProcesses();
+  EXPECT_TRUE(a.signals.empty());
+  EXPECT_TRUE(b.signals.empty());
+
+  b.GetFinalInfo()->raw_exit.emplace();
+  b.result = CraneErrCode::ERR_GENERIC_FAILURE;
+  step.CleanResidualProcesses();
+  EXPECT_EQ(a.signals, std::vector<int>{SIGKILL});
+  EXPECT_EQ(b.signals, std::vector<int>{SIGKILL});
+
+  b.result = CraneErrCode::SUCCESS;
+  step.CleanResidualProcesses();
+  step.CleanResidualProcesses();
+  EXPECT_EQ(a.signals, (std::vector<int>{SIGKILL, SIGKILL}));
+  EXPECT_EQ(b.signals, (std::vector<int>{SIGKILL, SIGKILL}));
+}
+
+TEST(CrunResidualCleanup, FallsBackWhenCgroupV2BackendIsNotRecursive) {
+  StepToSupv spec;
+  spec.set_type(crane::grpc::Interactive);
+  spec.mutable_interactive_meta()->set_interactive_type(crane::grpc::Crun);
+  StepInstance step(spec);
+  auto task = std::make_unique<ResidualTask>(&step, 0);
+  auto& process = *task;
+  process.GetFinalInfo()->raw_exit.emplace();
+  step.AddTaskInstance(0, std::move(task));
+  auto cgroup = std::make_unique<NonRecursiveCgroup>();
+  auto& parent = *cgroup;
+  step.step_user_cg = std::move(cgroup);
+
+  step.CleanResidualProcesses();
+
+  EXPECT_EQ(parent.subtree_kill_calls, 1);
+  EXPECT_EQ(parent.parent_kill_calls, 0);
+  EXPECT_EQ(process.signals, std::vector<int>{SIGKILL});
+}
+
 }  // namespace
 
 }  // namespace Craned::Supervisor
