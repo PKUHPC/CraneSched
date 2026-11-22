@@ -58,16 +58,17 @@ SONAME（例如 `liblua-5.3.so`）而无法在 Rocky 9 上安装。使用
 
 #### 构建过程
 
-导航到您的构建目录并确保项目已正确配置：
+向不同 CPU 型号的机器分发软件包时，配置构建需关闭 `CRANE_NATIVE_ARCH_OPT`：
 
 ```bash
 cd CraneSched/build
 
 # 对于 CGroup v1（默认）
-cmake -G Ninja -DCMAKE_BUILD_TYPE=Release ..
+cmake -G Ninja -DCMAKE_BUILD_TYPE=Release -DCRANE_NATIVE_ARCH_OPT=OFF ..
 
 # 对于 CGroup v2
-cmake -G Ninja -DCMAKE_BUILD_TYPE=Release -DCRANE_ENABLE_CGROUP_V2=true ..
+cmake -G Ninja -DCMAKE_BUILD_TYPE=Release -DCRANE_NATIVE_ARCH_OPT=OFF \
+    -DCRANE_ENABLE_CGROUP_V2=true ..
 
 # 构建项目
 cmake --build .
