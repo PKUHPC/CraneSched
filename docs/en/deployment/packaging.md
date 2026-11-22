@@ -58,16 +58,18 @@ build host's Lua SONAME, which can differ between distributions. Configure with
 
 #### Build Process
 
-Navigate to your build directory and ensure the project is properly configured:
+Configure the build with `CRANE_NATIVE_ARCH_OPT=OFF` when packaging for
+machines with different CPU models:
 
 ```bash
 cd CraneSched/build
 
 # For CGroup v1 (default)
-cmake -G Ninja -DCMAKE_BUILD_TYPE=Release ..
+cmake -G Ninja -DCMAKE_BUILD_TYPE=Release -DCRANE_NATIVE_ARCH_OPT=OFF ..
 
 # For CGroup v2
-cmake -G Ninja -DCMAKE_BUILD_TYPE=Release -DCRANE_ENABLE_CGROUP_V2=true ..
+cmake -G Ninja -DCMAKE_BUILD_TYPE=Release -DCRANE_NATIVE_ARCH_OPT=OFF \
+    -DCRANE_ENABLE_CGROUP_V2=true ..
 
 # Build the project
 cmake --build .
