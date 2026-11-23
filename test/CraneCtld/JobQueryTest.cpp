@@ -27,7 +27,7 @@ using Ctld::BuildJobQueryReply;
 using Ctld::ProjectJobForQuery;
 constexpr char kPrivate[] = "private-query-test-marker";
 
-TEST(JobSignalOptionsTest, ValidatesSubmittedSignals) {
+TEST(JobSubmission, ValidatesSubmittedSignalFields) {
   using crane::grpc::Signal;
   struct TestCase {
     int number;
@@ -59,16 +59,24 @@ TEST(JobSignalOptionsTest, ValidatesSubmittedSignals) {
     signal->set_signal_time(test.seconds);
     signal->set_signal_flag(test.flag);
     SCOPED_TRACE(request.ShortDebugString());
-    auto error = Ctld::ValidateJobSignals(
-        request, test.type != crane::grpc::Interactive);
+    request.add_gids(::getgid());
+    Ctld::JobInCtld job;
+    job.SetFieldsByJobToCtld(request);
+    auto result = Ctld::JobScheduler::PreJobSubmitCheck(&job);
     if (test.error) {
-      ASSERT_TRUE(error);
-      EXPECT_NE(error->find(test.error), std::string::npos);
+      ASSERT_FALSE(result);
+      EXPECT_NE(result.error().find("Invalid --signal"), std::string::npos);
+      EXPECT_NE(result.error().find(test.error), std::string::npos);
     } else {
-      EXPECT_FALSE(error);
+      EXPECT_TRUE(result);
     }
   }
-  EXPECT_FALSE(Ctld::ValidateJobSignals(crane::grpc::JobToCtld{}, false));
+  crane::grpc::JobToCtld request;
+  request.set_type(crane::grpc::Batch);
+  request.add_gids(::getgid());
+  Ctld::JobInCtld job;
+  job.SetFieldsByJobToCtld(request);
+  EXPECT_TRUE(Ctld::JobScheduler::PreJobSubmitCheck(&job));
 }
 
 TEST(JobSubmission, RpcRejectsInvalidSignalsBeforeAdmission) {

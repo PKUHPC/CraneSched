@@ -38,34 +38,6 @@
 
 namespace Ctld {
 
-namespace {
-
-std::optional<std::string> ValidateJobSignals(const crane::grpc::JobToCtld& job,
-                                              bool allow_batch_only) {
-  using crane::grpc::Signal;
-  for (const auto& signal : job.signals()) {
-    const auto number = signal.signal_number();
-    // Linux application signals. glibc reserves 32 and 33 for NPTL.
-    if (number < 1 || number > 64 || number == 32 || number == 33)
-      return fmt::format("Invalid --signal number {} (expected 1-31 or 34-64)",
-                         number);
-
-    if (signal.signal_time() > 65535)
-      return fmt::format("Invalid --signal time {} (expected 0-65535 seconds)",
-                         signal.signal_time());
-
-    if (!Signal::SignalFlag_IsValid(signal.signal_flag()))
-      return fmt::format("Invalid --signal flag {}",
-                         static_cast<int>(signal.signal_flag()));
-
-    if (!allow_batch_only && signal.signal_flag() == Signal::BATCH_ONLY)
-      return "Invalid --signal: B: is only supported for batch submissions";
-  }
-  return std::nullopt;
-}
-
-}  // namespace
-
 grpc::Status CtldForInternalServiceImpl::StepStatusChange(
     grpc::ServerContext* context,
     const crane::grpc::StepStatusChangeRequest* request,
@@ -405,25 +377,22 @@ grpc::Status CtldForInternalServiceImpl::CforedStream(
         switch (cfored_request.type()) {
         case StreamCforedRequest::JOB_REQUEST: {
           auto const& payload = cfored_request.payload_job_req();
+          auto job = std::make_unique<JobInCtld>();
+          job->SetFieldsByJobToCtld(payload.job());
+
+          CRANE_TRACE("[Job #{}] Recv JOB_REQUEST.", job->JobId());
+
+          InteractiveMeta meta;
+          meta.cfored_name = cfored_name;
+          meta.cb_step_res_allocated = cb_step_res_allocated;
+          meta.cb_step_cancel = cb_step_cancel;
+          meta.cb_step_completed = cb_step_completed;
+          job->meta = std::move(meta);
+
           std::expected<std::pair<job_id_t, step_id_t>, std::string> result;
-          std::unique_ptr<JobInCtld> job;
-          if (auto error = ValidateJobSignals(payload.job(),
-                                              /*allow_batch_only=*/false)) {
-            result = std::unexpected(std::move(*error));
-          } else {
-            job = std::make_unique<JobInCtld>();
-            job->SetFieldsByJobToCtld(payload.job());
-            CRANE_TRACE("[Job #{}] Recv JOB_REQUEST.", job->JobId());
 
-            InteractiveMeta meta;
-            meta.cfored_name = cfored_name;
-            meta.cb_step_res_allocated = cb_step_res_allocated;
-            meta.cb_step_cancel = cb_step_cancel;
-            meta.cb_step_completed = cb_step_completed;
-            job->meta = std::move(meta);
-
-            if (auto check = JobScheduler::PreJobSubmitCheck(job.get()); !check)
-              result = std::unexpected(check.error());
+          if (auto check = JobScheduler::PreJobSubmitCheck(job.get()); !check) {
+            result = std::unexpected(check.error());
           }
 
           if (result) {
@@ -729,6 +698,8 @@ grpc::Status CraneCtldServiceImpl::SubmitBatchJob(
   submit_span.SetAttribute("uid", static_cast<int64_t>(request->job().uid()));
   submit_span.SetAttribute("partition",
                            std::string(request->job().partition_name()));
+  submit_span.SetAttribute(
+      "queue_depth", static_cast<int64_t>(g_job_scheduler->PendingQueueSize()));
 
   {
     CRANE_TRACE_CHILD_NAMED(auth_span, submit_span, "submit/auth");
@@ -749,17 +720,6 @@ grpc::Status CraneCtldServiceImpl::SubmitBatchJob(
     return grpc::Status::OK;
   }
 
-  if (auto error = ValidateJobSignals(
-          request->job(), request->job().type() != crane::grpc::Interactive)) {
-    submit_span.SetStatus(crane::StatusCode::kError, "validation_failed");
-    response->set_ok(false);
-    response->set_code(CraneErrCode::ERR_INVALID_PARAM);
-    response->set_reason(*error);
-    return grpc::Status::OK;
-  }
-
-  submit_span.SetAttribute(
-      "queue_depth", static_cast<int64_t>(g_job_scheduler->PendingQueueSize()));
   auto job = std::make_unique<JobInCtld>();
   job->SetFieldsByJobToCtld(request->job());
 
@@ -896,6 +856,13 @@ grpc::Status CraneCtldServiceImpl::SubmitBatchJobs(
     return grpc::Status::OK;
   }
 
+  // Generate shared submit_id for all jobs in the batch
+  std::string submit_tp = crane::SerializeTraceParent(submit_span.GetContext());
+  std::string submit_id = submit_tp.size() >= 35 ? submit_tp.substr(3, 32) : "";
+  submit_span.SetAttribute("crane.submit_id", submit_id);
+
+  std::vector<CraneExpectedRich<std::future<CraneExpected<job_id_t>>>> results;
+
   uint32_t job_count = request->count();
   const auto& job_to_ctld = request->job();
 
@@ -906,23 +873,6 @@ grpc::Status CraneCtldServiceImpl::SubmitBatchJobs(
     response->mutable_code_list()->Add(CraneErrCode::ERR_INVALID_PARAM);
     return grpc::Status::OK;
   }
-
-  if (ValidateJobSignals(job_to_ctld,
-                         job_to_ctld.type() != crane::grpc::Interactive)) {
-    submit_span.SetStatus(crane::StatusCode::kError, "validation_failed");
-    for (uint32_t i = 0; i < job_count; ++i) {
-      response->add_job_id_list(0);
-      response->add_code_list(CraneErrCode::ERR_INVALID_PARAM);
-    }
-    return grpc::Status::OK;
-  }
-
-  // Generate shared submit_id for all jobs in the batch
-  std::string submit_tp = crane::SerializeTraceParent(submit_span.GetContext());
-  std::string submit_id = submit_tp.size() >= 35 ? submit_tp.substr(3, 32) : "";
-  submit_span.SetAttribute("crane.submit_id", submit_id);
-
-  std::vector<CraneExpectedRich<std::future<CraneExpected<job_id_t>>>> results;
 
   if (has_array_spec) {
     // Array job: submit ONE parent job. Expansion into individual tasks
