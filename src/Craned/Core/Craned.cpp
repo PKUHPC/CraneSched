@@ -1754,14 +1754,8 @@ void WaitForStopAndDoGvarFini() {
    */
   g_ctld_client->Shutdown();
   g_craned_for_pam_server->Wait();
-
-  g_server.reset();
-  g_craned_for_pam_server.reset();
-
-  /*
-   * Called in g_server.
-   */
-  g_cri_client.reset();
+  g_ctld_client_sm->Shutdown();
+  g_ctld_client->Wait();
 
   /* Called from
    * PAM_SERVER, G_SERVER
@@ -1769,11 +1763,12 @@ void WaitForStopAndDoGvarFini() {
    */
   g_job_mgr->Wait();
 
-  /*
-   * Called from JobMgr and CtldClient, wait all thread pool task finish before
-   * destruct.
-   */
+  // The controller client can still have callbacks queued on the thread pool.
   g_thread_pool->wait();
+
+  g_server.reset();
+  g_craned_for_pam_server.reset();
+  g_cri_client.reset();
   g_job_mgr.reset();
 
   g_ctld_client.reset();
