@@ -26,9 +26,9 @@ git -C "$workspace" checkout --force --detach "$source_sha"
 
 cd "$workspace"
 HTTPS_PROXY="$download_proxy" cmake --preset ci-debug
-cmake --build --preset ci-debug --target crane_unit_tests --parallel "${BUILD_JOBS:-6}"
+cmake --build --preset ci-debug --target crane_unit_tests --parallel "${BUILD_JOBS:-16}"
 ctest --test-dir cmake-build-ci-debug --output-on-failure
-cmake --build --preset ci-debug --parallel "${BUILD_JOBS:-6}"
+cmake --build --preset ci-debug --parallel "${BUILD_JOBS:-16}"
 
 [[ "$(git rev-parse HEAD)" == "$source_sha" ]]
 [[ -z "$(git status --porcelain --untracked-files=no)" ]]

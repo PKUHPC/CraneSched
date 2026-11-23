@@ -16,11 +16,6 @@ on:
         required: false
         default: false
         type: boolean
-      integration_shards:
-        description: Independent integration environments
-        type: choice
-        default: '4'
-        options: ['1', '4']
 
 permissions:
   contents: read
@@ -115,10 +110,6 @@ jobs:
     if: ${{ !cancelled() && needs.build.result == 'success' }}
     runs-on: crane-ci
     timeout-minutes: 180
-    concurrency:
-      group: crane-ci-integration
-      cancel-in-progress: false
-      queue: max
     container:
       image: ${{ vars.CRANE_CI_DEV_IMAGE }}
     outputs:
@@ -129,7 +120,7 @@ jobs:
       CI_TEST_IMAGE: ${{ needs.build.outputs.test_image }}
       CI_ASSET_DIR: ${{ needs.build.outputs.asset_dir }}
       CI_SUITE_REVISION: ${{ needs.build.outputs.harness_sha }}
-      CI_SHARD_COUNT: ${{ inputs.integration_shards }}
+      CI_SHARD_COUNT: '4'
     steps:
       - name: Run all prepared tests and reclaim their environments
         id: integration

@@ -76,9 +76,9 @@ make -C go protos
 make -C go test
 
 HTTPS_PROXY="$download_proxy" cmake --preset ci-debug
-cmake --build --preset ci-debug --target crane_unit_tests --parallel "${BUILD_JOBS:-6}"
+cmake --build --preset ci-debug --target crane_unit_tests --parallel "${BUILD_JOBS:-16}"
 ctest --test-dir cmake-build-ci-debug --output-on-failure
-cmake --build --preset ci-debug --parallel "${BUILD_JOBS:-6}"
+cmake --build --preset ci-debug --parallel "${BUILD_JOBS:-16}"
 
 make -C go clean
 make -C go all tool PREFIX=/usr STRIP=true CHECK_GPU=0

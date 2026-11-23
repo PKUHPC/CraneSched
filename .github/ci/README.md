@@ -8,11 +8,10 @@ in parallel. The final job reports the combined result. Fix formatting diagnosti
 
 - `source_ref`: product revision; blank uses the selected workflow revision.
 - `harness_ref`: optional test-suite revision; blank uses the matching branch, then master.
-- `integration_shards`: number of independent integration environments.
 - `publish_packages`: enable RPM publication; default is false.
 
 Build returns `rpm_dir`, `harness_sha`, `asset_dir` and `test_image` for downstream jobs.
-Integration reports completion and expected/passed counts.
+Integration runs four shards and reports completion and expected/passed counts.
 
 ## Configuration
 
