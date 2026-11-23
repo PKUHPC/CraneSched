@@ -74,30 +74,6 @@ std::vector<std::string> FindNodesNotInConfig_(
 
 constexpr size_t kMaxExecutionGroups = 256;
 
-std::expected<void, std::string> CheckJobPrerequisites(const JobInCtld* job) {
-  if (job == nullptr) return std::unexpected("null job pointer");
-  if (job->gids.empty()) return std::unexpected("GID list must not be empty");
-  if (job->gids.size() > kMaxExecutionGroups)
-    return std::unexpected("GID list exceeds maximum size");
-
-  if (job->IsContainer()) {
-    if (!job->pod_meta)
-      return std::unexpected("container job requires Pod metadata");
-    const auto& pod = *job->pod_meta;
-    auto valid = util::os::ValidateContainerIdentity(
-        job->uid, job->gids, pod.userns, pod.run_as_user, pod.run_as_group);
-    if (!valid) return valid;
-  }
-
-#ifndef HAVE_PMIX
-  if (job->IsPmix()) {
-    return std::unexpected("PMIx support is not compiled in.");
-  }
-#endif
-
-  return {};
-}
-
 bool PersistJobRuntimeStateNoLock_(JobInCtld* job, task_id_t job_id,
                                    crane::grpc::JobStatus status,
                                    absl::Time end_time, absl::Time suspend_time,
@@ -1195,33 +1171,29 @@ bool JobScheduler::Init() {
   return true;
 }
 
+// Compile-time and feature-gate pre-submit checks
 std::expected<void, std::string> JobScheduler::PreJobSubmitCheck(
     const JobInCtld* job) {
-  if (auto valid = CheckJobPrerequisites(job); !valid) return valid;
+  if (job == nullptr) return std::unexpected("null job pointer");
+  if (job->gids.empty()) return std::unexpected("GID list must not be empty");
+  if (job->gids.size() > kMaxExecutionGroups)
+    return std::unexpected("GID list exceeds maximum size");
 
-  using crane::grpc::Signal;
-  for (const auto& signal : job->JobToCtld().signals()) {
-    const auto number = signal.signal_number();
-    // Linux application signals. glibc reserves 32 and 33 for NPTL.
-    if (number < 1 || number > 64 || number == 32 || number == 33)
-      return std::unexpected(fmt::format(
-          "Invalid --signal number {} (expected 1-31 or 34-64)", number));
-
-    if (signal.signal_time() > 65535)
-      return std::unexpected(
-          fmt::format("Invalid --signal time {} (expected 0-65535 seconds)",
-                      signal.signal_time()));
-
-    if (!Signal::SignalFlag_IsValid(signal.signal_flag()))
-      return std::unexpected(fmt::format(
-          "Invalid --signal flag {}", static_cast<int>(signal.signal_flag())));
-
-    if (signal.signal_flag() == Signal::BATCH_ONLY &&
-        (job->IsInteractive() ||
-         std::holds_alternative<InteractiveMeta>(job->meta)))
-      return std::unexpected(
-          "Invalid --signal: B: is only supported for batch submissions");
+  if (job->IsContainer()) {
+    if (!job->pod_meta)
+      return std::unexpected("container job requires Pod metadata");
+    const auto& pod = *job->pod_meta;
+    auto valid = util::os::ValidateContainerIdentity(
+        job->uid, job->gids, pod.userns, pod.run_as_user, pod.run_as_group);
+    if (!valid) return valid;
   }
+
+#ifndef HAVE_PMIX
+  if (job->IsPmix()) {
+    return std::unexpected("PMIx support is not compiled in.");
+  }
+#endif
+
   return {};
 }
 
@@ -3873,6 +3845,34 @@ JobScheduler::SubmitJobToScheduler(std::unique_ptr<JobInCtld> job) {
   if (auto valid = PreJobSubmitCheck(job.get()); !valid)
     return std::unexpected(
         FormatRichErr(CraneErrCode::ERR_INVALID_PARAM, "{}", valid.error()));
+
+  using crane::grpc::Signal;
+  for (const auto& signal : job->JobToCtld().signals()) {
+    const auto number = signal.signal_number();
+    // Linux application signals. glibc reserves 32 and 33 for NPTL.
+    if (number < 1 || number > 64 || number == 32 || number == 33)
+      return std::unexpected(FormatRichErr(
+          CraneErrCode::ERR_INVALID_PARAM,
+          "Invalid --signal number {} (expected 1-31 or 34-64)", number));
+
+    if (signal.signal_time() > 65535)
+      return std::unexpected(
+          FormatRichErr(CraneErrCode::ERR_INVALID_PARAM,
+                        "Invalid --signal time {} (expected 0-65535 seconds)",
+                        signal.signal_time()));
+
+    if (!Signal::SignalFlag_IsValid(signal.signal_flag()))
+      return std::unexpected(FormatRichErr(
+          CraneErrCode::ERR_INVALID_PARAM, "Invalid --signal flag {}",
+          static_cast<int>(signal.signal_flag())));
+
+    if (signal.signal_flag() == Signal::BATCH_ONLY &&
+        (job->IsInteractive() ||
+         std::holds_alternative<InteractiveMeta>(job->meta)))
+      return std::unexpected(FormatRichErr(
+          CraneErrCode::ERR_INVALID_PARAM,
+          "Invalid --signal: B: is only supported for batch submissions"));
+  }
 
   if (!job->password_entry->Valid()) {
     CRANE_DEBUG("Uid {} not found on the controller node", job->uid);
@@ -8909,7 +8909,7 @@ CraneExpectedRich<void> JobScheduler::AcquireJobAttributes(JobInCtld* job) {
 }
 
 CraneExpectedRich<void> JobScheduler::CheckJobValidity(JobInCtld* job) {
-  if (auto valid = CheckJobPrerequisites(job); !valid) {
+  if (auto valid = PreJobSubmitCheck(job); !valid) {
     return std::unexpected(
         FormatRichErr(CraneErrCode::ERR_INVALID_PARAM, "{}", valid.error()));
   }

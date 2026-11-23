@@ -1401,7 +1401,7 @@ class JobScheduler {
   static CraneExpected<void> AcquireStepAttributes(StepInCtld* step);
   static CraneExpected<void> CheckStepValidity(StepInCtld* step);
 
-  // Check submission fields and job prerequisites before admission.
+  // Pre-submit checks (compile-time capability, feature flags, etc.).
   // Return ok when allowed; otherwise return human-readable reason.
   static std::expected<void, std::string> PreJobSubmitCheck(
       const JobInCtld* job);

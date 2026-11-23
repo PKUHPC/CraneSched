@@ -28,6 +28,7 @@ using Ctld::ProjectJobForQuery;
 constexpr char kPrivate[] = "private-query-test-marker";
 
 TEST(JobSubmission, ValidatesSubmittedSignalFields) {
+  Ctld::JobScheduler scheduler;
   using crane::grpc::Signal;
   struct TestCase {
     int number;
@@ -51,32 +52,41 @@ TEST(JobSubmission, ValidatesSubmittedSignalFields) {
        nullptr},
       {64, 60, Signal::NONE, crane::grpc::Batch, nullptr},
   };
+  crane::grpc::JobToCtld request;
+  // The invalid UID stops requests that pass signal validation before
+  // the scheduler needs account or partition state.
+  request.set_uid(std::numeric_limits<uid_t>::max());
+  request.add_gids(::getgid());
   for (const auto& test : cases) {
-    crane::grpc::JobToCtld request;
     request.set_type(test.type);
+    request.clear_signals();
     auto* signal = request.add_signals();
     signal->set_signal_number(test.number);
     signal->set_signal_time(test.seconds);
     signal->set_signal_flag(test.flag);
     SCOPED_TRACE(request.ShortDebugString());
-    request.add_gids(::getgid());
-    Ctld::JobInCtld job;
-    job.SetFieldsByJobToCtld(request);
-    auto result = Ctld::JobScheduler::PreJobSubmitCheck(&job);
+
+    auto job = std::make_unique<Ctld::JobInCtld>();
+    job->SetFieldsByJobToCtld(request);
+    auto result = scheduler.SubmitJobToScheduler(std::move(job));
+    ASSERT_FALSE(result);
     if (test.error) {
-      ASSERT_FALSE(result);
-      EXPECT_NE(result.error().find("Invalid --signal"), std::string::npos);
-      EXPECT_NE(result.error().find(test.error), std::string::npos);
+      EXPECT_EQ(result.error().code(), CraneErrCode::ERR_INVALID_PARAM);
+      EXPECT_NE(result.error().description().find("Invalid --signal"),
+                std::string::npos);
+      EXPECT_NE(result.error().description().find(test.error),
+                std::string::npos);
     } else {
-      EXPECT_TRUE(result);
+      EXPECT_EQ(result.error().code(), CraneErrCode::ERR_INVALID_UID);
     }
   }
-  crane::grpc::JobToCtld request;
-  request.set_type(crane::grpc::Batch);
-  request.add_gids(::getgid());
-  Ctld::JobInCtld job;
-  job.SetFieldsByJobToCtld(request);
-  EXPECT_TRUE(Ctld::JobScheduler::PreJobSubmitCheck(&job));
+
+  request.clear_signals();
+  auto job = std::make_unique<Ctld::JobInCtld>();
+  job->SetFieldsByJobToCtld(request);
+  auto result = scheduler.SubmitJobToScheduler(std::move(job));
+  ASSERT_FALSE(result);
+  EXPECT_EQ(result.error().code(), CraneErrCode::ERR_INVALID_UID);
 }
 
 TEST(JobSubmission, RpcRejectsInvalidSignalsBeforeAdmission) {
