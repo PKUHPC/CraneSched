@@ -16,10 +16,10 @@
  * along with this program.  If not, see <https://www.gnu.org/licenses/>.
  */
 
-#include "crane/AccountingTime.h"
-
 #include <google/protobuf/util/time_util.h>
 #include <gtest/gtest.h>
+
+#include "crane/AccountingTime.h"
 
 namespace {
 
