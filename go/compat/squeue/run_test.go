@@ -10,12 +10,14 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"google.golang.org/protobuf/types/known/timestamppb"
 	"io"
 	"net"
 	"os"
 	"path/filepath"
 	"slices"
 	"testing"
+	"time"
 
 	pb "github.com/PKUHPC/CraneSched/go/generated/protos"
 	"google.golang.org/grpc"
@@ -201,5 +203,109 @@ func TestJobReportKeepsKnownFalseAndFractionalBilling(t *testing.T) {
 	}
 	if err := json.Unmarshal(record["billable_tres"], &billing); err != nil || !billing.Set || billing.Number != 0.5 {
 		t.Errorf("billable_tres = %s, err %v", record["billable_tres"], err)
+	}
+}
+
+func TestJobAndStepQueueFields(t *testing.T) {
+	job := &pb.JobInfo{JobId: 17, Type: pb.JobType_Batch, SubmitHostname: "login", SubmittedSize: &pb.SubmittedJobSize{MaxNodes: 4}, MaxStepWaitStatus: new(uint32(7 << 8)), CpusPerTask: new(2.0), MaxNodes: new(uint32(4)), NodeNum: 2, Ntasks: new(uint32(2)), ReqTotalResView: &pb.ResourceView{CpuCount: 4}, AllocatedResView: &pb.ResourceView{CpuCount: 2}}
+	o := &options{}
+	check := func(r row, field, want string) {
+		t.Helper()
+		got, err := r.value(field, o)
+		if err != nil || got != want {
+			t.Fatalf("%s = %q, %v, want %q", field, got, err, want)
+		}
+	}
+	r := row{job: job}
+	check(r, "DerivedEC", "7:0")
+	check(r, "AllocNodes", "login")
+	check(r, "MaxCPUs", "4")
+	check(r, "MaxNodes", "4")
+	check(r, "tres-per-task", "cpu=2")
+	report := jobReport(r, o)
+	if report.DerivedExitCode.ReturnCode.Number != 7 || report.MaxCPUs.Number != 0 || report.MaxNodes.Number != 4 {
+		t.Fatal(report)
+	}
+	job.Status = pb.JobStatus_Running
+	job.ExecutionNode = []string{"n1", "n2"}
+	check(r, "MaxCPUs", "2")
+	check(r, "MaxNodes", "2")
+	step := row{job: job, step: &pb.StepInfo{StepType: pb.StepType_COMMON, StepId: 2, CpusPerTask: new(1.0)}}
+	check(step, "tres-per-task", "cpu=2")
+	job.CpusPerTask = nil
+	check(r, "tres-per-task", "N/A")
+	check(step, "tres-per-task", "(null)")
+	s := stepReport(step, o)
+	if s.Array.TaskID != nil {
+		t.Fatal(s.Array)
+	}
+	job.ArrayTask = &pb.ArrayTaskIdentity{ArrayJobId: 4, TaskId: 0}
+	if x := stepReport(step, o).Array; x.TaskID == nil || *x.TaskID != 0 || x.JobID != 4 {
+		t.Fatal(x)
+	}
+	job.ExitCode = 256 + 15
+	check(r, "exit_code", "0:15")
+	if x := jobReport(r, o).ExitCode; x.Signal.Name != "TERM" || x.Signal.ID.Number != 15 {
+		t.Fatal(x)
+	}
+	job.MaxStepWaitStatus = nil
+	if _, err := r.value("DerivedEC", o); err == nil || jobReport(r, o).DerivedExitCode != nil {
+		t.Fatal("missing outcome was reported")
+	}
+}
+
+func TestPendingNodeCeilingUsesSubmittedCounts(t *testing.T) {
+	job := &pb.JobInfo{Status: pb.JobStatus_Pending, MaxNodes: new(uint32(1)), CpusPerTask: new(2.0)}
+	r := row{job: job}
+	if got := r.maxNodes(); got != nil {
+		t.Fatalf("missing submission reported as %d", *got)
+	}
+	for _, tc := range []struct {
+		size         *pb.SubmittedJobSize
+		tasksPerNode uint32
+		want         uint32
+	}{
+		{&pb.SubmittedJobSize{}, 0, 0},
+		{&pb.SubmittedJobSize{MaxNodes: 1}, 0, 1},
+		{&pb.SubmittedJobSize{Tasks: 1}, 0, 1},
+		{&pb.SubmittedJobSize{}, 2, 2},
+	} {
+		job.SubmittedSize = tc.size
+		job.TasksPerNode = new(tc.tasksPerNode)
+		if got := r.maxNodes(); got == nil || *got != tc.want {
+			t.Errorf("submitted nodes %d, tasks %d, tasks per node %d: got %v, want %d", tc.size.MaxNodes, tc.size.Tasks, tc.tasksPerNode, got, tc.want)
+		}
+	}
+}
+
+func TestJobSortWithoutAllocatedNodes(t *testing.T) {
+	pending := func(id uint32, name string) *pb.JobInfo {
+		return &pb.JobInfo{JobId: id, Name: name, Status: pb.JobStatus_Pending}
+	}
+	array, held, active := pending(3, "array"), pending(1, "held"), pending(2, "running")
+	active.Status = pb.JobStatus_Running
+	active.StartTime = timestamppb.New(time.Unix(1700000000, 0))
+	active.ExecutionNode = []string{"n1"}
+	for _, tc := range []struct {
+		order string
+		want  []string
+	}{
+		{"N,j", []string{"running", "held", "array"}}, {"-N,j", []string{"array", "held", "running"}}, {"b", []string{"running", "array", "held"}},
+	} {
+		o, err := parse([]string{"-S", tc.order}, nil, io.Discard)
+		if err != nil {
+			t.Fatal(err)
+		}
+		rows, err := o.rows(&pb.QueryJobsInfoReply{JobInfoList: []*pb.JobInfo{array, held, active}})
+		if err != nil {
+			t.Fatal(err)
+		}
+		var got []string
+		for _, r := range rows {
+			got = append(got, r.job.Name)
+		}
+		if !slices.Equal(got, tc.want) {
+			t.Errorf("%s: %v, want %v", tc.order, got, tc.want)
+		}
 	}
 }

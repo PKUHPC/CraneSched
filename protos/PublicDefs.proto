@@ -188,6 +188,12 @@ message Signal {
   SignalFlag signal_flag = 3;
 }
 
+// Counts before task layout normalization; zero means the user omitted a bound.
+message SubmittedJobSize {
+  uint32 max_nodes = 1;
+  uint32 tasks = 2;
+}
+
 message JobToCtld {
   /* -------- Fields that are set at the submission time. ------- */
   google.protobuf.Duration time_limit = 1;
@@ -265,6 +271,7 @@ message JobToCtld {
   ArraySpec array_spec = 58;
   // Before task layout normalization. Zero denotes an unspecified bound.
   optional uint32 requested_tasks_per_node = 59;
+  SubmittedJobSize submitted_size = 60;
 }
 
 message JobInEmbeddedDb {
@@ -314,6 +321,8 @@ message RuntimeAttrOfJob {
   // Normalized query request, retained for recovery archival.
   GresMap requested_gres = 30;
   bool held_by_admin = 31;
+  // POSIX wait status aggregated over completed application steps.
+  optional uint32 max_step_wait_status = 32;
 }
 
 message StepToCtld {
@@ -725,6 +734,9 @@ message JobInfo {
   map<string, uint32> allocated_licenses = 59;
   optional bool requeue_eligible = 60;
   optional string script_path = 61;
+  optional double cpus_per_task = 62;
+  optional uint32 max_step_wait_status = 63;
+  SubmittedJobSize submitted_size = 64;
 }
 
 message StepInfo {
@@ -776,6 +788,7 @@ message StepInfo {
   QueryVisibility query_visibility = 42;
   IoMeta io_meta = 43;
   GresMap gres_per_node = 44;
+  optional double cpus_per_task = 45;
 }
 
 // Physical CPU topology of a node or job topology constraint.

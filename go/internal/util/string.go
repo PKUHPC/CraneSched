@@ -844,6 +844,12 @@ func CheckJobNameLength(name string) error {
 }
 
 func CheckJobArgs(job *protos.JobToCtld) error {
+	if job.SubmittedSize == nil {
+		job.SubmittedSize = &protos.SubmittedJobSize{MaxNodes: job.NodeNumMax, Tasks: job.Ntasks}
+	}
+	if job.RequestedTasksPerNode == nil {
+		job.RequestedTasksPerNode = new(job.NtasksPerNode)
+	}
 	if job.MemPerNode != nil && job.MemPerCpu != nil {
 		return fmt.Errorf("--mem and --mem-per-cpu are mutually exclusive, " +
 			"please check your command line options, submission script, and environment variables")

@@ -632,8 +632,7 @@ bool JobScheduler::Init() {
     auto it = recovered_running_jobs.find(job_id);
     return recovered_running_jobs.erase(it);
   };
-  // When store, write/purge step info first, then job info.
-  // When read, iterate by job.
+  // Replay retained terminal steps before recovering the active steps.
   for (auto job_it = recovered_running_jobs.begin();
        job_it != recovered_running_jobs.end();) {
     auto& [job_id, job] = *job_it;
@@ -660,7 +659,18 @@ bool JobScheduler::Init() {
       if (completed_step_status.contains(step_status)) {
         CRANE_INFO("[Step #{}{}] Step is completed, put to mongodb!", job_id,
                    step_id);
+        if ((step_type == crane::grpc::COMMON ||
+             (step_type == crane::grpc::PRIMARY && job->IsCrun())) &&
+            job->RecordStepExitStatus(step_status,
+                                      step_info.runtime_attr().exit_code()) &&
+            !g_embedded_db_client->UpdateRuntimeAttrOfJob(0, job->JobDbId(),
+                                                          job->RuntimeAttr())) {
+          CRANE_ERROR("Failed to recover terminal step outcome for job #{}",
+                      job_id);
+          return false;
+        }
         completed_steps.emplace_back(std::move(step_info));
+        continue;
       }
       std::unique_ptr<StepInCtld> step;
       if (step_type == crane::grpc::StepType::DAEMON) {
@@ -6722,29 +6732,7 @@ void JobScheduler::CleanJobStatusChangeQueueCb_() {
   CRANE_TRACE("Persist step status changes to embedded db cost {} ms",
               step_txn_ms);
   db_commit_span.SetAttribute("step_runtime_update_ms", step_txn_ms);
-  auto now = std::chrono::steady_clock::now();
-
-  FinalTransferResult final_step_result;
-  {
-    CRANE_TRACE_CHILD_NAMED(final_steps_span, db_commit_span,
-                            "status_change/process_final_steps");
-    final_steps_span.SetAttribute(
-        "step_count", static_cast<int64_t>(context.step_raw_ptrs.size()));
-    final_step_result = ProcessFinalSteps_(context.step_raw_ptrs);
-    final_steps_span.SetAttribute("ok", final_step_result.ok);
-    final_steps_span.SetAttribute("persist_ms", final_step_result.persist_ms);
-    final_steps_span.SetAttribute("mongo_insert_ms",
-                                  final_step_result.mongo_insert_ms);
-    final_steps_span.SetAttribute("purge_ms", final_step_result.purge_ms);
-    if (!final_step_result.ok)
-      final_steps_span.SetStatus(crane::StatusCode::kError,
-                                 final_step_result.failed_stage);
-  }
-  auto duration = std::chrono::steady_clock::now() - now;
-  CRANE_TRACE(
-      "ProcessFinalSteps_ took {} ms",
-      std::chrono::duration_cast<std::chrono::milliseconds>(duration).count());
-
+  bool job_updates_ok = true;
   auto job_txn_begin = std::chrono::steady_clock::now();
   std::vector<JobInCtld*> rn_jobs;
   rn_jobs.reserve(context.rn_job_raw_ptrs.size());
@@ -6761,6 +6749,7 @@ void JobScheduler::CleanJobStatusChangeQueueCb_() {
       begin_span.SetAttribute("chunk_size", static_cast<int64_t>(end - begin));
       auto ok = g_embedded_db_client->BeginVariableDbTransaction(&txn_id);
       if (!ok) {
+        job_updates_ok = false;
         CRANE_ERROR(
             "JobScheduler failed to start job transaction when clean step "
             "status change.");
@@ -6782,6 +6771,7 @@ void JobScheduler::CleanJobStatusChangeQueueCb_() {
         commit_span.SetAttribute("job_id", job->JobId());
         if (!g_embedded_db_client->UpdateRuntimeAttrOfJob(
                 txn_id, job->JobDbId(), job->RuntimeAttr())) {
+          job_updates_ok = false;
           CRANE_ERROR("[Job #{}] Failed to call UpdateRuntimeAttrOfJob()",
                       job->JobId());
           updates_span.SetStatus(crane::StatusCode::kError,
@@ -6795,6 +6785,7 @@ void JobScheduler::CleanJobStatusChangeQueueCb_() {
       commit_span.SetAttribute("chunk_size", static_cast<int64_t>(end - begin));
       auto ok = g_embedded_db_client->CommitVariableDbTransaction(txn_id);
       if (!ok) {
+        job_updates_ok = false;
         CRANE_ERROR(
             "JobScheduler failed to commit job transaction when clean step "
             "status change.");
@@ -6813,6 +6804,31 @@ void JobScheduler::CleanJobStatusChangeQueueCb_() {
   db_commit_span.SetAttribute("step_txn_ms", step_txn_ms);
   db_commit_span.SetAttribute("job_txn_ms", job_txn_ms);
   db_commit_span.SetAttribute("job_runtime_update_ms", job_txn_ms);
+  // Checkpoint live job outcomes before their terminal steps can be purged.
+  auto now = std::chrono::steady_clock::now();
+
+  FinalTransferResult final_step_result;
+  {
+    CRANE_TRACE_CHILD_NAMED(final_steps_span, db_commit_span,
+                            "status_change/process_final_steps");
+    final_steps_span.SetAttribute(
+        "step_count", static_cast<int64_t>(context.step_raw_ptrs.size()));
+    final_step_result =
+        ProcessFinalSteps_(context.step_raw_ptrs, job_updates_ok);
+    final_steps_span.SetAttribute("ok", final_step_result.ok);
+    final_steps_span.SetAttribute("persist_ms", final_step_result.persist_ms);
+    final_steps_span.SetAttribute("mongo_insert_ms",
+                                  final_step_result.mongo_insert_ms);
+    final_steps_span.SetAttribute("purge_ms", final_step_result.purge_ms);
+    if (!final_step_result.ok)
+      final_steps_span.SetStatus(crane::StatusCode::kError,
+                                 final_step_result.failed_stage);
+  }
+  auto duration = std::chrono::steady_clock::now() - now;
+  CRANE_TRACE(
+      "ProcessFinalSteps_ took {} ms",
+      std::chrono::duration_cast<std::chrono::milliseconds>(duration).count());
+
   now = std::chrono::steady_clock::now();
   // End lifecycle spans for completed jobs (before ownership transfer)
   // Note: only job_raw_ptrs contains truly finished jobs.
@@ -8345,14 +8361,7 @@ void SchedulerAlgo::NodeSelect(
 }
 
 JobScheduler::FinalTransferResult JobScheduler::ProcessFinalSteps_(
-    std::unordered_set<StepInCtld*> const& steps) {
-  return PersistAndTransferStepsToMongodb_(steps);
-  // CallPluginHookForFinalJobs_(jobs);
-}
-
-JobScheduler::FinalTransferResult
-JobScheduler::PersistAndTransferStepsToMongodb_(
-    std::unordered_set<StepInCtld*> const& steps) {
+    std::unordered_set<StepInCtld*> const& steps, bool purge) {
   FinalTransferResult result;
   if (steps.empty()) return result;
 
@@ -8413,6 +8422,12 @@ JobScheduler::PersistAndTransferStepsToMongodb_(
           std::chrono::steady_clock::now() - mongo_begin)
           .count();
   result.mongo_inserted = true;
+  // On a failed job checkpoint recovery replays these terminal steps.
+  if (!purge) {
+    result.ok = false;
+    result.failed_stage = "job_runtime_update_failed";
+    return result;
+  }
 
   std::vector<step_db_id_t> db_ids;
   for (StepInCtld* step : steps) db_ids.emplace_back(step->StepDbId());

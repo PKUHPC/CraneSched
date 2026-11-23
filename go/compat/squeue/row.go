@@ -133,7 +133,7 @@ func (o *options) timestamp(stamp *timestamppb.Timestamp) string {
 }
 func supported(f string) bool {
 	switch f {
-	case "StdIn", "StdOut", "StdErr", "tres-per-node", "LicensesAlloc", "NTPerNode", "MaxNodes", "tres-alloc", "Account", "ArrayJobId", "ArrayTaskId", "JobArrayId", "JobId", "StepId", "StepName", "StepState", "BatchFlag", "BatchHost", "Cluster", "Command", "Comment", "CPUsPerTask", "cpus-per-task", "Deadline", "Dependency", "EndTime", "ExcNodes", "Exclusive", "exit_code", "GroupId", "GroupName", "Licenses", "MinCPUs", "MinMemory", "Name", "Nodes", "NodeList", "NumCPUs", "NumNodes", "NumTasks", "Partition", "PendingTime", "Priority", "PriorityLong", "QOS", "Reason", "ReasonList", "ReqNodes", "Requeue", "Reservation", "RestartCnt", "StartTime", "State", "StateCompact", "SubmitTime", "TimeLeft", "TimeLimit", "TimeUsed", "UserId", "UserName", "WCKey", "WorkDir", "SchedNodes", "OverSubscribe":
+	case "StdIn", "StdOut", "StdErr", "tres-per-node", "tres-per-task", "LicensesAlloc", "NTPerNode", "MaxNodes", "MaxCPUs", "AllocNodes", "DerivedEC", "tres-alloc", "Account", "ArrayJobId", "ArrayTaskId", "JobArrayId", "JobId", "StepId", "StepName", "StepState", "BatchFlag", "BatchHost", "Cluster", "Command", "Comment", "CPUsPerTask", "cpus-per-task", "Deadline", "Dependency", "EndTime", "ExcNodes", "Exclusive", "exit_code", "GroupId", "GroupName", "Licenses", "MinCPUs", "MinMemory", "Name", "Nodes", "NodeList", "NumCPUs", "NumNodes", "NumTasks", "Partition", "PendingTime", "Priority", "PriorityLong", "QOS", "Reason", "ReasonList", "ReqNodes", "Requeue", "Reservation", "RestartCnt", "StartTime", "State", "StateCompact", "SubmitTime", "TimeLeft", "TimeLimit", "TimeUsed", "UserId", "UserName", "WCKey", "WorkDir", "SchedNodes", "OverSubscribe":
 		return true
 	default:
 		return false
@@ -278,7 +278,13 @@ func (r row) value(f string, o *options) (string, error) {
 		}
 		return cmp.Or(strings.Join(gresParts(gres, ":"), ","), "N/A"), nil
 	case "MaxNodes":
-		return num(j.GetMaxNodes()), nil
+		if limit := r.maxNodes(); limit != nil && *limit > 0 {
+			return num(*limit), nil
+		}
+		if j.SubmittedSize == nil && j.Status == pb.JobStatus_Pending && j.GetMaxNodes() > 0 {
+			return num(j.GetMaxNodes()), nil
+		}
+		return num(j.NodeNum), nil
 	case "NTPerNode":
 		if j.TasksPerNode == nil {
 			return "N/A", nil
@@ -296,6 +302,8 @@ func (r row) value(f string, o *options) (string, error) {
 		return utils.CompressHosts(j.ReqNodes), nil
 	case "ExcNodes":
 		return utils.CompressHosts(j.ExcludeNodes), nil
+	case "AllocNodes":
+		return cmp.Or(j.SubmitHostname, "(null)"), nil
 	case "BatchHost":
 		if len(j.ExecutionNode) > 0 {
 			return j.ExecutionNode[0], nil
@@ -348,9 +356,9 @@ func (r row) value(f string, o *options) (string, error) {
 			return "N/A", nil
 		}
 		return num(*tasks), nil
-	case "NumCPUs", "MinCPUs", "CPUsPerTask", "cpus-per-task":
+	case "NumCPUs", "MaxCPUs", "MinCPUs", "CPUsPerTask", "cpus-per-task":
 		cpus := requested.GetCpuCount()
-		if f == "NumCPUs" && allocated.GetCpuCount() > 0 {
+		if (f == "NumCPUs" || f == "MaxCPUs") && status != pb.JobStatus_Pending && allocated.GetCpuCount() > 0 {
 			cpus = allocated.GetCpuCount()
 		}
 		switch f {
@@ -368,6 +376,15 @@ func (r row) value(f string, o *options) (string, error) {
 			return "", fmt.Errorf("squeue: error: job %d has a fractional CPU count that Slurm cannot represent", j.JobId)
 		}
 		return strconv.FormatFloat(cpus, 'f', 0, 64), nil
+	case "tres-per-task":
+		value, ok := r.taskTRES()
+		if !ok {
+			return "", fmt.Errorf("squeue: error: CPU count per task cannot be represented for job %d", j.JobId)
+		}
+		if r.step == nil {
+			return cmp.Or(value, "N/A"), nil
+		}
+		return cmp.Or(value, "(null)"), nil
 	case "MinMemory":
 		if j.MemoryPerCpu != nil {
 			return memory(*j.MemoryPerCpu, o.noConvert), nil
@@ -417,10 +434,52 @@ func (r row) value(f string, o *options) (string, error) {
 		return "NO", nil
 	case "OverSubscribe":
 		return "NO", nil
-	case "exit_code":
-		return fmt.Sprintf("%d:%d", j.ExitCode&255, j.ExitCode>>8), nil
+	case "exit_code", "DerivedEC":
+		status := r.waitStatus(f)
+		if status == nil {
+			return "", fmt.Errorf("squeue: error: %s is unavailable for job %d", f, j.JobId)
+		}
+		return fmt.Sprintf("%d:%d", *status>>8, *status&127), nil
 	}
 	return "", unsupported("field " + f)
+}
+
+// The queue reports the pending node ceiling separately from the allocation.
+// A CPU-only request above one CPU/task carries no implicit node maximum.
+func (r row) maxNodes() *uint32 {
+	j := r.job
+	if j.Status != pb.JobStatus_Pending && len(j.ExecutionNode) > 0 {
+		return new(uint32(0))
+	}
+	size := j.SubmittedSize
+	if size == nil {
+		return nil
+	}
+	if size.MaxNodes > 0 {
+		return j.MaxNodes // the effective bound after task-count validation
+	}
+	if n := cmp.Or(size.Tasks, j.GetTasksPerNode()); n > 0 {
+		return new(n)
+	}
+	if j.GetCpusPerTask() > 1 {
+		return new(uint32(0))
+	}
+	return j.MaxNodes
+}
+
+func (r row) waitStatus(field string) *uint32 {
+	if field == "DerivedEC" {
+		return r.job.MaxStepWaitStatus
+	}
+	code := r.job.ExitCode
+	switch {
+	case code < 256:
+		return new(code << 8)
+	case code > 256 && code < 320:
+		return new(code - 256)
+	default:
+		return nil
+	}
 }
 
 func memory(bytes uint64, noConvert bool) string {
@@ -436,6 +495,28 @@ func memory(bytes uint64, noConvert bool) string {
 		}
 	}
 	return fmt.Sprintf("%dM", mb)
+}
+
+// A step inherits its allocation’s per-task TRES unless it requests GRES
+// independently. Batch and extern have no separate per-task request.
+func (r row) taskTRES() (string, bool) {
+	cpus := r.job.CpusPerTask
+	if step := r.step; step != nil {
+		if step.StepType == pb.StepType_DAEMON || step.StepType == pb.StepType_PRIMARY && r.job.Type == pb.JobType_Batch {
+			return "", true
+		}
+		if step.GresPerNode != nil {
+			cpus = step.CpusPerTask
+		}
+	}
+	if cpus == nil {
+		return "", true
+	}
+	n := cpuNumber(*cpus)
+	if n == nil {
+		return "", false
+	}
+	return fmt.Sprintf("cpu=%d", n.Number), true
 }
 func gresParts(g *pb.GresMap, sep string) []string {
 	var parts []string

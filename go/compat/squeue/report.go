@@ -13,12 +13,14 @@ import (
 	"os/user"
 	"strconv"
 	"strings"
+	"syscall"
 
 	"github.com/PKUHPC/CraneSched/go/compat/protocol/v45"
 	"github.com/PKUHPC/CraneSched/go/compat/utils"
 	pb "github.com/PKUHPC/CraneSched/go/generated/protos"
 	"github.com/PKUHPC/CraneSched/go/internal/util"
 	"github.com/tidwall/gjson"
+	"golang.org/x/sys/unix"
 	"google.golang.org/protobuf/types/known/durationpb"
 	"google.golang.org/protobuf/types/known/timestamppb"
 )
@@ -200,19 +202,18 @@ func jobReport(r row, o *options) v45.QueueJob {
 		ArrayJobID:              number32(0),
 		ArrayMaxTasks:           number32(j.GetArraySpec().GetMaxConcurrent()),
 	}
+	if tres, ok := r.taskTRES(); ok {
+		result.TRESPerTask = new(tres)
+	}
+	result.MaxCPUs = number32(0) // No separate CPU ceiling in Crane.
+	result.MaxNodes = optional32(r.maxNodes())
 	if deadline := timestamp(j.DeadlineTime); deadline != nil {
 		result.Deadline = *deadline
 	} else {
-		// The v45 deadline for a job without a deadline is the Unix epoch.
 		result.Deadline = v45.Numeric[uint64](0, false, false)
 	}
-	if j.ExitCode < 256 {
-		status := "SUCCESS"
-		if j.ExitCode != 0 {
-			status = "ERROR"
-		}
-		result.ExitCode = &v45.QueueJobDerivedExitCode{Status: []string{status}, ReturnCode: number32(j.ExitCode)}
-	}
+	result.ExitCode = reportExit(r.waitStatus("exit_code"))
+	result.DerivedExitCode = reportExit(r.waitStatus("DerivedEC"))
 	if j.Type == pb.JobType_Batch {
 		result.Command = j.ScriptPath
 	} else {
@@ -252,11 +253,10 @@ func jobReport(r row, o *options) v45.QueueJob {
 		if j.NodeNum != 0 {
 			result.MinimumCPUsPerNode = cpuNumber(rv.CpuCount / float64(j.NodeNum))
 		}
-		if j.GetNtasks() > 0 {
+		if j.CpusPerTask != nil {
+			result.CPUsPerTask = cpuNumber(*j.CpusPerTask)
+		} else if j.GetNtasks() > 0 {
 			result.CPUsPerTask = cpuNumber(rv.CpuCount / float64(j.GetNtasks()))
-			if result.CPUsPerTask != nil {
-				result.TRESPerTask = fmt.Sprintf("cpu=%d", result.CPUsPerTask.Number)
-			}
 		}
 		if j.MemoryPerCpu != nil {
 			result.MemoryPerCPU = new(v45.Numeric[uint64](*j.MemoryPerCpu>>20, false, false))
@@ -280,6 +280,32 @@ func jobReport(r row, o *options) v45.QueueJob {
 	result.TRESPerNode = strings.Join(gresParts(j.GresPerNode, ":"), ",")
 	return result
 }
+
+func reportExit(status *uint32) *v45.QueueJobDerivedExitCode {
+	if status == nil {
+		return nil
+	}
+	exit := &v45.QueueJobDerivedExitCode{}
+	if sig := *status & 127; sig != 0 {
+		exit.Status = []string{"SIGNALED"}
+		name := strings.TrimPrefix(unix.SignalName(syscall.Signal(sig)), "SIG")
+		switch name {
+		case "HUP", "INT", "QUIT", "ABRT", "KILL", "ALRM", "TERM", "CHLD", "USR1", "USR2", "PIPE", "URG", "CONT", "STOP", "TSTP", "TTIN", "TTOU", "XCPU":
+		default:
+			name = num(sig)
+		}
+		exit.Signal = v45.QueueJobDerivedExitCodeSignal{ID: number32(sig), Name: name}
+		return exit
+	}
+	code := *status >> 8
+	exit.Status = []string{"SUCCESS"}
+	if code != 0 {
+		exit.Status = []string{"ERROR"}
+	}
+	exit.ReturnCode = number32(code)
+	return exit
+}
+
 func stepReport(r row, o *options) v45.QueueStep {
 	j, s := r.job, r.step
 	name, _ := r.value("StepName", o)
@@ -292,7 +318,7 @@ func stepReport(r row, o *options) v45.QueueStep {
 		State:     []string{state},
 		ID:        r.stepID(),
 		User:      j.Username,
-		Array:     v45.QueueStepArray{TaskID: v45.Int32(math.MaxUint32 - 1)}}
+	}
 	if s.Uid != j.Uid {
 		result.User = strconv.FormatUint(uint64(s.Uid), 10)
 		if account, err := user.LookupId(result.User); err == nil {
@@ -300,7 +326,7 @@ func stepReport(r row, o *options) v45.QueueStep {
 		}
 	}
 	if a := j.ArrayTask; a != nil {
-		result.Array = v45.QueueStepArray{JobID: v45.Int32(a.ArrayJobId), TaskID: v45.Int32(a.TaskId)}
+		result.Array = v45.QueueStepArray{JobID: v45.Int32(a.ArrayJobId), TaskID: new(v45.Int32(a.TaskId))}
 	}
 	if s.Ntasks != nil {
 		result.NumberTasks = new(v45.Int32(*s.Ntasks))
@@ -313,10 +339,8 @@ func stepReport(r row, o *options) v45.QueueStep {
 		result.TRES.Allocation = new(resourceTRES(rv, s.NodeNum, false))
 	}
 	result.TRES.Per.Node = strings.Join(gresParts(s.GresPerNode, ":"), ",")
-	if !special && s.ReqTotalResView != nil && s.GetNtasks() > 0 {
-		if n := cpuNumber(s.ReqTotalResView.CpuCount / float64(s.GetNtasks())); n != nil {
-			result.TRES.Per.Task = fmt.Sprintf("cpu=%d", n.Number)
-		}
+	if tres, ok := r.taskTRES(); ok {
+		result.TRES.Per.Task = new(tres)
 	}
 	result.Time = v45.QueueStepTime{Running: v45.Numeric[uint64](uint64(max(0, s.ElapsedTime.GetSeconds())), s.ElapsedTime == nil, false), Start: timestamp(s.StartTime), Limit: timeLimit(s.TimeLimit)}
 	if special {

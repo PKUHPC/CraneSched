@@ -1245,6 +1245,7 @@ struct JobInCtld {
 
   int32_t RequeueCount() const { return requeue_count; }
 
+  bool RecordStepExitStatus(crane::grpc::JobStatus step_status, uint32_t code);
   bool RequeueEligible() const;
   bool ShouldRequeue() const;
   void ResetForRequeue();

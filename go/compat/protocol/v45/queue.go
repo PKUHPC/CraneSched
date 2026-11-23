@@ -131,7 +131,7 @@ type QueueJob struct {
 	Deadline                 Number[uint64]                `json:"deadline" description:"Latest time that the job may start (UNIX timestamp) (UNIX timestamp or time string recognized by Slurm (e.g., '[MM/DD[/YY]-]HH:MM[:SS]'); may also be infinite or unset) (64 bit integer number with flags)"`
 	DelayBoot                Number[Int32]                 `json:"delay_boot" description:"Number of seconds after job eligible start that nodes will be rebooted to satisfy feature specification (32 bit integer number with flags)" report:"-"`
 	Dependency               string                        `json:"dependency" description:"Other jobs that must meet certain criteria before this job can start"`
-	DerivedExitCode          QueueJobDerivedExitCode       `json:"derived_exit_code" description:"Highest exit code of all job steps (return code returned by process)" report:"-"`
+	DerivedExitCode          *QueueJobDerivedExitCode      `json:"derived_exit_code" description:"Highest exit code of all job steps (return code returned by process)"`
 	EligibleTime             Number[uint64]                `json:"eligible_time" description:"Time when the job became eligible to run (UNIX timestamp) (UNIX timestamp or time string recognized by Slurm (e.g., '[MM/DD[/YY]-]HH:MM[:SS]'); may also be infinite or unset) (64 bit integer number with flags)" report:"-"`
 	EndTime                  *Number[uint64]               `json:"end_time" description:"End time, real or expected (UNIX timestamp) (UNIX timestamp or time string recognized by Slurm (e.g., '[MM/DD[/YY]-]HH:MM[:SS]'); may also be infinite or unset) (64 bit integer number with flags)"`
 	ExcludedNodes            string                        `json:"excluded_nodes" description:"Comma-separated list of nodes that may not be used"`
@@ -157,8 +157,8 @@ type QueueJob struct {
 	LicensesAllocated        string                        `json:"licenses_allocated" description:"License(s) allocated to the job"`
 	MailType                 []string                      `json:"mail_type" description:"Mail event type(s)" enum:"BEGIN|END|FAIL|REQUEUE|TIME=100%|TIME=90%|TIME=80%|TIME=50%|STAGE_OUT|ARRAY_TASKS|INVALID_DEPENDENCY" report:"-"`
 	MailUser                 string                        `json:"mail_user" description:"User to receive email notifications" report:"-"`
-	MaxCPUs                  Number[Int32]                 `json:"max_cpus" description:"Maximum number of CPUs usable by the job (32 bit integer number with flags)" report:"-"`
-	MaxNodes                 Number[Int32]                 `json:"max_nodes" description:"Maximum number of nodes usable by the job (32 bit integer number with flags)" report:"-"`
+	MaxCPUs                  Number[Int32]                 `json:"max_cpus" description:"Maximum number of CPUs usable by the job (32 bit integer number with flags)"`
+	MaxNodes                 *Number[Int32]                `json:"max_nodes" description:"Maximum number of nodes usable by the job (32 bit integer number with flags)"`
 	McsLabel                 string                        `json:"mcs_label" description:"Multi-Category Security label on the job" report:"-"`
 	MemoryPerTRES            string                        `json:"memory_per_tres" description:"Semicolon delimited list of TRES=# values indicating how much memory in megabytes should be allocated for each specified TRES (currently only used for gres/gpu)" report:"-"`
 	MemoryUpdateDelay        Int32                         `json:"memory_update_delay" description:"Auto-reduce memory delay in minutes" report:"-"`
@@ -223,7 +223,7 @@ type QueueJob struct {
 	TRESPerJob               string                        `json:"tres_per_job" description:"Comma-separated list of TRES=# values to be allocated per job" report:"-"`
 	TRESPerNode              string                        `json:"tres_per_node" description:"Comma-separated list of TRES=# values to be allocated per node"`
 	TRESPerSocket            string                        `json:"tres_per_socket" description:"Comma-separated list of TRES=# values to be allocated per socket" report:"-"`
-	TRESPerTask              string                        `json:"tres_per_task" description:"Comma-separated list of TRES=# values to be allocated per task"`
+	TRESPerTask              *string                       `json:"tres_per_task" description:"Comma-separated list of TRES=# values to be allocated per task"`
 	TRESReqStr               *string                       `json:"tres_req_str" description:"TRES requested by the job"`
 	TRESAllocStr             *string                       `json:"tres_alloc_str" description:"TRES used by the job"`
 	UserID                   Int32                         `json:"user_id" description:"User ID that owns the job"`
@@ -249,8 +249,8 @@ func (QueueResponse) SchemaRequired() []string {
 }
 
 type QueueStepArray struct {
-	JobID  Int32 `json:"job_id" description:"Job ID of job array, or 0 if N/A"`
-	TaskID Int32 `json:"task_id" description:"Task ID of this task in job array"`
+	JobID  Int32  `json:"job_id" description:"Job ID of job array, or 0 if N/A"`
+	TaskID *Int32 `json:"task_id" description:"Task ID of this task in job array"`
 }
 
 type QueueStepCPUFrequency struct {
@@ -264,12 +264,12 @@ type QueueStepCPU struct {
 }
 
 type QueueStepTRESPer struct {
-	CPU    string `json:"cpu" description:"Semicolon delimited list of TRES=# values indicating how many CPUs should be allocated for each specified TRES (currently only used for gres/gpu)" report:"-"`
-	Memory string `json:"memory" description:"Semicolon delimited list of TRES=# values indicating how much memory should be allocated for each specified TRES (currently only used for gres/gpu)" report:"-"`
-	Step   string `json:"step" description:"Comma-separated list of TRES=# values to be allocated per job step" report:"-"`
-	Node   string `json:"node" description:"Comma-separated list of TRES=# values to be allocated per node"`
-	Socket string `json:"socket" description:"Comma-separated list of TRES=# values to be allocated per socket" report:"-"`
-	Task   string `json:"task" description:"Comma-separated list of TRES=# values to be allocated per task"`
+	CPU    string  `json:"cpu" description:"Semicolon delimited list of TRES=# values indicating how many CPUs should be allocated for each specified TRES (currently only used for gres/gpu)" report:"-"`
+	Memory string  `json:"memory" description:"Semicolon delimited list of TRES=# values indicating how much memory should be allocated for each specified TRES (currently only used for gres/gpu)" report:"-"`
+	Step   string  `json:"step" description:"Comma-separated list of TRES=# values to be allocated per job step" report:"-"`
+	Node   string  `json:"node" description:"Comma-separated list of TRES=# values to be allocated per node"`
+	Socket string  `json:"socket" description:"Comma-separated list of TRES=# values to be allocated per socket" report:"-"`
+	Task   *string `json:"task" description:"Comma-separated list of TRES=# values to be allocated per task"`
 }
 
 type QueueStepTRES struct {

@@ -1446,9 +1446,7 @@ class JobScheduler {
   };
 
   static FinalTransferResult ProcessFinalSteps_(
-      std::unordered_set<StepInCtld*> const& steps);
-  static FinalTransferResult PersistAndTransferStepsToMongodb_(
-      std::unordered_set<StepInCtld*> const& steps);
+      std::unordered_set<StepInCtld*> const& steps, bool purge = true);
 
   static FinalTransferResult ProcessFinalJobs_(
       const std::unordered_set<JobInCtld*>& jobs);

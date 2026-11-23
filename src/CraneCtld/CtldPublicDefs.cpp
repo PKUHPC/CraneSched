@@ -439,6 +439,8 @@ void StepInCtld::SetFieldsOfStepInfo(
 
   if (StepToCtld().has_io_meta())
     *step_info->mutable_io_meta() = StepToCtld().io_meta();
+  if (StepToCtld().has_cpus_per_task())
+    step_info->set_cpus_per_task(StepToCtld().cpus_per_task());
   if (StepToCtld().has_gres_per_node())
     *step_info->mutable_gres_per_node() = StepToCtld().gres_per_node();
   step_info->set_name(name);
@@ -1691,6 +1693,12 @@ CommonStepInCtld::StepStatusChange(crane::grpc::JobStatus new_status,
       }
     }
 
+    // A crun step leaves the live query as soon as it finishes. Keep its
+    // process outcome on the allocation before releasing the step.
+    if ((!IsPrimaryStep() || job->IsCrun()) &&
+        job->RecordStepExitStatus(Status(), ExitCode()))
+      context->rn_job_raw_ptrs.insert(job);
+
     // Release step
     context->step_raw_ptrs.insert(this);
     if (this->IsPrimaryStep()) {
@@ -1937,6 +1945,26 @@ std::string_view JobInCtld::HoldReason() const {
   return runtime_attr.held_by_admin() ? "JobHeldAdmin" : "JobHeldUser";
 }
 
+bool JobInCtld::RecordStepExitStatus(crane::grpc::JobStatus step_status,
+                                     uint32_t code) {
+  if (!runtime_attr.has_max_step_wait_status()) return false;
+
+  // Scheduler failures have no process wait status. Recovery of old jobs
+  // likewise cannot reconstruct outcomes for previously removed steps.
+  if (step_status == crane::grpc::JobStatus::OutOfMemory ||
+      code == ExitCode::kTerminationSignalBase ||
+      code >= ExitCode::kCraneExitCodeBase) {
+    runtime_attr.clear_max_step_wait_status();
+    return true;
+  }
+  const uint32_t wait_status = code < ExitCode::kExitStatusNum
+                                   ? code << 8
+                                   : code - ExitCode::kTerminationSignalBase;
+  if (wait_status <= runtime_attr.max_step_wait_status()) return false;
+  runtime_attr.set_max_step_wait_status(wait_status);
+  return true;
+}
+
 bool JobInCtld::RequeueEligible() const {
   return type == crane::grpc::Batch && !job_to_ctld.no_requeue() &&
          (g_config.CtldConf.JobRequeue || requeue_if_failed);
@@ -2123,6 +2151,7 @@ void JobInCtld::TriggerTerminalDependencyEvents(absl::Time end_time) {
 
 void JobInCtld::SetFieldsByJobToCtld(crane::grpc::JobToCtld const& val) {
   job_to_ctld = val;
+  runtime_attr.set_max_step_wait_status(0);
 
   partition_id = (val.partition_name().empty()) ? g_config.DefaultPartition
                                                 : val.partition_name();
@@ -2305,12 +2334,18 @@ void JobInCtld::SetFieldsOfJobInfo(crane::grpc::JobInfo* job_info) const {
   job_info->set_submit_hostname(submit_hostname);
   if (job_to_ctld.has_io_meta())
     *job_info->mutable_io_meta() = job_to_ctld.io_meta();
+  if (job_to_ctld.has_cpus_per_task())
+    job_info->set_cpus_per_task(job_to_ctld.cpus_per_task());
   job_info->set_max_nodes(node_num_max);
+  if (job_to_ctld.has_submitted_size())
+    *job_info->mutable_submitted_size() = job_to_ctld.submitted_size();
   if (job_to_ctld.has_requested_tasks_per_node())
     job_info->set_tasks_per_node(job_to_ctld.requested_tasks_per_node());
   if (job_to_ctld.batch_meta().has_script_path())
     job_info->set_script_path(job_to_ctld.batch_meta().script_path());
   job_info->set_requeue_eligible(RequeueEligible());
+  if (runtime_attr.has_max_step_wait_status())
+    job_info->set_max_step_wait_status(runtime_attr.max_step_wait_status());
   if (job_to_ctld.has_mem_per_cpu())
     job_info->set_memory_per_cpu(job_to_ctld.mem_per_cpu());
   if (job_to_ctld.has_gres_per_node())

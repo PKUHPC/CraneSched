@@ -357,7 +357,6 @@ func BuildCbatchJob(cmd *cobra.Command, args []string, config *util.Config) (*pr
 	if err := util.CheckFileLength(job.GetIoMeta().ErrorFilePattern); err != nil {
 		return nil, fmt.Errorf("invalid argument: error file path is invalid: %w", err)
 	}
-	job.RequestedTasksPerNode = new(job.NtasksPerNode)
 	if err := util.CheckJobArgs(job); err != nil {
 		return nil, fmt.Errorf("invalid argument: %w", err)
 	}

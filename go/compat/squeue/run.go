@@ -310,6 +310,21 @@ func (o *options) rows(reply *pb.QueryJobsInfoReply) ([]row, error) {
 }
 
 func (o *options) sortRows(rows []row) error {
+	// Text job output is presorted by descending start time. Jobs without
+	// a start always follow jobs with a real or estimated start.
+	now := time.Now().Unix()
+	startTime := func(r row) int64 {
+		t := r.sortNumber("StartTime")
+		if t > 0 && r.job.Status == pb.JobStatus_Pending {
+			return max(t, now)
+		}
+		return max(0, t)
+	}
+	if !o.steps {
+		slices.SortStableFunc(rows, func(a, b row) int {
+			return cmp.Compare(startTime(b), startTime(a))
+		})
+	}
 	order := o.sort
 	if !o.customSort {
 		switch {
@@ -384,14 +399,25 @@ func (o *options) sortRows(rows []row) error {
 	type item struct {
 		r      row
 		values []string
+		index  int
 	}
 	items := make([]item, len(rows))
 	for i, r := range rows {
-		it := item{r: r}
+		it := item{r: r, index: i}
 		for _, k := range keys {
 			var v string
 			var err error
 			switch k.field {
+			case "NodeList", "Nodes":
+				hosts := r.job.ExecutionNode
+				if r.step != nil {
+					hosts = r.step.ExecutionNode
+				}
+				for _, host := range hosts {
+					if v == "" || utils.HostLess(host, v) {
+						v = host
+					}
+				}
 			case "id":
 				v = r.id()
 				if r.step != nil {
@@ -399,6 +425,9 @@ func (o *options) sortRows(rows []row) error {
 				}
 			case "TimeUsed", "TimeLeft", "TimeLimit", "MinMemory", "SubmitTime", "StartTime", "EndTime":
 				v = strconv.FormatInt(r.sortNumber(k.field), 10)
+				if k.field == "StartTime" && !o.steps {
+					v = strconv.FormatInt(startTime(r), 10)
+				}
 			default:
 				v, err = r.value(k.field, o)
 			}
@@ -410,17 +439,23 @@ func (o *options) sortRows(rows []row) error {
 		items[i] = it
 	}
 	slices.SortStableFunc(items, func(a, b item) int {
+		tieOrder := 1
 		for i, k := range keys {
 			av, bv := a.values[i], b.values[i]
 			n := strings.Compare(av, bv)
 			if k.field == "NodeList" || k.field == "Nodes" {
 				if av == bv {
+					// In 26.05.4 an ascending hostlist pass reverses
+					// the prior order of records with empty hostlists.
+					if av == "" && !k.desc {
+						tieOrder = -tieOrder
+					}
 					n = 0
 				} else if av == "" {
 					n = 1
 				} else if bv == "" {
 					n = -1
-				} else if utils.NaturalLess(av, bv) {
+				} else if utils.HostLess(av, bv) {
 					n = -1
 				} else {
 					n = 1
@@ -441,13 +476,19 @@ func (o *options) sortRows(rows []row) error {
 				}
 			}
 			if n != 0 {
-				if k.desc {
-					return -n
+				if k.field == "StartTime" && !o.steps && (av == "0" || bv == "0") {
+					if av == "0" {
+						return tieOrder
+					}
+					return -tieOrder
 				}
-				return n
+				if k.desc {
+					return -n * tieOrder
+				}
+				return n * tieOrder
 			}
 		}
-		return 0
+		return cmp.Compare(a.index, b.index) * tieOrder
 	})
 	for i := range items {
 		rows[i] = items[i].r

@@ -1640,6 +1640,8 @@ crane::grpc::StepInfo ProjectStep(const crane::grpc::StepInfo& source,
   // Preserve container identity without exposing any metadata.
   if (source.has_container_meta()) result.mutable_container_meta();
   result.set_step_type(source.step_type());
+  if (source.has_cpus_per_task())
+    result.set_cpus_per_task(source.cpus_per_task());
   result.set_job_id(source.job_id());
   result.set_step_id(source.step_id());
   result.set_name(source.name());
@@ -1729,6 +1731,8 @@ crane::grpc::JobInfo ProjectJobForQuery(
     result.set_requeue_if_failed(source.requeue_if_failed());
     if (source.has_requeue_eligible())
       result.set_requeue_eligible(source.requeue_eligible());
+    if (source.has_cpus_per_task())
+      result.set_cpus_per_task(source.cpus_per_task());
     result.set_node_num(source.node_num());
     if (source.has_ntasks()) result.set_ntasks(source.ntasks());
     if (source.has_req_total_res_view())
@@ -1747,6 +1751,12 @@ crane::grpc::JobInfo ProjectJobForQuery(
     *result.mutable_execution_node() = source.execution_node();
     result.set_exclusive(source.exclusive());
     result.set_submit_hostname(source.submit_hostname());
+    if (source.has_submitted_size()) {
+      result.mutable_submitted_size()->set_max_nodes(
+          source.submitted_size().max_nodes());
+      result.mutable_submitted_size()->set_tasks(
+          source.submitted_size().tasks());
+    }
     if (source.has_max_nodes()) result.set_max_nodes(source.max_nodes());
     if (source.has_tasks_per_node())
       result.set_tasks_per_node(source.tasks_per_node());
@@ -1754,6 +1764,8 @@ crane::grpc::JobInfo ProjectJobForQuery(
       result.set_memory_per_cpu(source.memory_per_cpu());
     if (source.has_gres_per_node())
       CopyGres(source.gres_per_node(), result.mutable_gres_per_node());
+    if (source.has_max_step_wait_status())
+      result.set_max_step_wait_status(source.max_step_wait_status());
     *result.mutable_allocated_licenses() = source.allocated_licenses();
     *result.mutable_scheduled_nodes() = source.scheduled_nodes();
     if (source.has_array_spec()) {

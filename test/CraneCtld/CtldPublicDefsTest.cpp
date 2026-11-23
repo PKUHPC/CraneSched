@@ -1232,6 +1232,24 @@ TEST(CtldStepStateMachineTest,
 
 // --- ShouldRequeue tests ---
 
+TEST(StepExitStatusTest, RetainsHighestProcessStatusAcrossRecovery) {
+  Ctld::JobInCtld job;
+  crane::grpc::JobToCtld request;
+  request.add_gids(0);
+  job.SetFieldsByJobToCtld(request);
+  EXPECT_EQ(job.RuntimeAttr().max_step_wait_status(), 0U);
+  EXPECT_TRUE(job.RecordStepExitStatus(crane::grpc::Failed, 256 + 15));
+  EXPECT_TRUE(job.RecordStepExitStatus(crane::grpc::Failed, 7));
+  EXPECT_FALSE(job.RecordStepExitStatus(crane::grpc::Failed, 2));
+  Ctld::JobInCtld recovered;
+  recovered.SetFieldsByRuntimeAttrOfJob(job.RuntimeAttr());
+  EXPECT_EQ(recovered.RuntimeAttr().max_step_wait_status(), 7U << 8);
+  EXPECT_TRUE(recovered.RecordStepExitStatus(crane::grpc::Failed,
+                                             ExitCode::EC_RPC_ERR));
+  EXPECT_FALSE(recovered.RuntimeAttr().has_max_step_wait_status());
+  EXPECT_FALSE(recovered.RecordStepExitStatus(crane::grpc::Completed, 0));
+}
+
 TEST(ShouldRequeueTest, EligibilityUsesClusterDefaultAndSubmissionFlags) {
   const bool old_default = g_config.CtldConf.JobRequeue;
   Ctld::JobInCtld job;

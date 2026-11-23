@@ -672,6 +672,9 @@ TEST(JobQuery, QuerySchemaRequiresExplicitFieldClassification) {
                                        "allocated_licenses",
                                        "requeue_eligible",
                                        "script_path",
+                                       "cpus_per_task",
+                                       "max_step_wait_status",
+                                       "submitted_size",
                                        "query_visibility"});
   ExpectFields(crane::grpc::StepInfo::descriptor(), {"type",
                                                      "step_type",
@@ -702,6 +705,7 @@ TEST(JobQuery, QuerySchemaRequiresExplicitFieldClassification) {
                                                      "allocated_res_view",
                                                      "deadline_time",
                                                      "io_meta",
+                                                     "cpus_per_task",
                                                      "gres_per_node",
                                                      "query_visibility"});
   ExpectFields(crane::grpc::ResourceView::descriptor(),
