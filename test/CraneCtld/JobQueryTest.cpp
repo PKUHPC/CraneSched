@@ -5,12 +5,14 @@
 #include <gtest/gtest.h>
 
 #include <filesystem>
+#include <limits>
 #include <list>
 #include <set>
 #include <string>
 
 #include "Array.h"
 #include "Database/EmbeddedDbClient.h"
+#include "JobScheduler.h"
 // Test the production helpers without exporting them or replacing dependencies.
 #include "RpcService/CtldGrpcServer.cpp"
 #include "google/protobuf/util/message_differencer.h"
@@ -23,6 +25,25 @@ using crane::grpc::QUERY_VISIBILITY_PUBLIC;
 using Ctld::BuildJobQueryReply;
 using Ctld::ProjectJobForQuery;
 constexpr char kPrivate[] = "private-query-test-marker";
+
+TEST(JobSubmission, RejectsInvalidSignalBeforeEnqueue) {
+  Ctld::JobScheduler scheduler;
+  crane::grpc::JobToCtld request;
+  request.set_type(crane::grpc::Batch);
+  request.set_uid(std::numeric_limits<uid_t>::max());
+  request.add_gids(::getgid());
+  request.add_signals()->set_signal_number(999);
+  auto job = std::make_unique<Ctld::JobInCtld>();
+  job->SetFieldsByJobToCtld(request);
+
+  auto result = scheduler.SubmitJobToScheduler(std::move(job));
+
+  ASSERT_FALSE(result.has_value());
+  EXPECT_EQ(result.error().code(), CraneErrCode::ERR_INVALID_PARAM);
+  EXPECT_NE(result.error().description().find("Invalid --signal number 999"),
+            std::string::npos);
+  EXPECT_EQ(scheduler.PendingQueueSize(), 0);
+}
 
 #ifdef CRANE_HAVE_UNQLITE
 class ArrayChildQueryTest : public ::testing::Test {

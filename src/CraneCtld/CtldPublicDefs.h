@@ -1158,6 +1158,8 @@ struct JobInCtld {
   crane::grpc::JobToCtld const& JobToCtld() const { return job_to_ctld; }
   crane::grpc::JobToCtld* MutableJobToCtld() { return &job_to_ctld; }
 
+  std::expected<void, std::string> CheckSignalOptions() const;
+
   void SetReqTotalResView(ResourceView value) {
     req_total_res_view = std::move(value);
     *runtime_attr.mutable_requested_gres() =

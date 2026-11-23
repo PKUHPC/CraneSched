@@ -213,7 +213,7 @@ Email address to receive job status notifications if --mail-type is specified.
 **--signal=&lt;sig_num&gt;[@sig_time]**
 
 :   **Applies to:** `job`  
-Send signal to the job if --signal is specified. The format is "&lt;sig_num&gt;[@sig_time]", where sig_num is the signal number and sig_time is the signal sending time, sent sig_time seconds before the time limit.
+Request a signal for the job allocation before its time limit. Use a signal name such as `USR1` or a Linux signal number from 1–31 or 34–64. glibc reserves 32 and 33. The lead time must be 0–65535 seconds and defaults to 60 when omitted.
 
 
 **--external-launcher**

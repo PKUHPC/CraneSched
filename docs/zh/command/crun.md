@@ -190,7 +190,7 @@ nodes个任务，或ntasks个任务，以较小者为准。默认值：1。
 **--signal=&lt;sig_num&gt;[@sig_time]**
 
 :   **适用于：** `作业`  
-如果指定了--signal，则发送给作业信号。格式为"&lt;sig_num&gt;[@sig_time]"，其中sig_num是信号编号，sig_time是信号发送时间，距离time limit前sig_time秒发送。
+指定作业达到时间限制前发送的信号。可以使用信号名称（如 `USR1`）或 Linux 信号编号 1–31 和 34–64，32 和 33 由 glibc 保留。提前时间支持 0–65535 秒，省略时默认为 60 秒。
 
 **--external-launcher**
 

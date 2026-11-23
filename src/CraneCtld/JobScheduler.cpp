@@ -3846,6 +3846,10 @@ JobScheduler::SubmitJobToScheduler(std::unique_ptr<JobInCtld> job) {
     return std::unexpected(
         FormatRichErr(CraneErrCode::ERR_INVALID_PARAM, "{}", valid.error()));
 
+  if (auto valid = job->CheckSignalOptions(); !valid)
+    return std::unexpected(
+        FormatRichErr(CraneErrCode::ERR_INVALID_PARAM, "{}", valid.error()));
+
   if (!job->password_entry->Valid()) {
     CRANE_DEBUG("Uid {} not found on the controller node", job->uid);
     validate_span.SetStatus(crane::StatusCode::kError, "invalid_uid");
