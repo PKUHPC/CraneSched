@@ -94,7 +94,6 @@ class StepInstance {
     uint32_t max_exit_code{0};
     StepStatus final_status_on_termination{StepStatus::Completed};
     std::string final_reason_on_termination;
-    int priority{0};
   };
 
   TerminationStatus final_termination_status;
@@ -251,8 +250,12 @@ class StepInstance {
   void RecordTaskResult(StepStatus new_status, uint32_t exit_code,
                         std::optional<std::string> reason,
                         const TaskFinalInfo& final_info);
+  // Called once after all task cleanup, before reporting the step result.
+  void FinalizeOomStatus();
 
  private:
+  bool m_has_natural_task_exit_{false};
+  bool m_has_explicit_termination_{false};
   std::atomic<StepStatus> m_status_{StepStatus::Configuring};
   crane::grpc::StepToD m_step_to_supv_;
   std::unique_ptr<cri::CriClient> m_cri_client_;

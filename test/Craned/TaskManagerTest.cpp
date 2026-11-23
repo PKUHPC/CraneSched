@@ -503,6 +503,7 @@ TEST_F(OomTerminationTest, OomWinsOverSuccessfulShellExitAndPreservesReason) {
   // Exactly the result of a shell which prints its OOM-killed child's status
   // and then exits successfully. No synthetic signal/exit code is introduced.
   step.RecordTaskResult(StepStatus::Completed, 0, std::nullopt, Exit());
+  step.FinalizeOomStatus();
   const auto& result = step.final_termination_status;
   EXPECT_EQ(result.final_status_on_termination, StepStatus::OutOfMemory);
   EXPECT_EQ(result.max_exit_code, 0);
@@ -518,6 +519,7 @@ TEST_F(OomTerminationTest, OomPreservesNonzeroAndSignalExitCodes) {
     auto info = Exit(signal ? SIGKILL : 137, signal);
     uint32_t code = signal ? ExitCode::kTerminationSignalBase + SIGKILL : 137;
     step.RecordTaskResult(StepStatus::Failed, code, std::nullopt, info);
+    step.FinalizeOomStatus();
     EXPECT_EQ(step.final_termination_status.final_status_on_termination,
               StepStatus::OutOfMemory);
     EXPECT_EQ(step.final_termination_status.max_exit_code, code);
@@ -531,6 +533,7 @@ TEST_F(OomTerminationTest, OrdinaryExitAndSigkillAreNotEvidenceOfOom) {
     InitCounter(step);
     auto status = code == 0 ? StepStatus::Completed : StepStatus::Failed;
     step.RecordTaskResult(status, code, std::nullopt, Exit());
+    step.FinalizeOomStatus();
     EXPECT_EQ(step.final_termination_status.final_status_on_termination,
               status);
     EXPECT_EQ(step.final_termination_status.max_exit_code, code);
@@ -542,11 +545,12 @@ TEST_F(OomTerminationTest, MonitoringFailureDoesNotInventOom) {
   InitCounter(step);
   std::filesystem::remove(cg_ / "memory.events");
   step.RecordTaskResult(StepStatus::Completed, 0, std::nullopt, Exit());
+  step.FinalizeOomStatus();
   EXPECT_EQ(step.final_termination_status.final_status_on_termination,
             StepStatus::Completed);
 }
 
-TEST_F(OomTerminationTest, OomSurvivesOtherTaskFailureInEitherOrder) {
+TEST_F(OomTerminationTest, OomIsAppliedAfterAllTaskResultsInEitherOrder) {
   for (bool oom_first : {false, true}) {
     StepInstance step(spec_);
     InitCounter(step);
@@ -560,14 +564,19 @@ TEST_F(OomTerminationTest, OomSurvivesOtherTaskFailureInEitherOrder) {
     step.RecordTaskResult(StepStatus::Completed, 0, std::nullopt, Exit());
     if (oom_first) failure();
     EXPECT_EQ(step.final_termination_status.final_status_on_termination,
+              StepStatus::Failed);
+    step.FinalizeOomStatus();
+    EXPECT_EQ(step.final_termination_status.final_status_on_termination,
               StepStatus::OutOfMemory);
+    EXPECT_EQ(step.final_termination_status.max_exit_code,
+              ExitCode::EC_SPAWN_FAILED);
     EXPECT_NE(step.final_termination_status.final_reason_on_termination.find(
                   "oom_kill"),
               std::string::npos);
   }
 }
 
-TEST_F(OomTerminationTest, ExplicitTerminationKeepsPrecedenceOverOom) {
+TEST_F(OomTerminationTest, ExplicitTerminationSkipsOomClassification) {
   for (const auto& [cause, status] :
        {std::pair{TaskFinalizeCause::CANCELLED_BY_USER, StepStatus::Cancelled},
         std::pair{TaskFinalizeCause::TIMEOUT, StepStatus::ExceedTimeLimit},
@@ -586,12 +595,61 @@ TEST_F(OomTerminationTest, ExplicitTerminationKeepsPrecedenceOverOom) {
       info.cause = cause;
       step.RecordTaskResult(status, 265, "explicit termination", info);
       if (!oom_first) normal();
+      step.FinalizeOomStatus();
       EXPECT_EQ(step.final_termination_status.final_status_on_termination,
                 status);
       EXPECT_EQ(step.final_termination_status.final_reason_on_termination,
                 "explicit termination");
     }
   }
+}
+
+TEST_F(OomTerminationTest, OomFinalizationPreservesExistingTaskAggregation) {
+  for (bool with_oom : {false, true}) {
+    for (bool timeout_first : {false, true}) {
+      StepInstance step(spec_);
+      InitCounter(step);
+      if (with_oom) Oom();
+      auto timeout = [&] {
+        TaskFinalInfo info{.cause = TaskFinalizeCause::TIMEOUT};
+        step.RecordTaskResult(StepStatus::ExceedTimeLimit,
+                              ExitCode::EC_EXCEED_TIME_LIMIT, "time limit",
+                              info);
+      };
+      if (timeout_first) timeout();
+      TaskFinalInfo info{.cause = TaskFinalizeCause::TASK_SPAWN_FAILED};
+      step.RecordTaskResult(StepStatus::Failed, ExitCode::EC_SPAWN_FAILED,
+                            "spawn failure", info);
+      if (!timeout_first) timeout();
+      step.RecordTaskResult(StepStatus::Completed, 0, std::nullopt, Exit());
+      step.FinalizeOomStatus();
+      // Keep the pre-OOM aggregation: last non-success status and the reason
+      // accompanying the largest exit code. OOM must not rank these failures.
+      EXPECT_EQ(
+          step.final_termination_status.final_status_on_termination,
+          timeout_first ? StepStatus::Failed : StepStatus::ExceedTimeLimit);
+      EXPECT_EQ(step.final_termination_status.max_exit_code,
+                ExitCode::EC_EXCEED_TIME_LIMIT);
+      EXPECT_EQ(step.final_termination_status.final_reason_on_termination,
+                "time limit");
+    }
+  }
+}
+
+TEST_F(OomTerminationTest, StartupFailureWithoutNaturalExitIsNotOom) {
+  StepInstance step(spec_);
+  InitCounter(step);
+  Oom();
+  TaskFinalInfo info{.cause = TaskFinalizeCause::TASK_SPAWN_FAILED};
+  step.RecordTaskResult(StepStatus::Failed, ExitCode::EC_SPAWN_FAILED,
+                        "spawn failure", info);
+  step.FinalizeOomStatus();
+  EXPECT_EQ(step.final_termination_status.final_status_on_termination,
+            StepStatus::Failed);
+  EXPECT_EQ(step.final_termination_status.max_exit_code,
+            ExitCode::EC_SPAWN_FAILED);
+  EXPECT_EQ(step.final_termination_status.final_reason_on_termination,
+            "spawn failure");
 }
 
 TEST_F(OomTerminationTest, CallocKeepsExistingCompletionSemantics) {
@@ -601,6 +659,7 @@ TEST_F(OomTerminationTest, CallocKeepsExistingCompletionSemantics) {
   InitCounter(step);
   Oom();
   step.RecordTaskResult(StepStatus::Completed, 0, std::nullopt, Exit());
+  step.FinalizeOomStatus();
   EXPECT_EQ(step.final_termination_status.final_status_on_termination,
             StepStatus::Completed);
 }
@@ -626,8 +685,8 @@ TEST_F(OomTerminationTest, OldKernelNotificationHandlesShellExitZero) {
       };
       notify(cg_);
       if (ancestor) notify(job_);
-      step.oom_monitor.Stop();
       step.RecordTaskResult(StepStatus::Completed, 0, std::nullopt, Exit());
+      step.FinalizeOomStatus();
       EXPECT_EQ(step.final_termination_status.final_status_on_termination,
                 !ancestor || primary ? StepStatus::OutOfMemory
                                      : StepStatus::Completed);

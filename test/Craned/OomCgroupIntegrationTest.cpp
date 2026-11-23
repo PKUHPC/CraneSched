@@ -138,9 +138,9 @@ class OomCgroupIntegrationTest : public ::testing::Test {
     ProcInstance process(&step, 0);
     ASSERT_TRUE(process.HandleSigchld(pid, status));
     step.oom_monitor.FinishTask(task_);
-    step.oom_monitor.Stop();
     step.RecordTaskResult(StepStatus::Completed, 0, std::nullopt,
                           *process.GetFinalInfo());
+    step.FinalizeOomStatus();
     EXPECT_EQ(step.final_termination_status.final_status_on_termination,
               oom ? StepStatus::OutOfMemory : StepStatus::Completed)
         << text;
