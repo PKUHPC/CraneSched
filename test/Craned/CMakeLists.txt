@@ -11,6 +11,7 @@ gtest_discover_tests(execution_groups_test)
 add_executable(oom_monitor_test OomMonitorTest.cpp)
 target_link_libraries(oom_monitor_test PRIVATE
         GTest::gtest GTest::gtest_main craned_common)
+target_link_options(oom_monitor_test PRIVATE "LINKER:--wrap=write")
 gtest_discover_tests(oom_monitor_test)
 
 set(task_manager_test_support

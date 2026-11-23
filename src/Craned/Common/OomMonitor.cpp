@@ -29,8 +29,8 @@ std::error_code SystemError() {
 struct OomMonitor::Watch {
   std::filesystem::path path;
   uint64_t baseline{0};
+  uint64_t notifications{0};
   bool cgroup_v2{false};
-  bool notified{false};
   bool read_error_logged{false};
   int event_fd{-1};
   int control_fd{-1};
@@ -40,11 +40,11 @@ struct OomMonitor::Watch {
     if (control_fd != -1) close(control_fd);
   }
 
-  std::expected<bool, std::error_code> Sample() {
+  std::expected<uint64_t, std::error_code> Sample() {
     if (event_fd == -1) {
       auto count = ReadOomKillCount(path, cgroup_v2);
       if (!count) return std::unexpected(count.error());
-      return *count > baseline;
+      return *count > baseline ? *count - baseline : 0;
     }
 
     uint64_t count;
@@ -53,14 +53,14 @@ struct OomMonitor::Watch {
       n = read(event_fd, &count, sizeof(count));
     } while (n < 0 && errno == EINTR);
     if (n == sizeof(count)) {
-      notified |= count != 0;
+      notifications += count;
     } else if (n < 0 && errno == EAGAIN) {
       // eventfd retains notifications until read, even without a poll thread.
     } else {
       return std::unexpected(n < 0 ? SystemError()
                                    : std::make_error_code(std::errc::io_error));
     }
-    return notified;
+    return notifications - baseline;
   }
 
   void LogError(const std::error_code& error) {
@@ -162,6 +162,17 @@ std::unique_ptr<OomMonitor::Watch> OomMonitor::MakeWatch_(
                error.message());
     return nullptr;
   }
+  if (!events_only) {
+    // Registration while under_oom can signal once before the normal ancestor
+    // notification arrives. Exclude everything observed before workload launch
+    // from this watch, but retain the job's full history for attribution.
+    auto initial = watch->Sample();
+    if (!initial) {
+      watch->LogError(initial.error());
+      return nullptr;
+    }
+    watch->baseline = *initial;
+  }
   CRANE_DEBUG("[OOM] Monitoring v1 OOM notifications at {}", path);
   return watch;
 }
@@ -209,6 +220,7 @@ const OomMonitor::Evidence& OomMonitor::Sample() {
 const OomMonitor::Evidence& OomMonitor::Sample_(
     const std::filesystem::path& sample_path) {
   std::string event_path;
+  uint64_t workload_notifications = 0;
   // Read descendants before the ancestor. A parent notification must be
   // observed before treating its propagated child notification as local.
   for (auto& watch : m_watches_) {
@@ -224,26 +236,33 @@ const OomMonitor::Evidence& OomMonitor::Sample_(
       if (watch->event_fd == -1 && m_evidence_.workload.empty()) {
         m_evidence_.workload =
             "Detected oom_kill counter growth in " + watch->path.string();
-      } else if (watch->event_fd != -1) {
+      } else if (watch->event_fd != -1 && *detected > workload_notifications) {
+        workload_notifications = *detected;
         event_path = watch->path.string();
       }
     }
   }
   bool ancestor_known = false;
-  bool ancestor_oom = false;
+  uint64_t ancestor_notifications = 0;
   if (m_job_watch_) {
     auto detected = m_job_watch_->Sample();
     ancestor_known = detected.has_value();
     if (!detected) {
       m_job_watch_->LogError(detected.error());
     } else if (*detected) {
-      ancestor_oom = true;
+      ancestor_notifications = *detected;
       m_evidence_.ancestor = "OOM notification at job cgroup " +
                              m_job_watch_->path.string() +
                              "; victim step is unknown";
     }
   }
-  if (!event_path.empty() && ancestor_known && !ancestor_oom &&
+  // After excluding registration notifications, each ancestor traversal adds
+  // at most one notification per watch.
+  // Keep cumulative counts: propagation can straddle samples, and task watches
+  // may be sampled only at exit. The earlier ancestor registration makes this
+  // comparison conservative for watches registered later.
+  if (!event_path.empty() && ancestor_known &&
+      workload_notifications > ancestor_notifications &&
       m_evidence_.workload.empty())
     m_evidence_.workload = "OOM notification in workload cgroup " + event_path;
   return m_evidence_;
