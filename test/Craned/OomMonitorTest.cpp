@@ -201,6 +201,49 @@ TEST_F(OomMonitorTest, ParentNotificationDoesNotClaimSiblingTaskWasKilled) {
   EXPECT_FALSE(monitor.GetEvidence().ancestor.empty());
 }
 
+TEST_F(OomMonitorTest, OldV1DistinguishesLocalEventsFromAncestorHistory) {
+  for (bool sample_between_events : {false, true}) {
+    for (bool local_oom : {false, true}) {
+      SCOPED_TRACE(sample_between_events);
+      SCOPED_TRACE(local_oom);
+      auto second = step_ / "task_1";
+      for (const auto& path : {job_, step_, task_, second}) V1(path);
+      OomMonitor monitor;
+      ASSERT_TRUE(monitor.Start(step_, job_, false));
+      ASSERT_TRUE(monitor.AddTask(task_));
+      ASSERT_TRUE(monitor.AddTask(second));
+      for (const auto& path : {job_, step_, task_, second}) Notify(path, 2);
+      if (sample_between_events) {
+        monitor.FinishTask(task_);
+        EXPECT_TRUE(monitor.GetEvidence().workload.empty());
+      }
+      if (local_oom) Notify(second);
+      monitor.FinishTask(second);
+      monitor.Stop();
+      EXPECT_EQ(monitor.GetEvidence().workload.empty(), !local_oom);
+      EXPECT_FALSE(monitor.GetEvidence().ancestor.empty());
+      if (local_oom)
+        EXPECT_NE(monitor.GetEvidence().workload.find("task_1"),
+                  std::string::npos);
+    }
+  }
+}
+
+TEST_F(OomMonitorTest, OldV1DoesNotAttributeDelayedAncestorPropagation) {
+  for (const auto& path : {job_, step_, task_}) V1(path);
+  OomMonitor monitor;
+  ASSERT_TRUE(monitor.Start(step_, job_, false));
+  ASSERT_TRUE(monitor.AddTask(task_));
+  Notify(job_);
+  EXPECT_TRUE(monitor.Sample().workload.empty());
+  // The ancestor is signalled before its descendants in the kernel tree walk.
+  Notify(step_);
+  Notify(task_);
+  monitor.FinishTask(task_);
+  EXPECT_TRUE(monitor.Sample().workload.empty());
+  EXPECT_FALSE(monitor.GetEvidence().ancestor.empty());
+}
+
 TEST_F(OomMonitorTest,
        UnavailableAncestorPreventsUnscopedNotificationAttribution) {
   V1(step_);

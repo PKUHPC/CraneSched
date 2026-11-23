@@ -794,7 +794,9 @@ TEST_F(OomTerminationTest, CallocKeepsExistingCompletionSemantics) {
 }
 
 TEST_F(OomTerminationTest, OldKernelNotificationHandlesShellExitZero) {
-  for (bool ancestor : {false, true}) {
+  for (const auto& [ancestor, later_local_oom] :
+       {std::pair{false, false}, std::pair{true, false},
+        std::pair{true, true}}) {
     for (bool primary : {false, true}) {
       spec_.set_step_type(primary ? crane::grpc::PRIMARY : crane::grpc::COMMON);
       spec_.set_type(primary ? crane::grpc::Batch : crane::grpc::Interactive);
@@ -814,15 +816,20 @@ TEST_F(OomTerminationTest, OldKernelNotificationHandlesShellExitZero) {
       };
       notify(cg_);
       if (ancestor) notify(job_);
+      if (later_local_oom) {
+        EXPECT_TRUE(step.oom_monitor.Sample().workload.empty());
+        notify(cg_);
+      }
       step.RecordTaskResult(StepStatus::Completed, 0, std::nullopt, Exit());
       step.FinalizeOomStatus();
       EXPECT_EQ(step.final_termination_status.final_status_on_termination,
-                !ancestor || primary ? StepStatus::OutOfMemory
-                                     : StepStatus::Completed);
+                !ancestor || later_local_oom || primary
+                    ? StepStatus::OutOfMemory
+                    : StepStatus::Completed);
       EXPECT_EQ(step.final_termination_status.max_exit_code, 0);
       EXPECT_FALSE(
           step.final_termination_status.final_reason_on_termination.empty());
-      if (ancestor)
+      if (ancestor && !later_local_oom)
         EXPECT_NE(
             step.final_termination_status.final_reason_on_termination.find(
                 "victim step is unknown"),
