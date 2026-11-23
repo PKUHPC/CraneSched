@@ -3848,18 +3848,12 @@ JobScheduler::SubmitJobToScheduler(std::unique_ptr<JobInCtld> job) {
 
   using crane::grpc::Signal;
   for (const auto& signal : job->JobToCtld().signals()) {
-    const auto number = signal.signal_number();
-    // Linux application signals. glibc reserves 32 and 33 for NPTL.
-    if (number < 1 || number > 64 || number == 32 || number == 33)
-      return std::unexpected(FormatRichErr(
-          CraneErrCode::ERR_INVALID_PARAM,
-          "Invalid --signal number {} (expected 1-31 or 34-64)", number));
-
-    if (signal.signal_time() > 65535)
-      return std::unexpected(
-          FormatRichErr(CraneErrCode::ERR_INVALID_PARAM,
-                        "Invalid --signal time {} (expected 0-65535 seconds)",
-                        signal.signal_time()));
+    if (auto valid = util::os::ValidateJobSignal(signal.signal_number(),
+                                                 signal.signal_time());
+        !valid)
+      return std::unexpected(FormatRichErr(CraneErrCode::ERR_INVALID_PARAM,
+                                           "Invalid --signal {}",
+                                           valid.error()));
 
     if (!Signal::SignalFlag_IsValid(signal.signal_flag()))
       return std::unexpected(FormatRichErr(

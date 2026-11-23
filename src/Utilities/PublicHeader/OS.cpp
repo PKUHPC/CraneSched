@@ -54,6 +54,23 @@
 
 namespace util::os {
 
+std::expected<void, std::string> ValidateJobSignal(int32_t signal_number,
+                                                   uint32_t lead_time_seconds) {
+  // glibc reserves signals 32 and 33 for NPTL.
+  if (signal_number < 1 || signal_number > 64 || signal_number == 32 ||
+      signal_number == 33)
+    return std::unexpected(
+        std::format("number {} (expected 1-31 or 34-64)", signal_number));
+
+  constexpr uint32_t kMaxSignalLeadTimeSeconds = 65535;
+  if (lead_time_seconds > kMaxSignalLeadTimeSeconds)
+    return std::unexpected(std::format("time {} (expected 0-{} seconds)",
+                                       lead_time_seconds,
+                                       kMaxSignalLeadTimeSeconds));
+
+  return {};
+}
+
 std::expected<void, std::string> ValidateContainerIdentity(
     uint32_t host_uid, std::span<const uint32_t> host_gids, bool userns,
     uint32_t container_uid, uint32_t container_gid) {
