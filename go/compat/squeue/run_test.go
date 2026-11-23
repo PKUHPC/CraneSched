@@ -5,7 +5,6 @@
 package squeue
 
 import (
-	"bufio"
 	"bytes"
 	"context"
 	"encoding/json"
@@ -112,62 +111,111 @@ func serveQueue(t *testing.T, controller pb.CraneCtldServer) string {
 	return config
 }
 
-// The golden streams were captured from squeue 26.05.4 with a held job,
-// a running batch containing a numeric step, and a held 1-5:2%1 array.
-// Replay the same public facts without requiring slurm.conf or a live scheduler.
-func TestSlurm26054Queue(t *testing.T) {
-	details := pb.QueryVisibility_QUERY_VISIBILITY_DETAILS
-	job := func(id uint32, name string) *pb.JobInfo {
-		return &pb.JobInfo{
-			JobId: id, Name: name, Type: pb.JobType_Batch, Partition: "compute", Account: "root", Username: "root", Qos: "normal",
-			Held: true, NodeNum: 1, Ntasks: new(uint32(1)), TimeLimit: &durationpb.Duration{Seconds: 900}, Cwd: "/tmp",
-			RequeueEligible: new(true), ScriptPath: new(""), RequeueIfFailed: true, QueryVisibility: details, IoMeta: &pb.IoMeta{OutputFilePattern: "/tmp/sqcmp-%j.out"},
-			ReqTotalResView: &pb.ResourceView{CpuCount: 1, MemoryBytes: 100 << 20},
-		}
+func TestQueueTextOutput(t *testing.T) {
+	visibility := pb.QueryVisibility_QUERY_VISIBILITY_DETAILS
+	held := &pb.JobInfo{
+		JobId: 7, Type: pb.JobType_Batch, Name: "compile", Partition: "cpu", Held: true,
+		TimeLimit: durationpb.New(15 * time.Minute), QueryVisibility: visibility,
+		ReqTotalResView: &pb.ResourceView{MemoryBytes: 128 << 20}, NodeNum: 1,
+		IoMeta: &pb.IoMeta{OutputFilePattern: "/tmp/build-%j.log"},
 	}
-	held, active, array := job(4517, "sqcmp-held"), job(4518, "sqcmp-run"), job(4519, "sqcmp-array")
-	active.Held = false
-	active.Status = pb.JobStatus_Running
-	active.ExecutionNode = []string{"slurm03"}
-	active.PendingReasonOrCranedList = &pb.JobInfo_CranedList{CranedList: "slurm03"}
-	array.ArraySpec = &pb.ArraySpec{Start: 1, End: 5, Stride: new(uint32(2)), MaxConcurrent: new(uint32(1))}
-	for i, kind := range []pb.StepType{pb.StepType_DAEMON, pb.StepType_PRIMARY, pb.StepType_COMMON} {
-		active.StepInfoList = append(active.StepInfoList, &pb.StepInfo{JobId: 4518, StepId: uint32(i), StepType: kind, Name: "sleep",
-			Status: pb.JobStatus_Running, TimeLimit: &durationpb.Duration{Seconds: 315576000000}, Ntasks: new(uint32(1)),
-			ExecutionNode: []string{"slurm03"}, QueryVisibility: details})
+	active := &pb.JobInfo{
+		JobId: 8, Type: pb.JobType_Batch, Status: pb.JobStatus_Running, Partition: "cpu", Username: "alice",
+		QueryVisibility: visibility,
+		StepInfoList: []*pb.StepInfo{
+			{StepType: pb.StepType_DAEMON, StepId: 0, Status: pb.JobStatus_Running, QueryVisibility: visibility},
+			{StepType: pb.StepType_PRIMARY, StepId: 1, Status: pb.JobStatus_Running, QueryVisibility: visibility},
+			{StepType: pb.StepType_COMMON, StepId: 2, QueryVisibility: visibility, Name: "worker", Status: pb.JobStatus_Running,
+				Ntasks: new(uint32(3)), ExecutionNode: []string{"n1"}, TimeLimit: durationpb.New(time.Minute)},
+		},
 	}
-	config := serveQueue(t, &referenceQueue{jobs: []*pb.JobInfo{held, active, array}})
-	f, err := os.Open("testdata/slurm-26.05.4.jsonl")
-	if err != nil {
-		t.Fatal(err)
-	}
-	defer f.Close()
-	scan := bufio.NewScanner(f)
-	for scan.Scan() {
-		var tc struct {
-			Name           string
-			Args           []string
-			Env            map[string]string
-			Stdout, Stderr string
-			RC             int
-		}
-		if err := json.Unmarshal(scan.Bytes(), &tc); err != nil {
-			t.Fatal(err)
-		}
-		t.Run(tc.Name, func(t *testing.T) {
+	config := serveQueue(t, &referenceQueue{jobs: []*pb.JobInfo{held, active}})
+	for _, tc := range []struct {
+		name           string
+		args, env      []string
+		stdout, stderr string
+	}{
+		{"literal prefix, alignment and truncation", []string{"-hj7", "-o", "job=%3j|%.9j|%t"}, nil, "job=com|  compile|PD\n", ""},
+		{"held job reason and unassigned nodes", []string{"-hj7", "-o", "%r|%R|%N"}, nil, "JobHeldUser|(JobHeldUser)|\n", ""},
+		{"job stream defaults and literal pattern", []string{"-hj7", "-O", "StdIn:0|,StdOut:0|,StdErr:0"}, nil, "/dev/null|/tmp/build-%j.log|(null)\n", ""},
+		{"long format from environment", []string{"-hj7"}, []string{"SQUEUE_FORMAT2=Name:0|,MinMemory:0|,TimeLeft:0"}, "compile|128M|15:00\n", ""},
+		{"short format wins over long environment format", []string{"-hj7"}, []string{"SQUEUE_FORMAT=id=%i", "SQUEUE_FORMAT2=Name:0"}, "id=7\n", ""},
+		{"command line overrides format and state environment", []string{"-hj7", "-o", "%T", "-t", "PD"}, []string{"SQUEUE_FORMAT2=Name:0", "SQUEUE_STATES=RUNNING"}, "PENDING\n", ""},
+		{"environment name filter", []string{"-hj7", "-o", "%i"}, []string{"SQUEUE_NAMES=missing"}, "", ""},
+		{"environment partition filter", []string{"-hj7", "-o", "%i"}, []string{"SQUEUE_PARTITION=other"}, "", ""},
+		{"pending job excluded by elapsed filter", []string{"-hj7", "--running-under=15", "-o", "%i"}, nil, "", ""},
+		{"invalid job field is echoed", []string{"-hj7", "-o", "%j/%@@"}, nil, "compile/%@@\n", "squeue: error: Invalid job format specification: @\n"},
+		{"empty format code", []string{"-hj7", "-o", "%%"}, nil, "\n", ""},
+		{"step uses its own short fields", []string{"-hs8.0", "-o", "%i|%j|%N|%A|%t"}, nil, "8.0|worker|n1|3|%t\n", "squeue: error: Invalid job step format specification: t\n"},
+		{"step stream and array defaults", []string{"-hs8.0", "-O", "ArrayJobId:0|,ArrayTaskId:0|,StdIn:0|,StdOut:0|,StdErr:0"}, nil, "0|N/A|||\n", ""},
+		{"batch selector uses numeric step zero", []string{"-hs8.batch", "-o", "%i"}, nil, "8.0\n", ""},
+		{"extern selector uses numeric step zero", []string{"-hs8.extern", "-o", "%i"}, nil, "8.0\n", ""},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
 			var out, diag bytes.Buffer
-			env := []string{"TZ=UTC", "LC_ALL=C"}
-			for k, v := range tc.Env {
-				env = append(env, k+"="+v)
-			}
-			rc := execute(t.Context(), config, append([]string{"squeue"}, tc.Args...), env, &out, &diag)
-			if rc != tc.RC || out.String() != tc.Stdout || diag.String() != tc.Stderr {
-				t.Errorf("%q: got (%d, %q, %q), want (%d, %q, %q)", tc.Args, rc, out.String(), diag.String(), tc.RC, tc.Stdout, tc.Stderr)
+			rc := execute(t.Context(), config, append([]string{"squeue"}, tc.args...), tc.env, &out, &diag)
+			if rc != 0 || out.String() != tc.stdout || diag.String() != tc.stderr {
+				t.Errorf("exit %d, stdout %q, stderr %q; want 0, %q, %q", rc, &out, &diag, tc.stdout, tc.stderr)
 			}
 		})
 	}
-	if err := scan.Err(); err != nil {
-		t.Fatal(err)
+}
+
+func TestQueueOptionDiagnostics(t *testing.T) {
+	for _, tc := range []struct {
+		args           []string
+		code           int
+		stdout, stderr string
+	}{
+		{[]string{"--usage", "--bad"}, 0, usage, ""},
+		{[]string{"--bad", "--usage"}, 1, "", "squeue: unrecognized option '--bad'\nTry \"squeue --help\" for more information\n"},
+		{[]string{"operand"}, 1, usage, "squeue: error: Unrecognized option: operand\n"},
+		{[]string{"-j0"}, 1, "", "squeue: error: Invalid job id: 0\n"},
+		{[]string{"-sinvalid"}, 1, "", "squeue: error: Invalid job_step id: invalid.??\n"},
+		{[]string{"-j", "-s"}, 1, "", "squeue: error: Incompatible options --jobs and --steps\n"},
+		{[]string{"-o", "%j", "-O", "Name"}, 1, "", "squeue: error: -O (--Format) is incompatible with -o (--format)\n"},
+		{[]string{"-O", "Name", "-o", "%j"}, 1, "", "squeue: error: -o (--format) is incompatible with -O (--Format)\n"},
+		{[]string{"--running-under=1", "--running-over=3"}, 1, "", "squeue: fatal: --running-over=00:03:00 and --running-under=00:01:00 will return 0 jobs.\n"},
+		{[]string{"-t", "NODE_FAIL", "--help"}, 1, "", "squeue: error: current Crane version does not support job state NODE_FAIL\n"},
+	} {
+		t.Run(strings.Join(tc.args, " "), func(t *testing.T) {
+			var out, diag bytes.Buffer
+			rc := execute(t.Context(), "", append([]string{"squeue"}, tc.args...), nil, &out, &diag)
+			if rc != tc.code || out.String() != tc.stdout || diag.String() != tc.stderr {
+				t.Errorf("exit %d, stdout %q, stderr %q; want %d, %q, %q", rc, &out, &diag, tc.code, tc.stdout, tc.stderr)
+			}
+		})
+	}
+}
+
+func TestConfiguringStateIncludesStartingJobs(t *testing.T) {
+	reply := &pb.QueryJobsInfoReply{JobInfoList: []*pb.JobInfo{
+		{JobId: 1, Status: pb.JobStatus_Configuring},
+		{JobId: 2, Status: pb.JobStatus_Starting},
+		{JobId: 3, Status: pb.JobStatus_Running},
+	}}
+	for _, filter := range []string{"configuring", "CF"} {
+		o, err := parse([]string{"-t", filter}, nil, io.Discard)
+		if err != nil {
+			t.Fatal(err)
+		}
+		rows, err := o.rows(reply)
+		if err != nil {
+			t.Fatal(err)
+		}
+		var ids []string
+		for _, r := range rows {
+			ids = append(ids, r.id())
+			for field, want := range map[string]string{"State": "CONFIGURING", "StateCompact": "CF"} {
+				if got, err := r.value(field, o); err != nil || got != want {
+					t.Errorf("job %s %s = %q, %v; want %q", r.id(), field, got, err, want)
+				}
+			}
+		}
+		slices.Sort(ids)
+		if !slices.Equal(ids, []string{"1", "2"}) {
+			t.Errorf("-t %s selected %v, want jobs 1 and 2", filter, ids)
+		}
 	}
 }
 
@@ -370,13 +418,17 @@ func TestStepQueryScopes(t *testing.T) {
 	}
 }
 
-func TestStructuredPendingArray(t *testing.T) {
-	j := &pb.JobInfo{JobId: 42, ArraySpec: &pb.ArraySpec{Start: 1, End: 5, Stride: new(uint32(2))}}
+func TestPendingArraySelection(t *testing.T) {
+	j := &pb.JobInfo{JobId: 42, ArraySpec: &pb.ArraySpec{Start: 1, End: 5, Stride: new(uint32(2)), MaxConcurrent: new(uint32(1))}}
 	for _, tc := range []struct {
 		args []string
 		want []string
 	}{
-		{[]string{"-r", "--json", "-j42"}, []string{"42_[1,3,5]"}},
+		{[]string{"-j42"}, []string{"42_[1,3,5%1]"}},
+		{[]string{"-j42_3,42_5"}, []string{"42_[3,5]"}},
+		{[]string{"-r", "-j42_3,42_5"}, []string{"42_3", "42_5"}},
+		{[]string{"-j42_2"}, nil},
+		{[]string{"-r", "--json", "-j42"}, []string{"42_[1,3,5%1]"}},
 		{[]string{"-r", "--json", "-j42_1,42_5"}, []string{"42_[1,5]"}},
 		{[]string{"--only-job-state", "--yaml", "-j42_3"}, []string{"42_1", "42_3", "42_5"}},
 		{[]string{"--only-job-state", "--json", "-j42_2"}, nil},

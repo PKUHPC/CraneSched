@@ -22,13 +22,56 @@ import (
 	"google.golang.org/protobuf/types/known/timestamppb"
 )
 
-var jobStates = [...]struct{ long, short string }{
-	pb.JobStatus_Pending: {"PENDING", "PD"}, pb.JobStatus_Running: {"RUNNING", "R"},
-	pb.JobStatus_Suspended: {"SUSPENDED", "S"}, pb.JobStatus_Completed: {"COMPLETED", "CD"},
-	pb.JobStatus_Cancelled: {"CANCELLED", "CA"}, pb.JobStatus_Failed: {"FAILED", "F"},
-	pb.JobStatus_ExceedTimeLimit: {"TIMEOUT", "TO"}, pb.JobStatus_OutOfMemory: {"OUT_OF_MEMORY", "OOM"},
-	pb.JobStatus_Configuring: {"CONFIGURING", "CF"}, pb.JobStatus_Starting: {"CONFIGURING", "CF"},
-	pb.JobStatus_Completing: {"COMPLETING", "CG"}, pb.JobStatus_Deadline: {"DEADLINE", "DL"},
+type jobState struct {
+	long, short string
+	statuses    []pb.JobStatus
+}
+
+// Slurm's --helpstate order includes states Crane cannot represent.
+var slurmStates = []jobState{
+	{"PENDING", "PD", []pb.JobStatus{pb.JobStatus_Pending}},
+	{"RUNNING", "R", []pb.JobStatus{pb.JobStatus_Running}},
+	{"SUSPENDED", "S", []pb.JobStatus{pb.JobStatus_Suspended}},
+	{"COMPLETED", "CD", []pb.JobStatus{pb.JobStatus_Completed}},
+	{"CANCELLED", "CA", []pb.JobStatus{pb.JobStatus_Cancelled}},
+	{"FAILED", "F", []pb.JobStatus{pb.JobStatus_Failed}},
+	{"TIMEOUT", "TO", []pb.JobStatus{pb.JobStatus_ExceedTimeLimit}},
+	{long: "NODE_FAIL"},
+	{long: "PREEMPTED"},
+	{long: "BOOT_FAIL"},
+	{"DEADLINE", "DL", []pb.JobStatus{pb.JobStatus_Deadline}},
+	{"OUT_OF_MEMORY", "OOM", []pb.JobStatus{pb.JobStatus_OutOfMemory}},
+	{"COMPLETING", "CG", []pb.JobStatus{pb.JobStatus_Completing}},
+	{"CONFIGURING", "CF", []pb.JobStatus{pb.JobStatus_Configuring, pb.JobStatus_Starting}},
+	{long: "EXPEDITING"},
+	{long: "RESIZING"},
+	{long: "RESV_DEL_HOLD"},
+	{long: "REQUEUED"},
+	{long: "REQUEUE_FED"},
+	{long: "REQUEUE_HOLD"},
+	{long: "REVOKED"},
+	{long: "SIGNALING"},
+	{long: "SPECIAL_EXIT"},
+	{long: "STAGE_OUT"},
+	{long: "STOPPED"},
+}
+
+var jobStates = func() map[pb.JobStatus]jobState {
+	byStatus := make(map[pb.JobStatus]jobState)
+	for _, state := range slurmStates {
+		for _, status := range state.statuses {
+			byStatus[status] = state
+		}
+	}
+	return byStatus
+}()
+
+func stateNames(separator string) string {
+	names := make([]string, len(slurmStates))
+	for i, state := range slurmStates {
+		names[i] = strings.ToLower(state.long)
+	}
+	return strings.Join(names, separator)
 }
 
 type row struct {
@@ -242,13 +285,14 @@ func (r row) value(f string, o *options) (string, error) {
 	case "WorkDir":
 		return j.Cwd, nil
 	case "State", "StepState", "StateCompact":
-		if int(status) >= len(jobStates) || status < 0 {
+		state, ok := jobStates[status]
+		if !ok {
 			return "?", nil
 		}
 		if f == "StateCompact" {
-			return jobStates[status].short, nil
+			return state.short, nil
 		}
-		return jobStates[status].long, nil
+		return state.long, nil
 	case "Reason":
 		return reason, nil
 	case "ReasonList":

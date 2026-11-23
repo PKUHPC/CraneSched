@@ -27,9 +27,6 @@ var help string
 //go:embed usage.txt
 var usage string
 
-//go:embed helpstate.txt
-var helpState string
-
 type operandError struct{ operand string }
 
 func (e *operandError) Error() string { return "squeue: error: Unrecognized option: " + e.operand }
@@ -347,20 +344,17 @@ func (o *options) selectStates(val string) error {
 	}
 	for _, input := range list(val) {
 		key := strings.ToUpper(input)
-		found := false
-		for i := range jobStates {
-			state := pb.JobStatus(i)
-			if jobStates[i].long == key || jobStates[i].short == key {
-				o.states = append(o.states, state)
-				found = true
-			}
+		i := slices.IndexFunc(slurmStates, func(state jobState) bool {
+			return state.long == key || state.short == key
+		})
+		if i < 0 {
+			return fmt.Errorf("squeue: error: Invalid job state specified: %s\nsqueue: error: Valid job states include: %s\n", input, stateNames(","))
 		}
-		if !found {
-			if slices.Contains(strings.Fields(helpState), strings.ToLower(key)) {
-				return unsupported("job state " + key)
-			}
-			return fmt.Errorf("squeue: error: Invalid job state specified: %s\nsqueue: error: Valid job states include: %s\n", input, strings.Join(strings.Fields(helpState), ","))
+		state := slurmStates[i]
+		if len(state.statuses) == 0 {
+			return unsupported("job state " + key)
 		}
+		o.states = append(o.states, state.statuses...)
 	}
 	return nil
 }

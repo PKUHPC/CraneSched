@@ -5,20 +5,11 @@
 package squeue
 
 import (
-	_ "embed"
 	"fmt"
 	"io"
 	"strconv"
 	"strings"
 )
-
-// These names, headings and short codes are the observable 26.05.4 interface.
-//
-//go:embed job-fields.txt
-var jobFields string
-
-//go:embed step-fields.txt
-var stepFields string
 
 type field struct {
 	name, header string
@@ -30,29 +21,177 @@ type catalog struct {
 	codes   map[byte]field
 }
 
-func registry(data string, step bool) catalog {
-	r := catalog{names: map[string]field{}, codes: map[byte]field{}}
-	for line := range strings.SplitSeq(strings.TrimSpace(data), "\n") {
-		v := strings.Fields(line)
-		f := field{name: v[0], header: v[1]}
-		if len(v) == 3 {
-			f.code = v[2][0]
+func registry(fields []field, shortOnly field) catalog {
+	r := catalog{ordered: fields, names: map[string]field{}, codes: map[byte]field{}}
+	for _, f := range fields {
+		if f.code != 0 {
 			r.codes[f.code] = f
 		}
 		r.names[strings.ToLower(f.name)] = f
-		r.ordered = append(r.ordered, f)
 	}
 	// Short-only fields remain accepted even though --helpformat omits them.
-	if step {
-		r.codes['b'] = field{"tres-per-step", "TRES_PER_JOB", 'b'}
-	} else {
-		r.codes['b'] = field{"tres-per-node", "TRES_PER_NODE", 'b'}
-	}
+	r.codes[shortOnly.code] = shortOnly
 	return r
 }
 
-var jobs = registry(jobFields, false)
-var steps = registry(stepFields, true)
+// Field names, headings and short codes match the Slurm 26.05.4 interface.
+var jobs = registry([]field{
+	{name: "Account", header: "ACCOUNT", code: 'a'},
+	{name: "AccrueTime", header: "ACCRUE_TIME"},
+	{name: "admin_comment", header: "ADMIN_COMMENT"},
+	{name: "AllocNodes", header: "ALLOC_NODES"},
+	{name: "AllocSID", header: "ALLOC_SID"},
+	{name: "ArrayJobId", header: "ARRAY_JOB_ID", code: 'F'},
+	{name: "ArrayTaskId", header: "ARRAY_TASK_ID", code: 'K'},
+	{name: "AssocId", header: "ASSOC_ID"},
+	{name: "BatchFlag", header: "BATCH_FLAG"},
+	{name: "BatchHost", header: "EXEC_HOST", code: 'B'},
+	{name: "BoardsPerNode", header: "BOARDS_PER_NODE"},
+	{name: "BurstBuffer", header: "BURST_BUFFER"},
+	{name: "BurstBufferState", header: "BURST_BUFFER_STATE"},
+	{name: "Cluster", header: "CLUSTER"},
+	{name: "ClusterFeature", header: "CLUSTER_FEATURES"},
+	{name: "Command", header: "COMMAND", code: 'o'},
+	{name: "Comment", header: "COMMENT", code: 'k'},
+	{name: "Container", header: "CONTAINER"},
+	{name: "ContainerId", header: "CONTAINERID"},
+	{name: "ContainerType", header: "CONTAINERTYPE"},
+	{name: "Contiguous", header: "CONTIGUOUS", code: 'O'},
+	{name: "Cores", header: "CORES_PER_SOCKET", code: 'I'},
+	{name: "CoreSpec", header: "CORE_SPEC", code: 'X'},
+	{name: "CPUsPerTask", header: "CPUS_PER_TASK"},
+	{name: "cpus-per-task", header: "CPUS_PER_TASK"},
+	{name: "cpus-per-tres", header: "CPUS_PER_TRES"},
+	{name: "CronJob", header: "CRON_JOB"},
+	{name: "Deadline", header: "DEADLINE"},
+	{name: "DelayBoot", header: "DELAY_BOOT"},
+	{name: "Dependency", header: "DEPENDENCY", code: 'E'},
+	{name: "DerivedEC", header: "DERIVED_EC"},
+	{name: "EligibleTime", header: "ELIGIBLE_TIME"},
+	{name: "EndTime", header: "END_TIME", code: 'e'},
+	{name: "ExcNodes", header: "EXC_NODES", code: 'x'},
+	{name: "Exclusive", header: "EXCLUSIVE"},
+	{name: "exit_code", header: "EXIT_CODE"},
+	{name: "Feature", header: "FEATURES", code: 'f'},
+	{name: "GroupId", header: "GROUP", code: 'G'},
+	{name: "GroupName", header: "GROUP", code: 'g'},
+	{name: "HetJobId", header: "HET_JOB_ID"},
+	{name: "HetJobIdSet", header: "HET_JOB_ID_SET"},
+	{name: "HetJobOffset", header: "HET_JOB_OFFSET"},
+	{name: "JobArrayId", header: "JOBID", code: 'i'},
+	{name: "JobId", header: "JOBID", code: 'A'},
+	{name: "LastSchedEval", header: "LAST_SCHED_EVAL"},
+	{name: "Licenses", header: "LICENSES", code: 'W'},
+	{name: "LicensesAlloc", header: "LICENSES_ALLOC"},
+	{name: "MaxCPUs", header: "MAX_CPUS"},
+	{name: "MaxNodes", header: "MAX_NODES"},
+	{name: "mem-per-tres", header: "MEM_PER_TRES"},
+	{name: "MCSLabel", header: "MCSLABEL"},
+	{name: "MinCPUs", header: "MIN_CPUS", code: 'c'},
+	{name: "MinMemory", header: "MIN_MEMORY", code: 'm'},
+	{name: "MinTime", header: "TIME_MIN"},
+	{name: "MinTmpDisk", header: "MIN_TMP_DISK", code: 'd'},
+	{name: "Name", header: "NAME", code: 'j'},
+	{name: "Network", header: "NETWORK"},
+	{name: "Nice", header: "NICE", code: 'y'},
+	{name: "NodeList", header: "NODELIST", code: 'N'},
+	{name: "NTPerCore", header: "NTASKS_PER_CORE"},
+	{name: "NTPerNode", header: "NTASKS_PER_NODE"},
+	{name: "NTPerSocket", header: "NTASKS_PER_SOCKET"},
+	{name: "NTPerBoard", header: "NTASKS_PER_BOARD"},
+	{name: "NumCPUs", header: "CPUS", code: 'C'},
+	{name: "NumNodes", header: "NODES", code: 'D'},
+	{name: "NumTasks", header: "TASKS"},
+	{name: "Origin", header: "ORIGIN"},
+	{name: "OriginRaw", header: "ORIGIN_RAW"},
+	{name: "OverSubscribe", header: "OVER_SUBSCRIBE", code: 'h'},
+	{name: "Partition", header: "PARTITION", code: 'P'},
+	{name: "PendingTime", header: "PENDING_TIME"},
+	{name: "PreemptTime", header: "PREEMPT_TIME"},
+	{name: "Prefer", header: "PREFER"},
+	{name: "Priority", header: "PRIORITY", code: 'p'},
+	{name: "PriorityLong", header: "PRIORITY", code: 'Q'},
+	{name: "Profile", header: "PROFILE"},
+	{name: "QOS", header: "QOS", code: 'q'},
+	{name: "Reason", header: "REASON", code: 'r'},
+	{name: "ReasonList", header: "NODELIST(REASON)", code: 'R'},
+	{name: "Reboot", header: "REBOOT"},
+	{name: "ReqNodes", header: "REQ_NODES", code: 'n'},
+	{name: "ReqSwitch", header: "REQ_SWITCH"},
+	{name: "Requeue", header: "REQUEUE"},
+	{name: "Reservation", header: "RESERVATION", code: 'v'},
+	{name: "ResizeTime", header: "RESIZE_TIME"},
+	{name: "RestartCnt", header: "RESTART_COUNT"},
+	{name: "SchedNodes", header: "SCHEDNODES", code: 'Y'},
+	{name: "SCT", header: "S:C:T", code: 'z'},
+	{name: "SegmentSize", header: "SEGMENT_SIZE"},
+	{name: "SiblingsActive", header: "ACTIVE_SIBLINGS"},
+	{name: "SiblingsActiveRaw", header: "ACTIVE_SIBLINGS_RAW"},
+	{name: "SiblingsViable", header: "VIABLE_SIBLINGS"},
+	{name: "SiblingsViableRaw", header: "VIALBLE_SIBLINGS_RAW"},
+	{name: "SLUID", header: "SLUID", code: 's'},
+	{name: "Sockets", header: "SOCKETS_PER_NODE", code: 'H'},
+	{name: "SPerBoard", header: "SOCKETS_PER_BOARD"},
+	{name: "StartTime", header: "START_TIME", code: 'S'},
+	{name: "State", header: "STATE", code: 'T'},
+	{name: "StateCompact", header: "ST", code: 't'},
+	{name: "StdErr", header: "STDERR"},
+	{name: "StdIn", header: "STDIN"},
+	{name: "StdOut", header: "STDOUT"},
+	{name: "SubmitTime", header: "SUBMIT_TIME", code: 'V'},
+	{name: "system_comment", header: "SYSTEM_COMMENT"},
+	{name: "Threads", header: "THREADS_PER_CORE", code: 'J'},
+	{name: "TimeLeft", header: "TIME_LEFT", code: 'L'},
+	{name: "TimeLimit", header: "TIME_LIMIT", code: 'l'},
+	{name: "TimeUsed", header: "TIME", code: 'M'},
+	{name: "tres-alloc", header: "TRES_ALLOC"},
+	{name: "tres-bind", header: "TRES_BIND"},
+	{name: "tres-freq", header: "TRES_FREQ"},
+	{name: "tres-per-job", header: "TRES_PER_JOB"},
+	{name: "tres-per-socket", header: "TRES_PER_SOCKET"},
+	{name: "tres-per-task", header: "TRES_PER_TASK"},
+	{name: "UserId", header: "UID", code: 'U'},
+	{name: "UserName", header: "USER", code: 'u'},
+	{name: "Wait4Switch", header: "WAIT4SWITCH"},
+	{name: "WCKey", header: "WCKEY", code: 'w'},
+	{name: "WorkDir", header: "WORK_DIR", code: 'Z'},
+}, field{name: "tres-per-node", header: "TRES_PER_NODE", code: 'b'})
+
+var steps = registry([]field{
+	{name: "ArrayJobId", header: "ARRAY_JOB_ID"},
+	{name: "ArrayTaskId", header: "ARRAY_TASK_ID"},
+	{name: "Cluster", header: "CLUSTER"},
+	{name: "Container", header: "CONTAINER"},
+	{name: "ContainerId", header: "CONTAINERID"},
+	{name: "ContainerType", header: "CONTAINERTYPE"},
+	{name: "CPUFreq", header: "CPU_FREQ"},
+	{name: "cpus-per-tres", header: "CPUS_PER_TRES"},
+	{name: "JobId", header: "JOB_ID"},
+	{name: "mem-per-tres", header: "MEM_PER_TRES"},
+	{name: "Network", header: "NETWORK"},
+	{name: "Nodes", header: "NODELIST", code: 'N'},
+	{name: "NumCPUs", header: "NUM_CPUS"},
+	{name: "NumTasks", header: "TASKS", code: 'A'},
+	{name: "Partition", header: "PARTITION", code: 'P'},
+	{name: "ResvPorts", header: "RESERVED_PORTS"},
+	{name: "StartTime", header: "START_TIME", code: 'S'},
+	{name: "StdErr", header: "STDERR"},
+	{name: "StdIn", header: "STDIN"},
+	{name: "StdOut", header: "STDOUT"},
+	{name: "StepId", header: "STEPID", code: 'i'},
+	{name: "StepName", header: "NAME", code: 'j'},
+	{name: "StepState", header: "STATE"},
+	{name: "TimeLimit", header: "TIME_LIMIT", code: 'l'},
+	{name: "TimeUsed", header: "TIME", code: 'M'},
+	{name: "tres-bind", header: "TRES_BIND"},
+	{name: "tres-freq", header: "TRES_FREQ"},
+	{name: "tres-per-job", header: "TRES_PER_STEP"},
+	{name: "tres-per-socket", header: "TRES_PER_SOCKET"},
+	{name: "tres-per-step", header: "TRES_PER_STEP"},
+	{name: "tres-per-task", header: "TRES_PER_TASK"},
+	{name: "UserId", header: "UID", code: 'U'},
+	{name: "UserName", header: "USER", code: 'u'},
+}, field{name: "tres-per-step", header: "TRES_PER_JOB", code: 'b'})
 
 func (o *options) catalog() catalog {
 	if o.steps {

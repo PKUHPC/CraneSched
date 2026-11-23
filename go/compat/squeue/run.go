@@ -56,7 +56,7 @@ func run(ctx context.Context, config string, argv []string, env map[string]strin
 	case "version":
 		local = "slurm 26.05.4\n"
 	case "helpstate":
-		local = helpState
+		local = stateNames("\n") + "\n"
 	case "helpformat", "helpFormat":
 		local = o.helpFields(o.action == "helpformat")
 	case "parsers":
