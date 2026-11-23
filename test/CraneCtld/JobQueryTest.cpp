@@ -176,7 +176,7 @@ class ArrayRequeueCancellationTest : public ::testing::Test {
     const auto cancel_result =
         arrays.ApplyParentTerminalResult(parent->JobId(), absl::Now());
     ASSERT_TRUE(cancel_result.parent_found);
-    ASSERT_EQ(cancel_result.running_child_job_ids.size(), 2U);
+    ASSERT_EQ(cancel_result.unfinished_child_job_ids.size(), 2U);
     EXPECT_TRUE(cancel_result.final_parents.empty());
     EXPECT_TRUE(arrays.IsRegisteredParent(parent->JobId()));
     EXPECT_TRUE(g_account_meta_container->UserHasJob(parent->Username()));

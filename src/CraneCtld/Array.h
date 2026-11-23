@@ -74,9 +74,11 @@ class ArrayMeta {
   bool WillCompleteMaterializationAfter(array_task_id_t task_id) const;
   std::unique_ptr<JobInCtld> BuildChild(array_task_id_t task_id) const;
 
-  size_t RunningChildCount() const { return running_child_job_ids_.size(); }
-  const absl::flat_hash_set<job_id_t>& RunningChildJobIds() const {
-    return running_child_job_ids_;
+  size_t UnfinishedChildCount() const {
+    return unfinished_child_job_ids_.size();
+  }
+  const absl::flat_hash_set<job_id_t>& UnfinishedChildJobIds() const {
+    return unfinished_child_job_ids_;
   }
   bool ParentStartEventTriggered() const {
     return parent_start_event_triggered_;
@@ -90,7 +92,7 @@ class ArrayMeta {
   bool TrackMaterialized(JobInCtld* child);
   // Returns true if this task completes materialization for the array parent.
   bool TrackMaterialized(array_task_id_t task_id, job_id_t child_job_id);
-  void OnChildRunning(job_id_t child_job_id);
+  void TrackUnfinishedChild(job_id_t child_job_id);
   void OnChildTerminal(job_id_t child_job_id);
   // Returns true if the parent start event is triggered by this call.
   bool MarkParentStarted(absl::Time start_time);
@@ -108,7 +110,7 @@ class ArrayMeta {
   array_task_id_t max_materialized_task_id_{0};
   bool has_any_materialized_{false};
   absl::flat_hash_map<array_task_id_t, job_id_t> child_job_id_by_task_id_;
-  absl::flat_hash_set<job_id_t> running_child_job_ids_;
+  absl::flat_hash_set<job_id_t> unfinished_child_job_ids_;
   bool parent_start_event_triggered_{false};
   std::optional<std::pair<crane::grpc::JobStatus, uint32_t>>
       terminal_status_override_;
@@ -167,7 +169,7 @@ class ArrayManager {
 
   struct FinishedParentResult {
     bool parent_found{false};
-    std::vector<job_id_t> running_child_job_ids;
+    std::vector<job_id_t> unfinished_child_job_ids;
     std::vector<FinalizedArrayParent> final_parents;
   };
 
@@ -208,7 +210,7 @@ class ArrayManager {
   // Called after a materialized child has successfully started.
   bool OnChildStarted(JobInCtld* child);
 
-  // Called when a running child reaches a terminal status.
+  // Called when a materialized child reaches a terminal status.
   std::vector<FinalizedArrayParent> OnChildTerminal(
       JobInCtld* child, const std::unordered_set<JobInCtld*>& final_jobs);
 
@@ -219,7 +221,9 @@ class ArrayManager {
   std::vector<FinalizedArrayParent> TryFinalizeParentIfComplete(
       job_id_t parent_job_id);
 
-  std::vector<job_id_t> RunningChildJobIdsForParent(
+  // Materialized children awaiting terminal processing, including requeued
+  // Pending children. Requeue does not remove a child from this set.
+  std::vector<job_id_t> UnfinishedChildJobIdsForParent(
       job_id_t parent_job_id) const;
 
   std::optional<crane::grpc::ArraySpec> RemainingTaskSpec(

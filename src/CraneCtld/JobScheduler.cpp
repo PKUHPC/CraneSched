@@ -2720,7 +2720,7 @@ CraneErrCode JobScheduler::ChangeJobTimeConstraint(
     // they are materialized.
     if (is_array_parent) {
       for (job_id_t child_job_id :
-           m_array_manager_->RunningChildJobIdsForParent(job_id)) {
+           m_array_manager_->UnfinishedChildJobIdsForParent(job_id)) {
         auto child_it = m_running_job_map_.find(child_job_id);
         if (child_it == m_running_job_map_.end()) continue;
         JobInCtld* child = child_it->second.get();
@@ -3634,7 +3634,7 @@ CraneErrCode JobScheduler::ChangeJobExtraAttrs(
     // materialized children. Future children inherit from the parent when
     // they are materialized.
     for (job_id_t child_id :
-         m_array_manager_->RunningChildJobIdsForParent(job_id)) {
+         m_array_manager_->UnfinishedChildJobIdsForParent(job_id)) {
       auto child_it = m_running_job_map_.find(child_id);
       if (child_it == m_running_job_map_.end()) {
         continue;
@@ -4105,7 +4105,8 @@ std::vector<job_id_t> JobScheduler::CancelArrayParentNoLock_(
       .terminate_running_children = terminate_children});
   if (!terminate_children) return {};
 
-  auto child_ids = m_array_manager_->RunningChildJobIdsForParent(parent_job_id);
+  auto child_ids =
+      m_array_manager_->UnfinishedChildJobIdsForParent(parent_job_id);
   for (job_id_t child_id : child_ids) {
     // Requeued children retain their array membership while waiting for a
     // fresh allocation. Running children are handled by the async parent
@@ -5409,7 +5410,7 @@ void JobScheduler::CleanCancelJobQueueCb_() {
       if (!finish_result.parent_found) continue;
 
       if (array_elem.terminate_running_children) {
-        for (job_id_t child_id : finish_result.running_child_job_ids) {
+        for (job_id_t child_id : finish_result.unfinished_child_job_ids) {
           auto rn_it = m_running_job_map_.find(child_id);
           if (rn_it == m_running_job_map_.end()) continue;
           CancelRunningJobNoLock_(rn_it->second.get(),

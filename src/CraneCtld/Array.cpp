@@ -216,12 +216,12 @@ bool ArrayMeta::TrackMaterialized(array_task_id_t task_id,
   return true;
 }
 
-void ArrayMeta::OnChildRunning(job_id_t child_job_id) {
-  running_child_job_ids_.insert(child_job_id);
+void ArrayMeta::TrackUnfinishedChild(job_id_t child_job_id) {
+  unfinished_child_job_ids_.insert(child_job_id);
 }
 
 void ArrayMeta::OnChildTerminal(job_id_t child_job_id) {
-  running_child_job_ids_.erase(child_job_id);
+  unfinished_child_job_ids_.erase(child_job_id);
 }
 
 void ArrayMeta::RecordTerminalResult(crane::grpc::JobStatus status,
@@ -273,7 +273,7 @@ std::optional<std::string> ArrayMeta::SpawnBlockReason(absl::Time now) const {
 
   size_t limit =
       ArrayUtil::EffectiveRunLimit(parent_job_->JobToCtld().array_spec());
-  if (RunningChildCount() >= limit) {
+  if (UnfinishedChildCount() >= limit) {
     return "ArrayTaskLimit";
   }
   return std::nullopt;
@@ -470,7 +470,7 @@ CraneExpected<void> ArrayManager::BindRecoveredRunningChildrenForParent(
   bool materialization_complete = false;
   for (JobInCtld* child : children) {
     materialization_complete |= meta->TrackMaterialized(child);
-    meta->OnChildRunning(child->JobId());
+    meta->TrackUnfinishedChild(child->JobId());
     meta->MarkParentStarted(child->StartTime());
   }
 
@@ -585,7 +585,7 @@ void ArrayManager::TryFinalizeParentNoLock_(
   if (meta == nullptr || meta->ParentPtr() == nullptr) return;
 
   if (!ArrayMaterializationComplete_(meta->Parent()) ||
-      meta->RunningChildCount() != 0) {
+      meta->UnfinishedChildCount() != 0) {
     return;
   }
 
@@ -629,9 +629,9 @@ ArrayManager::FinishedParentResult ArrayManager::ApplyParentTerminalResult(
     return result;
   }
   result.parent_found = true;
-  const auto& running_child_job_ids = meta->RunningChildJobIds();
-  result.running_child_job_ids.assign(running_child_job_ids.begin(),
-                                      running_child_job_ids.end());
+  const auto& unfinished_child_job_ids = meta->UnfinishedChildJobIds();
+  result.unfinished_child_job_ids.assign(unfinished_child_job_ids.begin(),
+                                         unfinished_child_job_ids.end());
 
   meta->ApplyTerminalResult(end_time);
   if (!g_embedded_db_client->UpdateRuntimeAttrOfJobIfExists(
@@ -640,7 +640,7 @@ ArrayManager::FinishedParentResult ArrayManager::ApplyParentTerminalResult(
                 parent_job_id);
   }
 
-  if (meta->RunningChildCount() != 0) {
+  if (meta->UnfinishedChildCount() != 0) {
     return result;
   }
 
@@ -665,12 +665,12 @@ ArrayManager::TryFinalizeParentIfComplete(job_id_t parent_job_id) {
   return final_parents;
 }
 
-std::vector<job_id_t> ArrayManager::RunningChildJobIdsForParent(
+std::vector<job_id_t> ArrayManager::UnfinishedChildJobIdsForParent(
     job_id_t parent_job_id) const {
   const auto* meta = FindMeta_(parent_job_id);
   if (meta == nullptr) return {};
-  const auto& running_child_job_ids = meta->RunningChildJobIds();
-  return {running_child_job_ids.begin(), running_child_job_ids.end()};
+  const auto& unfinished_child_job_ids = meta->UnfinishedChildJobIds();
+  return {unfinished_child_job_ids.begin(), unfinished_child_job_ids.end()};
 }
 
 // ----------------------------------------------------------------------------
@@ -765,7 +765,7 @@ std::unique_ptr<JobInCtld> ArrayManager::MaterializeChildForAllocation(
 
   // Child skips the pending phase: materialization is only called
   // when NodeSelect has already given the parent an allocation.
-  meta->OnChildRunning(child->JobId());
+  meta->TrackUnfinishedChild(child->JobId());
   return child;
 }
 
