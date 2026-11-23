@@ -76,6 +76,8 @@ make -C go protos
 make -C go test
 
 HTTPS_PROXY="$download_proxy" cmake --preset ci-debug
+# Recreate this private archive; the reused tree contained duplicate members.
+rm -f cmake-build-ci-debug/dependencies/cmake/lua/libcrane_lua.a
 cmake --build --preset ci-debug --target crane_unit_tests --parallel "${BUILD_JOBS:-6}"
 ctest --test-dir cmake-build-ci-debug --output-on-failure
 # Build the opt-in kernel fixture for the isolated integration environment.
