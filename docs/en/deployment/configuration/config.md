@@ -225,6 +225,12 @@ into an RPC failure eligible for automatic requeue. If no terminal status was
 received, the timeout is still reported as a failure. Restart Craned to apply
 changes to this setting.
 
+The same timeout applies to daemon steps and silent cleanup. With `RunInJob`,
+allow enough time for the Job Epilog and other shutdown work. If this timeout
+is shorter than the Epilog runtime, Craned may kill the Supervisor before the
+Epilog timeout elapses. Craned checks the deadline on a timer, so a pending
+shutdown RPC may delay the check.
+
 ## Advanced Options
 
 ### TLS Encryption

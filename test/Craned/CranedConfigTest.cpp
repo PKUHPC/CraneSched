@@ -35,18 +35,16 @@ TEST_F(CranedCompletionConfigTest, AcceptsPositiveTimeout) {
   EXPECT_EQ(g_config.CranedConf.SupervisorCompletionTimeoutSec, 60U);
 }
 
-TEST_F(CranedCompletionConfigTest, RejectsZeroTimeout) {
-  EXPECT_EXIT(
-      ParseCranedConfig(YAML::Load("Craned: {SupervisorCompletionTimeout: 0}")),
-      ::testing::ExitedWithCode(1), "");
-}
-
-TEST_F(CranedCompletionConfigTest, RejectsNegativeOrMalformedTimeout) {
-  for (const char* value : {"-1", "invalid", "4294967296"}) {
-    EXPECT_THROW(ParseCranedConfig(YAML::Load(
-                     std::string("Craned: {SupervisorCompletionTimeout: ") +
-                     value + "}")),
-                 YAML::BadConversion);
+TEST_F(CranedCompletionConfigTest, RejectsInvalidTimeoutWithFieldName) {
+  for (const char* value :
+       {"0", "-1", "invalid", "4294967296", "null", "[]", "1.5"}) {
+    SCOPED_TRACE(value);
+    EXPECT_EXIT(
+        ParseCranedConfig(
+            YAML::Load(std::string("Craned: {SupervisorCompletionTimeout: ") +
+                       value + "}")),
+        ::testing::ExitedWithCode(1),
+        "Craned[.]SupervisorCompletionTimeout must be a positive integer");
   }
 }
 

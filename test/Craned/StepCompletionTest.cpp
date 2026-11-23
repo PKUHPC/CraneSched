@@ -81,12 +81,17 @@ class StepCompletionTest : public ::testing::Test {
   }
 
   void ReapSupervisor() {
-    int result;
+    const auto deadline = std::chrono::steady_clock::now() + 2s;
     do {
-      result = waitpid(pid_, &wait_status_, 0);
-    } while (result < 0 && errno == EINTR);
-    ASSERT_EQ(result, pid_);
-    pid_ = -1;
+      const pid_t result = waitpid(pid_, &wait_status_, WNOHANG);
+      if (result == pid_) {
+        pid_ = -1;
+        return;
+      }
+      ASSERT_TRUE(result == 0 || (result < 0 && errno == EINTR));
+      std::this_thread::sleep_for(10ms);
+    } while (std::chrono::steady_clock::now() < deadline);
+    FAIL() << "Supervisor child did not exit before the test deadline";
   }
 
   void FinishCleanup() {
@@ -107,18 +112,12 @@ class StepCompletionTest : public ::testing::Test {
 
 TEST_F(StepCompletionTest, ThreeSecondCleanupCompletesNormally) {
   ReportTerminal();
-  const auto deadline = std::chrono::steady_clock::now() + 3100ms;
-  while (std::chrono::steady_clock::now() < deadline) {
-    EXPECT_FALSE(
-        CheckSupervisorCompletion_(state_, std::chrono::steady_clock::now()));
-    EXPECT_FALSE(state_.sigkill_sent);
-    std::this_thread::sleep_for(200ms);
-  }
-  FinishCleanup();
+  EXPECT_FALSE(PollAt(3100ms));
+  EXPECT_FALSE(state_.sigkill_sent);
+  ASSERT_NO_FATAL_FAILURE(FinishCleanup());
   ASSERT_TRUE(WIFEXITED(wait_status_));
   EXPECT_EQ(WEXITSTATUS(wait_status_), 0);
-  EXPECT_TRUE(
-      CheckSupervisorCompletion_(state_, std::chrono::steady_clock::now()));
+  EXPECT_TRUE(PollAt(3300ms));
   ExpectReportedTerminal();
 }
 
@@ -129,8 +128,8 @@ TEST_F(StepCompletionTest, TimeoutUsesElapsedTimeInsteadOfPollCount) {
   EXPECT_FALSE(PollAt(29999ms));
   EXPECT_FALSE(state_.sigkill_sent);
   EXPECT_FALSE(PollAt(30s));
-  EXPECT_TRUE(state_.sigkill_sent);
-  ReapSupervisor();
+  ASSERT_TRUE(state_.sigkill_sent);
+  ASSERT_NO_FATAL_FAILURE(ReapSupervisor());
   ASSERT_TRUE(WIFSIGNALED(wait_status_));
   EXPECT_EQ(WTERMSIG(wait_status_), SIGKILL);
   EXPECT_TRUE(PollAt(30200ms));
@@ -149,7 +148,7 @@ TEST_P(ReportedStepCompletionTest, ForcedCleanupPreservesAllTerminalFields) {
   // The process may still be present as a zombie on another timer tick.
   EXPECT_FALSE(PollAt(31s));
   ExpectReportedTerminal(status, exit_code);
-  ReapSupervisor();
+  ASSERT_NO_FATAL_FAILURE(ReapSupervisor());
   ASSERT_TRUE(WIFSIGNALED(wait_status_));
   EXPECT_EQ(WTERMSIG(wait_status_), SIGKILL);
   EXPECT_TRUE(PollAt(32s));
@@ -176,8 +175,8 @@ TEST_F(StepCompletionTest, ConfiguredTimeoutIsRespected) {
 
 TEST_F(StepCompletionTest, UnreportedResultStillFailsOnSupervisorTimeout) {
   EXPECT_FALSE(PollAt(30s));
-  EXPECT_TRUE(state_.sigkill_sent);
-  ReapSupervisor();
+  ASSERT_TRUE(state_.sigkill_sent);
+  ASSERT_NO_FATAL_FAILURE(ReapSupervisor());
   EXPECT_TRUE(PollAt(30200ms));
   ASSERT_TRUE(step_->pending_terminal_status.has_value());
   EXPECT_EQ(step_->pending_terminal_status->final_status, StepStatus::Failed);
@@ -185,7 +184,7 @@ TEST_F(StepCompletionTest, UnreportedResultStillFailsOnSupervisorTimeout) {
 }
 
 TEST_F(StepCompletionTest, ExitedSupervisorWaitsForInFlightTerminalStatus) {
-  FinishCleanup();
+  ASSERT_NO_FATAL_FAILURE(FinishCleanup());
   EXPECT_FALSE(PollAt(200ms));
   EXPECT_FALSE(step_->pending_terminal_status.has_value());
   ReportTerminal();
@@ -194,7 +193,7 @@ TEST_F(StepCompletionTest, ExitedSupervisorWaitsForInFlightTerminalStatus) {
 }
 
 TEST_F(StepCompletionTest, MissingTerminalStatusStillFailsAfterGracePeriod) {
-  FinishCleanup();
+  ASSERT_NO_FATAL_FAILURE(FinishCleanup());
   for (int i = 1; i < kMaxStatusWaitRetryCount; ++i)
     EXPECT_FALSE(PollAt(i * 200ms));
   EXPECT_TRUE(PollAt(kMaxStatusWaitRetryCount * 200ms));
@@ -205,7 +204,7 @@ TEST_F(StepCompletionTest, MissingTerminalStatusStillFailsAfterGracePeriod) {
 
 TEST_F(StepCompletionTest, SilentCleanupDoesNotWaitForTerminalStatus) {
   step_->silent_cleanup = true;
-  FinishCleanup();
+  ASSERT_NO_FATAL_FAILURE(FinishCleanup());
   EXPECT_TRUE(PollAt(200ms));
   EXPECT_FALSE(step_->pending_terminal_status.has_value());
 }

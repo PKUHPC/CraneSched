@@ -220,6 +220,10 @@ Craned:
 避免因清理缓慢将已完成作业改判为可自动重排队的 RPC 失败；未收到终态时仍报告失败。
 修改此配置后需重启 Craned 生效。
 
+此超时同样适用于 daemon step 和静默清理。启用 `RunInJob` 时，要为 Job Epilog
+及其他退出操作留出时间。如果此超时短于 Epilog 的运行时间，Craned 可能在 Epilog
+超时前结束 Supervisor。Craned 通过定时器检查超时，等待关闭 RPC 可能延后检查。
+
 ## 高级选项
 
 ### TLS 加密
