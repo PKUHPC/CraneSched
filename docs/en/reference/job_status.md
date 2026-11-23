@@ -22,6 +22,7 @@ of 137.
 On older cgroup v1 kernels without an OOM-kill counter, notifications identify
 an OOM condition rather than a particular victim. A job-level notification can
 mark a batch primary as `OutOfMemory`; it does not identify every sibling step
-as an OOM victim. Explicit cancellation, timeout, deadline, and Cfored disconnect
-retain precedence within a supervisor. Results from different execution nodes
-continue to use the controller's existing aggregation policy.
+as an OOM victim. OOM classification is skipped when the supervisor has recorded
+an explicit cancellation, timeout, deadline, or Cfored disconnect; those task
+results retain the existing aggregation behavior. Results from different
+execution nodes continue to use the controller's existing aggregation policy.

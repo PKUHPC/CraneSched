@@ -635,40 +635,51 @@ void StepInstance::InitOomMonitor() {
 void StepInstance::RecordTaskResult(StepStatus new_status, uint32_t exit_code,
                                     std::optional<std::string> reason,
                                     const TaskFinalInfo& final_info) {
-  // Explicit termination and startup errors retain their own classification.
-  // Sample after task cleanup has saved counters/events from the task cgroup.
-  if (final_info.cause == TaskFinalizeCause::NORMAL && final_info.raw_exit &&
-      !IsCalloc()) {
-    const auto& evidence = oom_monitor.Sample();
-    if (!evidence.workload.empty()) {
-      new_status = StepStatus::OutOfMemory;
-      reason = evidence.workload;
-    } else if (!evidence.ancestor.empty()) {
-      // An old-v1 parent event can reach every sibling. A batch primary owns
-      // the allocation's result, but a common step must not claim a local kill.
-      if (IsBatch() && IsPrimary()) new_status = StepStatus::OutOfMemory;
-      if (!reason || reason->empty()) reason = evidence.ancestor;
-    }
-  }
-
-  int priority = new_status == StepStatus::Completed ? 0 : 1;
-  if (new_status == StepStatus::OutOfMemory) priority = 2;
-  if (final_info.cause == TaskFinalizeCause::CANCELLED_BY_USER ||
-      final_info.cause == TaskFinalizeCause::TIMEOUT ||
-      final_info.cause == TaskFinalizeCause::DEADLINE ||
-      final_info.cause == TaskFinalizeCause::CFORED_DISCONNECTED)
-    priority = 3;
-
+  // Preserve task-result aggregation independently of OOM detection.
   auto& result = final_termination_status;
-  result.max_exit_code = std::max(result.max_exit_code, exit_code);
-  if (priority > result.priority ||
-      (priority == result.priority && new_status != StepStatus::Completed)) {
-    result.priority = priority;
+  if (result.max_exit_code < exit_code) {
+    result.max_exit_code = exit_code;
     result.final_status_on_termination = new_status;
     result.final_reason_on_termination = reason.value_or("");
-  } else if (priority == result.priority &&
-             result.final_reason_on_termination.empty() && reason) {
-    result.final_reason_on_termination = *reason;
+  }
+  if (new_status != StepStatus::Completed)
+    result.final_status_on_termination = new_status;
+
+  switch (final_info.cause) {
+  case TaskFinalizeCause::NORMAL:
+    m_has_natural_task_exit_ |= final_info.raw_exit.has_value();
+    break;
+  case TaskFinalizeCause::CANCELLED_BY_USER:
+  case TaskFinalizeCause::TIMEOUT:
+  case TaskFinalizeCause::DEADLINE:
+  case TaskFinalizeCause::CFORED_DISCONNECTED:
+    m_has_explicit_termination_ = true;
+    break;
+  default:
+    break;
+  }
+}
+
+void StepInstance::FinalizeOomStatus() {
+  CRANE_ASSERT(AllTaskFinished());
+  // Each task's cleanup saved its evidence before removing the cgroup. Drain
+  // the step monitor once, after all results, so no later task can erase OOM.
+  oom_monitor.Stop();
+  if (IsCalloc() || !m_has_natural_task_exit_ || m_has_explicit_termination_)
+    return;
+
+  const auto& evidence = oom_monitor.GetEvidence();
+  auto& result = final_termination_status;
+  if (!evidence.workload.empty()) {
+    result.final_status_on_termination = StepStatus::OutOfMemory;
+    result.final_reason_on_termination = evidence.workload;
+  } else if (!evidence.ancestor.empty()) {
+    // An old-v1 parent event can reach every sibling. A batch primary owns
+    // the allocation's result, but a common step must not claim a local kill.
+    if (IsBatch() && IsPrimary())
+      result.final_status_on_termination = StepStatus::OutOfMemory;
+    if (result.final_reason_on_termination.empty())
+      result.final_reason_on_termination = evidence.ancestor;
   }
 }
 
@@ -3127,12 +3138,12 @@ void TaskManager::ResolveFinishedTask_(task_id_t task_id, StepStatus new_status,
                static_cast<int>(err));
   }
 
-  if (m_step_.AllTaskFinished()) m_step_.oom_monitor.Stop();
   m_step_.RecordTaskResult(new_status, exit_code, std::move(reason),
                            *task->GetFinalInfo());
   auto& status = m_step_.final_termination_status;
 
   if (m_step_.AllTaskFinished()) {
+    m_step_.FinalizeOomStatus();
     CRANE_DEBUG("[Step #{}.{}] Final result: {} (exit code: {}, reason: {}).",
                 m_step_.job_id, m_step_.step_id,
                 status.final_status_on_termination, status.max_exit_code,
@@ -3693,8 +3704,8 @@ void TaskManager::EvCleanFinalizingTaskQueueCb_() {
     const auto& raw_exit = fi->raw_exit.value();
 
     if (!m_step_.IsCalloc()) {
-      // OOM evidence is applied in RecordTaskResult after cleanup has sampled
-      // the task cgroup. Preserve the actual wait status, including exit(0).
+      // Apply OOM evidence after all task results and cgroup cleanup. Preserve
+      // the actual wait status here, including exit(0).
       auto status = !raw_exit.is_terminated_by_signal && raw_exit.value == 0
                         ? StepStatus::Completed
                         : StepStatus::Failed;
