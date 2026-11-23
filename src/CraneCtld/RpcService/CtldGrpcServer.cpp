@@ -833,6 +833,11 @@ grpc::Status CraneCtldServiceImpl::SubmitBatchJobs(
                         "CraneCtld Server is not ready"};
 
   CRANE_TRACE_SCOPE_NAMED(submit_span, "submit/batch_request");
+  auto add_failure = [&](CraneErrCode code, const std::string& reason = "") {
+    response->add_job_id_list(0);
+    response->add_code_list(code);
+    response->add_reason_list(reason);
+  };
   submit_span.SetAttribute("crane.dimension", "submit");
   submit_span.SetAttribute("count", static_cast<int64_t>(request->count()));
   submit_span.SetAttribute("uid", static_cast<int64_t>(request->job().uid()));
@@ -851,8 +856,7 @@ grpc::Status CraneCtldServiceImpl::SubmitBatchJobs(
   if (request->job().type() == crane::grpc::JobType::Container &&
       !g_config.Container.Enabled) {
     submit_span.SetStatus(crane::StatusCode::kError, "cri_disabled");
-    response->add_job_id_list(0);
-    response->add_code_list(CraneErrCode::ERR_CRI_DISABLED);
+    add_failure(CraneErrCode::ERR_CRI_DISABLED);
     return grpc::Status::OK;
   }
 
@@ -869,8 +873,7 @@ grpc::Status CraneCtldServiceImpl::SubmitBatchJobs(
   const bool has_array_spec = job_to_ctld.has_array_spec();
 
   if (has_array_spec && job_count != 1) {
-    response->mutable_job_id_list()->Add(0);
-    response->mutable_code_list()->Add(CraneErrCode::ERR_INVALID_PARAM);
+    add_failure(CraneErrCode::ERR_INVALID_PARAM);
     return grpc::Status::OK;
   }
 
@@ -890,12 +893,10 @@ grpc::Status CraneCtldServiceImpl::SubmitBatchJobs(
       if (job_result.has_value()) {
         response->mutable_job_id_list()->Add(job_result.value());
       } else {
-        response->mutable_job_id_list()->Add(0);
-        response->mutable_code_list()->Add(job_result.error());
+        add_failure(job_result.error());
       }
     } else {
-      response->mutable_job_id_list()->Add(0);
-      response->mutable_code_list()->Add(result.error().code());
+      add_failure(result.error().code(), result.error().description());
     }
   } else {
     // Non-array jobs: submit individually (repeat count).
@@ -916,12 +917,10 @@ grpc::Status CraneCtldServiceImpl::SubmitBatchJobs(
         if (job_result.has_value()) {
           response->mutable_job_id_list()->Add(job_result.value());
         } else {
-          response->mutable_job_id_list()->Add(0);
-          response->mutable_code_list()->Add(job_result.error());
+          add_failure(job_result.error());
         }
       } else {
-        response->mutable_job_id_list()->Add(0);
-        response->mutable_code_list()->Add(res.error().code());
+        add_failure(res.error().code(), res.error().description());
       }
     }
   }
@@ -2811,7 +2810,14 @@ grpc::Status CraneCtldServiceImpl::AddOrModifyLicenseResource(
   std::unordered_map<crane::grpc::LicenseResource::Field, std::string>
       operators;
   for (const auto& operator_ : request->operators()) {
-    operators.emplace(operator_.operator_field(), operator_.value());
+    const auto field = operator_.operator_field();
+    if (!operators.emplace(field, operator_.value()).second &&
+        field == crane::grpc::LicenseResource::Flags) {
+      response->set_ok(false);
+      response->mutable_rich_err()->CopyFrom(FormatRichErr(
+          CraneErrCode::ERR_INVALID_PARAM, "Specify resource Flags only once"));
+      return grpc::Status::OK;
+    }
   }
 
   CraneExpectedRich<void> operator_result;

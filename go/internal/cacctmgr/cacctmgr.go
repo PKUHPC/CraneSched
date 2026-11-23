@@ -731,6 +731,9 @@ func ModifyQos(params []ModifyParam, name string) error {
 		fmt.Println("Information was successfully modified.")
 		return nil
 	} else {
+		if len(reply.GetRichErrorList()) == 0 {
+			return util.NewCraneErr(util.ErrorBackend, "Failed to modify QoS. The controller returned no error details.")
+		}
 		msg := fmt.Sprintln("Failed to modify information:")
 		for _, richError := range reply.RichErrorList {
 			if richError.Description == "" {

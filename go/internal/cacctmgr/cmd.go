@@ -425,6 +425,9 @@ func executeAddWckeyCommand(command *CAcctMgrCommand) error {
 }
 
 func executeAddResourceCommand(command *CAcctMgrCommand) error {
+	if err := validateResourceFlagsArguments(command); err != nil {
+		return err
+	}
 	FlagOperators := make(map[protos.LicenseResource_Field]string, 0)
 
 	FlagResourceName = command.GetID()
@@ -1412,7 +1415,9 @@ func executeModifyQosCommand(command *CAcctMgrCommand) error {
 }
 
 func executeModifyResourceCommand(command *CAcctMgrCommand) error {
-
+	if err := validateResourceFlagsArguments(command); err != nil {
+		return err
+	}
 	FlagOperators := make(map[protos.LicenseResource_Field]string, 0)
 
 	KvParams := command.GetKVMaps()
@@ -1505,6 +1510,41 @@ func executeModifyResourceCommand(command *CAcctMgrCommand) error {
 	}
 
 	return ModifyResource(FlagResourceName, FlagServerName, FlagClusters, FlagOperators)
+}
+
+func validateResourceFlagsArguments(command *CAcctMgrCommand) error {
+	seen := false
+	check := func(key, operator string) error {
+		if !strings.EqualFold(key, "flags") {
+			return nil
+		}
+		if seen {
+			return util.NewCraneErr(util.ErrorCmdArg, "Specify resource Flags only once")
+		}
+		if operator != "" && operator != "=" {
+			return util.NewCraneErr(util.ErrorCmdArg, "Resource Flags only supports assignment")
+		}
+		seen = true
+		return nil
+	}
+
+	switch cmd := command.Command.(type) {
+	case AddCommand:
+		for _, param := range cmd.KVParams {
+			if err := check(param.Key, ""); err != nil {
+				return err
+			}
+		}
+	case ModifyCommand:
+		if cmd.Set != nil {
+			for _, param := range cmd.Set.SetParams {
+				if err := check(param.Key, param.Op); err != nil {
+					return err
+				}
+			}
+		}
+	}
+	return nil
 }
 
 func executeShowCommand(command *CAcctMgrCommand) error {

@@ -77,14 +77,15 @@ class AccountMetaContainer final {
    * IN/OUT: job - job to be submitted; qos_priority field is set on success
    * IN: user - locked user object for job.Username()
    * IN: count - submit slots to reserve; array parents pass effective run limit
-   * RET: CraneErrCode::SUCCESS on success, error code on limit exceeded
+   * RET: success or a rich error explaining the rejected submission
    *
    * NOTE: Caller must hold AccountManager user lock for user. This function
    *       acquires AccountManager account and QoS locks in that order, then
    *       acquires internal stripe locks.
    */
-  CraneErrCode TryMallocMetaSubmitResource(JobInCtld& job, const User& user,
-                                           uint32_t count = 1);
+  CraneExpectedRich<void> TryMallocMetaSubmitResource(JobInCtld& job,
+                                                      const User& user,
+                                                      uint32_t count = 1);
 
   /*
    * Unconditionally reserve submit-slot resources without validation.
@@ -191,11 +192,9 @@ class AccountMetaContainer final {
   static bool IsUnlimitedTres_(const ResourceView& res);
 
   // Submit-time QoS dimension check for a single entity.
-  CraneErrCode CheckQosSubmitLimitsForEntity_(const MetaResourceStat& stat,
-                                              const std::string& qos_name,
-                                              const Qos& qos, bool is_user,
-                                              const ResourceView& req_res,
-                                              uint32_t count) const;
+  CraneExpectedRich<void> CheckQosSubmitLimitsForEntity_(
+      const MetaResourceStat& stat, const std::string& qos_name, const Qos& qos,
+      bool is_user, const ResourceView& req_res, uint32_t count) const;
 
   // Submit-time Partition dimension check for a single entity.
   // Returns SUCCESS when partition_limit is nullptr (no limit configured).
@@ -207,7 +206,7 @@ class AccountMetaContainer final {
       bool is_user, uint32_t count) const;
 
   // Submit-time combined check for a single entity (QoS + Partition).
-  CraneErrCode CheckEntitySubmitLimits_(
+  CraneExpectedRich<void> CheckEntitySubmitLimits_(
       const MetaResourceStat& stat, const std::string& account,
       const std::string& qos_name, const Qos& qos,
       const std::string& partition_id,
@@ -238,9 +237,10 @@ class AccountMetaContainer final {
 
   // Submit-time aggregated check across all entities.
   // Replaces the old CheckMetaSubmitResourceUsage_.
-  CraneErrCode CheckSubmitLimits_(const JobInCtld& job, const User& user,
-                                  const AccountRawMap& account_map,
-                                  const Qos& qos, uint32_t count);
+  CraneExpectedRich<void> CheckSubmitLimits_(const JobInCtld& job,
+                                             const User& user,
+                                             const AccountRawMap& account_map,
+                                             const Qos& qos, uint32_t count);
 
   // Schedule-time aggregated check across all entities.
   std::expected<void, std::string> CheckRunLimits_(
