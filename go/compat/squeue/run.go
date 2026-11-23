@@ -20,6 +20,10 @@ import (
 )
 
 func Run(ctx context.Context, argv, environ []string, out, diag io.Writer) int {
+	return execute(ctx, "/etc/crane/config.yaml", argv, environ, out, diag)
+}
+
+func execute(ctx context.Context, config string, argv, environ []string, out, diag io.Writer) int {
 	env := map[string]string{}
 	for _, e := range environ {
 		k, v, ok := strings.Cut(e, "=")
@@ -27,14 +31,17 @@ func Run(ctx context.Context, argv, environ []string, out, diag io.Writer) int {
 			env[k] = v
 		}
 	}
-	if err := run(ctx, argv, env, out, diag); err != nil {
+	if err := run(ctx, config, argv, env, out, diag); err != nil {
 		fmt.Fprintln(diag, err)
+		if _, ok := err.(*operandError); ok {
+			io.WriteString(out, usage)
+		}
 		return 1
 	}
 	return 0
 }
 
-func run(ctx context.Context, argv []string, env map[string]string, out, diag io.Writer) error {
+func run(ctx context.Context, config string, argv []string, env map[string]string, out, diag io.Writer) error {
 	o, err := parse(argv[1:], env, diag)
 	if err != nil {
 		return err
@@ -77,7 +84,7 @@ func run(ctx context.Context, argv []string, env map[string]string, out, diag io
 			return err
 		}
 	}
-	session, err := utils.OpenSession(ctx, "/etc/crane/config.yaml")
+	session, err := utils.OpenSession(ctx, config)
 	if err != nil {
 		return fmt.Errorf("squeue: error: %w", err)
 	}
@@ -102,8 +109,14 @@ func run(ctx context.Context, argv []string, env map[string]string, out, diag io
 				}
 				o.clusterName = info.GetClusterName()
 			}
+			req := o.req
+			// Slurm loads a single job by its allocation ID, then applies array
+			// and display filters. A missing task in an existing array is empty.
+			if !o.steps && len(req.FilterJobIds) == 1 {
+				req = &pb.QueryJobsInfoRequest{Mode: req.Mode, NumLimit: req.NumLimit, FilterJobIds: []*pb.JobIdSelector{{JobId: req.FilterJobIds[0].JobId}}}
+			}
 			var e error
-			reply, e = util.QueryJobsInfo(ctx, client, o.req)
+			reply, e = util.QueryJobsInfo(ctx, client, req)
 			return e
 		})
 		if err != nil {
@@ -112,7 +125,7 @@ func run(ctx context.Context, argv []string, env map[string]string, out, diag io
 		if !reply.GetOk() || reply.HasMore {
 			return fmt.Errorf("squeue: error: incomplete queue response")
 		}
-		if !o.onlyState && len(list(o.jobIDs)) == 1 && len(reply.JobInfoList) == 0 && !o.steps && len(o.req.FilterAccounts)+len(o.req.FilterJobNames)+len(o.req.FilterLicenses)+len(o.req.FilterQos)+len(o.req.FilterPartitions) == 0 {
+		if !o.onlyState && len(list(o.jobIDs)) == 1 && len(reply.JobInfoList) == 0 && !o.steps {
 			return fmt.Errorf("slurm_load_jobs error: Invalid job id specified")
 		}
 		if o.verbose > 0 && !o.onlyState {
@@ -129,6 +142,9 @@ func run(ctx context.Context, argv []string, env map[string]string, out, diag io
 		}
 		if report.schema {
 			return o.writeReport(out, report, argv, nil)
+		}
+		if strings.Contains(o.sort, "b") && o.serializer == "" {
+			fmt.Fprintln(diag, "squeue: Invalid sort specification: b")
 		}
 		rows, err := o.rows(reply)
 		if err != nil {
@@ -210,6 +226,19 @@ func (o *options) rows(reply *pb.QueryJobsInfoReply) ([]row, error) {
 					result = append(result, r)
 				}
 			}
+			continue
+		}
+		if len(o.req.FilterJobIds) == 1 && o.req.FilterJobIds[0].ArrayTaskId != nil && !util.IsPendingArrayParent(j) {
+			sel := o.req.FilterJobIds[0]
+			a := j.ArrayTask
+			if a == nil || a.ArrayJobId != sel.JobId || a.TaskId != *sel.ArrayTaskId {
+				continue
+			}
+		}
+		if len(o.req.FilterPartitions) > 0 && !slices.Contains(o.req.FilterPartitions, j.Partition) {
+			continue
+		}
+		if len(o.req.FilterLicenses) > 0 && !slices.ContainsFunc(o.req.FilterLicenses, func(s string) bool { _, ok := j.LicensesCount[s]; return ok }) {
 			continue
 		}
 		if !matchesFold(o.accounts, j.Account) || !matchesFold(o.qos, j.Qos) || !matchesFold(o.names, j.Name) {
@@ -316,6 +345,9 @@ func (o *options) sortRows(rows []row) error {
 		}
 		c := order[0]
 		order = order[1:]
+		if c == 'b' {
+			continue
+		}
 		if o.steps && !strings.ContainsRune("iNPlSMuU", rune(c)) {
 			continue
 		}
@@ -378,7 +410,19 @@ func (o *options) sortRows(rows []row) error {
 		for i, k := range keys {
 			av, bv := a.values[i], b.values[i]
 			n := strings.Compare(av, bv)
-			if k.field == "id" {
+			if k.field == "NodeList" || k.field == "Nodes" {
+				if av == bv {
+					n = 0
+				} else if av == "" {
+					n = 1
+				} else if bv == "" {
+					n = -1
+				} else if utils.NaturalLess(av, bv) {
+					n = -1
+				} else {
+					n = 1
+				}
+			} else if k.field == "id" {
 				if av != bv {
 					if utils.NaturalLess(av, bv) {
 						n = -1

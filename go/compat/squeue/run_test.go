@@ -5,11 +5,20 @@
 package squeue
 
 import (
+	"bufio"
 	"bytes"
+	"context"
+	"encoding/json"
+	"fmt"
 	"io"
+	"net"
+	"os"
+	"path/filepath"
+	"slices"
 	"testing"
 
 	pb "github.com/PKUHPC/CraneSched/go/generated/protos"
+	"google.golang.org/grpc"
 	"google.golang.org/protobuf/types/known/durationpb"
 )
 
@@ -49,6 +58,95 @@ func TestQueuePresentation(t *testing.T) {
 				t.Fatalf("got %q, want %q", got, tc.want)
 			}
 		})
+	}
+}
+
+type referenceQueue struct {
+	pb.UnimplementedCraneCtldServer
+	jobs []*pb.JobInfo
+}
+
+func (s *referenceQueue) QueryJobsInfo(_ context.Context, req *pb.QueryJobsInfoRequest) (*pb.QueryJobsInfoReply, error) {
+	reply := &pb.QueryJobsInfoReply{Ok: true}
+	for _, j := range s.jobs {
+		if len(req.FilterJobIds) > 0 && !slices.ContainsFunc(req.FilterJobIds, func(id *pb.JobIdSelector) bool { return id.JobId == j.JobId }) {
+			continue
+		}
+		if len(req.FilterPartitions) > 0 && !slices.Contains(req.FilterPartitions, j.Partition) {
+			continue
+		}
+		reply.JobInfoList = append(reply.JobInfoList, j)
+	}
+	return reply, nil
+}
+
+// The golden streams were captured from squeue 26.05.4 with a held job,
+// a running batch containing a numeric step, and a held 1-5:2%1 array.
+// Replay the same public facts without requiring slurm.conf or a live scheduler.
+func TestSlurm26054Queue(t *testing.T) {
+	details := pb.QueryVisibility_QUERY_VISIBILITY_DETAILS
+	job := func(id uint32, name string) *pb.JobInfo {
+		return &pb.JobInfo{
+			JobId: id, Name: name, Type: pb.JobType_Batch, Partition: "compute", Account: "root", Username: "root", Qos: "normal",
+			Held: true, NodeNum: 1, Ntasks: new(uint32(1)), TimeLimit: &durationpb.Duration{Seconds: 900}, Cwd: "/tmp",
+			RequeueIfFailed: true, QueryVisibility: details, IoMeta: &pb.IoMeta{OutputFilePattern: "/tmp/sqcmp-%j.out"},
+			ReqTotalResView: &pb.ResourceView{CpuCount: 1, MemoryBytes: 100 << 20},
+		}
+	}
+	held, active, array := job(4517, "sqcmp-held"), job(4518, "sqcmp-run"), job(4519, "sqcmp-array")
+	active.Held = false
+	active.Status = pb.JobStatus_Running
+	active.ExecutionNode = []string{"slurm03"}
+	active.PendingReasonOrCranedList = &pb.JobInfo_CranedList{CranedList: "slurm03"}
+	array.ArraySpec = &pb.ArraySpec{Start: 1, End: 5, Stride: new(uint32(2)), MaxConcurrent: new(uint32(1))}
+	for i, kind := range []pb.StepType{pb.StepType_DAEMON, pb.StepType_PRIMARY, pb.StepType_COMMON} {
+		active.StepInfoList = append(active.StepInfoList, &pb.StepInfo{JobId: 4518, StepId: uint32(i), StepType: kind, Name: "sleep",
+			Status: pb.JobStatus_Running, TimeLimit: &durationpb.Duration{Seconds: 315576000000}, Ntasks: new(uint32(1)),
+			ExecutionNode: []string{"slurm03"}, QueryVisibility: details})
+	}
+	l, err := net.Listen("tcp", "127.0.0.1:0")
+	if err != nil {
+		t.Fatal(err)
+	}
+	server := grpc.NewServer()
+	pb.RegisterCraneCtldServer(server, &referenceQueue{jobs: []*pb.JobInfo{held, active, array}})
+	go server.Serve(l)
+	t.Cleanup(server.Stop)
+	config := filepath.Join(t.TempDir(), "config.yaml")
+	if err := os.WriteFile(config, []byte(fmt.Sprintf("ControlMachine: 127.0.0.1\nCraneCtldListenPort: '%d'\n", l.Addr().(*net.TCPAddr).Port)), 0600); err != nil {
+		t.Fatal(err)
+	}
+	f, err := os.Open("testdata/slurm-26.05.4.jsonl")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer f.Close()
+	scan := bufio.NewScanner(f)
+	for scan.Scan() {
+		var tc struct {
+			Name           string
+			Args           []string
+			Env            map[string]string
+			Stdout, Stderr string
+			RC             int
+		}
+		if err := json.Unmarshal(scan.Bytes(), &tc); err != nil {
+			t.Fatal(err)
+		}
+		t.Run(tc.Name, func(t *testing.T) {
+			var out, diag bytes.Buffer
+			env := []string{"TZ=UTC", "LC_ALL=C"}
+			for k, v := range tc.Env {
+				env = append(env, k+"="+v)
+			}
+			rc := execute(t.Context(), config, append([]string{"squeue"}, tc.Args...), env, &out, &diag)
+			if rc != tc.RC || out.String() != tc.Stdout || diag.String() != tc.Stderr {
+				t.Errorf("%q: got (%d, %q, %q), want (%d, %q, %q)", tc.Args, rc, out.String(), diag.String(), tc.RC, tc.Stdout, tc.Stderr)
+			}
+		})
+	}
+	if err := scan.Err(); err != nil {
+		t.Fatal(err)
 	}
 }
 

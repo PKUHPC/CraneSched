@@ -118,7 +118,11 @@ func (o *options) columns(diag io.Writer) ([]column, error) {
 			}
 			f, ok := cat.names[strings.ToLower(name)]
 			if !ok {
-				fmt.Fprintf(diag, "squeue: error: Invalid job format specification: %s\n", name)
+				kind := "job"
+				if o.steps {
+					kind = "job step"
+				}
+				fmt.Fprintf(diag, "squeue: error: Invalid %s format specification: %s\n", kind, name)
 				w = 0
 			}
 			cols = append(cols, column{f, w, right, suffix})
@@ -156,6 +160,12 @@ func (o *options) columns(diag io.Writer) ([]column, error) {
 				}
 				w, right, tail := width(chunk, 0)
 				if tail == "" {
+					// A missing format code selects the first long-only field.
+					f := cat.ordered[0]
+					if !o.steps {
+						f = cat.names["accruetime"]
+					}
+					cols = append(cols, column{field: f, width: w, right: right})
 					continue
 				}
 				f, ok := cat.codes[tail[0]]

@@ -29,6 +29,10 @@ var usage string
 //go:embed helpstate.txt
 var helpState string
 
+type operandError struct{ operand string }
+
+func (e *operandError) Error() string { return "squeue: error: Unrecognized option: " + e.operand }
+
 const (
 	none     = utils.NoArgument
 	required = utils.RequiredArgument
@@ -211,7 +215,7 @@ func parse(args []string, env map[string]string, diag io.Writer) (*options, erro
 			rest = rest[1:]
 		}
 		if len(rest) > 0 {
-			return nil, fmt.Errorf("squeue: error: Unrecognized option: %s\n%s", rest[0], strings.TrimSuffix(usage, "\n"))
+			return nil, &operandError{rest[0]}
 		}
 	}
 	if o.jobs && o.steps && o.jobIDs == "" {
@@ -286,16 +290,20 @@ func (o *options) selectIDs() error {
 		}
 		o.req.FilterJobIds = append(o.req.FilterJobIds, ids...)
 	}
+	var selectedSteps []string
 	for _, v := range list(o.stepIDs) {
 		job, step, ok := strings.Cut(v, ".")
-		if !ok {
+		if !ok || step == "" {
 			return fmt.Errorf("squeue: error: Invalid job_step id: %s.??", job)
 		}
-		if step != "batch" && step != "extern" {
-			if _, e := strconv.ParseUint(step, 10, 32); e != nil {
-				return fmt.Errorf("squeue: error: Invalid job_step id: %s", v)
-			}
+		// In 26.05.4 -s reads the signed decimal prefix, including zero
+		// for text such as "batch". Displayed step names are independent.
+		var index int64
+		fmt.Sscanf(step, "%d", &index)
+		if int32(index) < 0 {
+			return fmt.Errorf("squeue: error: Invalid job_step id: %s", v)
 		}
+		selectedSteps = append(selectedSteps, job+"."+num(uint32(index)))
 		// Crane and Slurm use different special step IDs. Select the job here
 		// and match the translated step after reading its type.
 		ids, err := util.ParseJobIdSelectorList(job, ",")
@@ -304,6 +312,7 @@ func (o *options) selectIDs() error {
 		}
 		o.req.FilterJobIds = append(o.req.FilterJobIds, ids...)
 	}
+	o.stepIDs = strings.Join(selectedSteps, ",")
 	return nil
 }
 

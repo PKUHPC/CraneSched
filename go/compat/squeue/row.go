@@ -45,7 +45,10 @@ func (r row) id() string {
 	if r.task != nil {
 		return util.FormatJobIdFromArrayTaskId(r.job.JobId, r.task)
 	}
-	return cmp.Or(util.FormatPendingArrayJobID(r.job), util.FormatJobId(r.job.JobId, r.job.ArrayTask))
+	if util.IsPendingArrayParent(r.job) {
+		return num(r.job.JobId) + "_[" + arrayRange(r.job.ArraySpec) + "]"
+	}
+	return util.FormatJobId(r.job.JobId, r.job.ArrayTask)
 }
 func (r row) stepID() string {
 	switch r.step.StepType {
@@ -186,6 +189,9 @@ func (r row) value(f string, o *options) (string, error) {
 		if j.ArrayTask != nil {
 			return num(j.ArrayTask.ArrayJobId), nil
 		}
+		if r.step != nil {
+			return "0", nil
+		}
 		return num(j.JobId), nil
 	case "ArrayTaskId":
 		if r.selection != "" {
@@ -198,7 +204,7 @@ func (r row) value(f string, o *options) (string, error) {
 			return num(j.ArrayTask.TaskId), nil
 		}
 		if j.ArraySpec != nil {
-			return util.FormatArraySpec(j.ArraySpec, true), nil
+			return arrayRange(j.ArraySpec), nil
 		}
 		return "N/A", nil
 	case "Cluster":
@@ -227,7 +233,7 @@ func (r row) value(f string, o *options) (string, error) {
 	case "Reservation":
 		return cmp.Or(j.Reservation, "(null)"), nil
 	case "WCKey":
-		return cmp.Or(j.Wckey, "(null)"), nil
+		return cmp.Or(strings.TrimPrefix(j.Wckey, "*"), "(null)"), nil
 	case "Comment":
 		return util.PrivateJobField(cmp.Or(gjson.Get(j.ExtraAttr, "comment").String(), "(null)"), j.QueryVisibility), nil
 	case "Command":
@@ -270,7 +276,7 @@ func (r row) value(f string, o *options) (string, error) {
 		return num(j.GetTasksPerNode()), nil
 	case "tres-alloc":
 		if status == pb.JobStatus_Pending {
-			return "N/A", nil
+			allocated = requested
 		}
 		if math.Trunc(allocated.GetCpuCount()) != allocated.GetCpuCount() {
 			return "", fmt.Errorf("squeue: error: fractional CPU allocation")
@@ -317,6 +323,9 @@ func (r row) value(f string, o *options) (string, error) {
 		}
 		return strconv.FormatInt(max(0, int64(until.Sub(t).Seconds())), 10), nil
 	case "TimeLimit", "TimeLeft":
+		if r.step != nil && (r.step.StepType == pb.StepType_DAEMON || r.step.StepType == pb.StepType_PRIMARY && j.Type == pb.JobType_Batch) {
+			return "UNLIMITED", nil
+		}
 		if limit >= util.MaxJobTimeLimit {
 			return "UNLIMITED", nil
 		}
@@ -443,6 +452,9 @@ func (r row) ioPath(field string, expand bool) string {
 	if visibility != pb.QueryVisibility_QUERY_VISIBILITY_DETAILS {
 		return util.RestrictedJobField
 	}
+	if r.step != nil && r.step.StepType != pb.StepType_COMMON && j.Type == pb.JobType_Batch {
+		return ""
+	}
 	output := meta.GetOutputFilePattern()
 	if output == "" && j.Type == pb.JobType_Batch {
 		output = "Crane-" + num(j.JobId) + ".out"
@@ -454,10 +466,16 @@ func (r row) ioPath(field string, expand bool) string {
 	case "StdOut":
 		pattern = output
 	case "StdErr":
-		pattern = cmp.Or(meta.GetErrorFilePattern(), output)
+		pattern = meta.GetErrorFilePattern()
 	}
 	if pattern == "" {
+		if r.step != nil {
+			return ""
+		}
 		return "(null)"
+	}
+	if r.step != nil && (pattern == "all" || meta == nil) {
+		return ""
 	}
 	if !path.IsAbs(pattern) {
 		pattern = path.Join(cwd, pattern)
@@ -496,4 +514,30 @@ func taskRanges(ids []uint32) string {
 		i = end + 1
 	}
 	return strings.Join(groups, ",")
+}
+
+// The job record contains a compact bitmap display. Small noncontiguous
+// arrays are enumerated even when the submission used a stride.
+func arrayRange(s *pb.ArraySpec) string {
+	if s.GetStride() < 2 || s.End < s.Start {
+		return util.FormatArraySpec(s, true)
+	}
+	stride := s.GetStride()
+	last := s.End - (s.End-s.Start)%stride
+	count := (last-s.Start)/stride + 1
+	if count > 5 && last-s.Start > 10 {
+		return fmt.Sprintf("%d-%d:%d", s.Start, last, stride) + arrayLimit(s)
+	}
+	ids := make([]uint32, 0, count)
+	for i := uint64(s.Start); i <= uint64(last); i += uint64(stride) {
+		ids = append(ids, uint32(i))
+	}
+	return taskRanges(ids) + arrayLimit(s)
+}
+
+func arrayLimit(s *pb.ArraySpec) string {
+	if n := s.GetMaxConcurrent(); n > 0 {
+		return "%" + num(n)
+	}
+	return ""
 }
