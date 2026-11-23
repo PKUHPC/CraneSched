@@ -578,18 +578,20 @@ cbatch --wrap "echo Hello && sleep 10 && echo Done"
 ```
 
 ### Signal
-When a job is within sig_time seconds of its end time, the system will send it the signal sig_num. sig_num can be either a signal number or name (e.g., "10" or "USR1"). Accepted Linux signal numbers are 1–31 and 34–64. glibc reserves 32 and 33. sig_time must be an integer between 0 and 65535. By default, no signal is sent before the job's end time. If only sig_num is specified without sig_time, the default lead time is 60 seconds.
 
-By default, all job steps except for the batch shell itself will receive the signal. Using the "B:" option will send the signal only to the batch shell, and other processes will not receive the signal.
+When submitting a batch job, use `--signal` to request a signal before the job reaches its time limit. Use a signal name or number. The optional `@seconds` sets the lead time as an integer from 0 through 65535. With `--signal=USR1`, the lead time defaults to 60 seconds. Omit `--signal` to skip the advance notification signal.
+
+By default, the signal goes to the job steps other than the batch shell. Add `B:` to send it only to the shell running the batch script. Both commands below request `USR1` 60 seconds before the 30-minute time limit.
 
 ```bash
-Send signals to jobs
-# Send SIGUSR1 signal 60 seconds before timelimit, all steps except the batch process will receive this signal
-cbatch --signal=SIGUSR1@60 my_script.sh
+# Signal the job steps
+cbatch --time=00:30:00 --signal=USR1@60 my_script.sh
 
-# Send SIGUSR1 signal 60 seconds before timelimit, only the batch process will receive the signal
-cbatch --signal=B:SIGUSR1@60 my_script.sh
+# Signal only the batch shell
+cbatch --time=00:30:00 --signal=B:USR1@60 my_script.sh
 ```
+
+You can also use `#CBATCH --signal=B:USR1@60` in the script.
 
 ### Container Jobs
 

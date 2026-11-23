@@ -283,11 +283,13 @@ calloc --gres=gpu:a100:2 -N 1 -p GPU
 
 ### Signal
 
-When a job is within sig_time seconds of its end time, the system will send it the signal sig_num. sig_num can be either a signal number or name (e.g., "10" or "USR1"). Accepted Linux signal numbers are 1–31 and 34–64. glibc reserves 32 and 33. sig_time must be an integer between 0 and 65535. By default, no signal is sent before the job's end time. If only sig_num is specified without sig_time, the default lead time is 60 seconds.
+When requesting an interactive allocation, use `--signal` to request a signal before the allocation reaches its time limit. The following command requests `USR1` two minutes before the 30-minute time limit.
 
 ```bash
-calloc --signal=SIGUSR1@60 -N 1 -p CPU
+calloc --time=00:30:00 --signal=USR1@120 -N 1 -p CPU
 ```
+
+Use a signal name or number. The optional `@seconds` sets the lead time as an integer from 0 through 65535. With `--signal=USR1`, the lead time defaults to 60 seconds. Omit `--signal` to skip the advance notification signal.
 
 ## Interactive Usage
 

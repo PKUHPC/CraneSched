@@ -576,17 +576,19 @@ cbatch --wrap "echo Hello && sleep 10 && echo Done"
 
 ### Signal信号
 
-当作业距离结束时间还有 sig_time 秒时，系统会向其发送信号 sig_num。sig_num 可以是信号编号或名称（如 "10" 或 "USR1"）。Linux 信号编号支持 1–31 和 34–64，32 和 33 由 glibc 保留。sig_time 必须是 0 到 65535 之间的整数。默认情况下，作业结束前不会发送任何信号。如果只指定了 sig_num 而未指定 sig_time，则默认提前 60 秒发送信号。
+提交批处理作业时，使用 `--signal` 请求鹤思在作业达到时间限制前发送信号。信号可以写名称或编号。`@seconds` 指定提前秒数，取值为 0–65535 的整数。`--signal=USR1` 默认提前 60 秒。省略整个选项时，鹤思不会额外发送提前通知信号。
 
-默认情况下，除了batch shell 本身，其他所有作业步骤都会收到信号。使用 "B:" 选项可以只向 batch shell 发送信号，其他进程不会收到信号。
+默认发给批处理 shell 之外的作业步。加上 `B:` 则只发给运行批处理脚本的 shell。以下两条命令都请求在 30 分钟的时限到达前 60 秒发送 `USR1`。
+
 ```bash
-# 在timelimit前60秒发送SIGUSR1信号，除batch进程外其他step都会收到该信号
-cbatch --signal=SIGUSR1@60 my_script.sh
+# 发给作业步
+cbatch --time=00:30:00 --signal=USR1@60 my_script.sh
 
-# 在timelimit前60秒发送SIGUSR1信号，只有batch进程会收到信号
-cbatch --signal=B:SIGUSR1@60 my_script.sh
+# 只发给批处理 shell
+cbatch --time=00:30:00 --signal=B:USR1@60 my_script.sh
 ```
 
+也可以在脚本中使用 `#CBATCH --signal=B:USR1@60`。
 
 ### 容器作业
 
