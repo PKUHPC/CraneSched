@@ -473,7 +473,7 @@ ERRO[0000] command execution failed
 Create a new resource reservation.
 
 ```bash
-ccontrol create reservation <name> startTime=<time> duration=<duration> account=<account> [partition=<partition>] [nodes=<nodelist>] [nodeCnt=<count>] [user=<username>]
+ccontrol create reservation <name> startTime=<time> duration=<duration> account=<account> [partition=<partition>] [nodes=<nodelist>] [nodeCnt=<count>] [user=<username>] [--flex]
 ```
 
 **Parameters:**
@@ -486,6 +486,20 @@ ccontrol create reservation <name> startTime=<time> duration=<duration> account=
 - **nodes** (optional): Specific nodes to reserve (comma-separated list)
 - **nodeCnt** (optional): Number of nodes to reserve (used when nodes is not specified)
 - **user** (optional): User to associate with the reservation
+- **flex** (optional, default `false`): Allow associated jobs to start before the reservation, finish after it, and use other nodes in their partition. Accepts `--flex`, `--flex=true/false`, or `flex=true/false`; set at creation only.
+
+FLEX jobs still require access to the reservation and follow normal job priority,
+partition, account, QoS, node and resource constraints. The full requested run
+time must fit on the selected nodes without entering another reservation. FLEX
+does not guarantee that an arbitrarily long job can start or migrate a running
+job between nodes.
+
+New starts must occur before the reservation ends. Allocated jobs continue under
+their own time limits after expiry; pending jobs retain their reservation and
+report it as expired or missing. The expired reservation remains visible until
+its allocated jobs release their resources. `show reservation` displays `Flex`
+and marks retained expired reservations with `State=EXPIRED`. Ordinary
+reservations retain the requirement that the entire job fit in their window.
 
 **Examples:**
 ```bash
@@ -541,6 +555,7 @@ Different operations require different permission levels:
 | Operation | Permission Required |
 |-----------|-------------------|
 | Show commands | User can view their own jobs; admin can view all |
+| Show reservation | All users, including system users not registered with Crane |
 | Update node | Administrator only |
 | Update partition | Administrator only |
 | Update job | Job owner or administrator |

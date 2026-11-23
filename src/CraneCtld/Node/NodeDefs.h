@@ -107,6 +107,7 @@ struct ResvMeta {
   absl::Time start_time;
   absl::Time end_time;
 
+  bool flex{false};
   bool accounts_black_list{false};
   bool users_black_list{false};
   std::unordered_set<std::string> accounts;

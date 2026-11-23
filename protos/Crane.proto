@@ -792,6 +792,7 @@ message CreateReservationRequest {
   uint32 node_num = 11;
   // Server-assigned persistence metadata. Client-supplied values are ignored.
   uint64 creation_order = 12;
+  bool flex = 13;
 }
 
 message CreateReservationReply {

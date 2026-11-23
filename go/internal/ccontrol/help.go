@@ -120,7 +120,7 @@ COMMANDS:
     Resume previously suspended job(s).
 
   create reservation <name> [startTime=<time>] [duration=<duration>] [partition=<partition>]
-                    [nodes=<nodelist>] [account=<account>] [user=<username>]
+                    [nodes=<nodelist>] [account=<account>] [user=<username>] [flex=<bool> | --flex]
     Create a new reservation.
     name: Name of the reservation
     startTime: Time when reservation starts
@@ -130,6 +130,8 @@ COMMANDS:
     account: Account to associate with the reservation
     user: User to associate with the reservation
     nodeCnt: Number of nodes to reserve (valid when nodes is not specified)
+    flex: Allow early starts, execution beyond the reservation end, and nodes outside the reservation.
+          Other reservations remain protected. New jobs must start before this reservation ends.
 
   delete reservation <name>
     Delete an existing reservation.

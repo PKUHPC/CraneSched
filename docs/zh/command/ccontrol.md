@@ -463,7 +463,7 @@ ERRO[0000] command execution failed
 创建新的资源预留。
 
 ```bash
-ccontrol create reservation <名称> startTime=<时间> duration=<时长> account=<账户> [partition=<分区>] [nodes=<节点列表>] [nodeCnt=<数量>] [user=<用户名>]
+ccontrol create reservation <名称> startTime=<时间> duration=<时长> account=<账户> [partition=<分区>] [nodes=<节点列表>] [nodeCnt=<数量>] [user=<用户名>] [--flex]
 ```
 
 **参数：**
@@ -476,6 +476,16 @@ ccontrol create reservation <名称> startTime=<时间> duration=<时长> accoun
 - **nodes**（可选）：要预留的特定节点（逗号分隔列表）
 - **nodeCnt**（可选）：要预留的节点数量（在未指定nodes时使用）
 - **user**（可选）：与预留关联的用户
+- **flex**（可选，默认 `false`）：允许关联作业提前启动、跨预留结束时间运行，以及使用作业分区内的其他节点。支持 `--flex`、`--flex=true/false` 或 `flex=true/false`，仅在创建时设置。
+
+FLEX 作业仍须具有预留访问权限，并遵守现有优先级、分区、账户、QoS、节点和资源约束。
+调度时必须保证所选节点能容纳完整请求时长，且不侵入其他预留；FLEX 不保证任意长的
+作业都能立即启动，也不会在预留边界迁移运行中的作业。
+
+新启动必须早于预留结束时间。到期后，已分配作业继续按自身时限运行；待调度作业保留
+预留关联，并显示预留已过期或不存在的原因。已过期预留的元数据保留到关联的已分配作业
+释放资源。`show reservation` 显示 `Flex`，并对保留的过期预留显示 `State=EXPIRED`。
+普通预留仍要求作业的完整时长放入预留窗口。
 
 **示例：**
 ```bash
@@ -531,6 +541,7 @@ ccontrol --json show job 12345
 | 操作 | 所需权限 |
 |------|---------|
 | Show 命令 | 用户可查看自己的作业；管理员可查看所有 |
+| Show reservation | 所有用户，包括尚未注册为 Crane 用户的系统用户 |
 | Update node | 仅管理员 |
 | Update partition | 仅管理员 |
 | Update job | 作业所有者或管理员 |
