@@ -329,10 +329,14 @@ endif ()
 
 set(CRANE_ENABLE_TARGET_IPO FALSE)
 if (CRANE_IPO_SUPPORTED)
-    if (CMAKE_CXX_COMPILER_ID STREQUAL "Clang" OR CMAKE_BUILD_TYPE STREQUAL "Release")
-        # IPO/LTO is disabled in g++ under Debug mode since it's quite slow.
+    if (CMAKE_BUILD_TYPE STREQUAL "Release" OR
+            (CMAKE_CXX_COMPILER_ID STREQUAL "Clang" AND
+                    NOT CMAKE_BUILD_TYPE STREQUAL "Debug"))
+        # IPO/LTO is disabled in Debug mode since it slows incremental builds.
         message(STATUS "IPO / LTO enabled for selected Crane targets")
         set(CRANE_ENABLE_TARGET_IPO TRUE)
+    else ()
+        message(STATUS "IPO / LTO disabled for Debug builds")
     endif ()
 else ()
     message(STATUS "IPO / LTO not supported: <${CRANE_IPO_ERROR}>")
@@ -511,7 +515,7 @@ if (CRANE_ENABLE_BPF)
             ${CMAKE_BINARY_DIR}/src/Misc/BPF/cgroup_dev_bpf.o
             DESTINATION /usr/local/lib64/bpf/
             COMPONENT cranedc
-            PERMISSIONS OWNER_READ GROUP_READ WORLD_READ)
+            PERMISSIONS OWNER_READ OWNER_WRITE GROUP_READ WORLD_READ)
 endif ()
 
 # Install unit files

@@ -16,6 +16,18 @@ make -C go install DESTDIR=/absolute/staging PREFIX=/usr CHECK_GPU=0
 make -C go package CHECK_GPU=0
 ```
 
+Read-only quality checks use the same build container. From the repository root:
+
+```bash
+gofmt -l go  # CI requires an empty result.
+make -C go protos
+(cd go && go vet -mod=readonly ./...)
+```
+
+Vet checks all module packages after protocol generation without changing module
+dependencies. The developer `format` target remains a separate command that can
+update dependencies and format files.
+
 Generated Go code and binaries remain in `go/generated/` and `go/build/`.
 The package target produces the client, plugin and optional Slurm compatibility
 RPM/DEB packages under `go/build/dist/`. All components use the root product

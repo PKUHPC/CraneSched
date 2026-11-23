@@ -48,8 +48,7 @@ TEST(TracerManagerTest, InitializeAndExportSpan) {
   crane::g_tracing_enabled.store(true, std::memory_order_release);
 
   {
-    crane::ScopedSpan span(
-        "test-span", manager.GetTracerSafe());
+    crane::ScopedSpan span("test-span", manager.GetTracerSafe());
     span.SetAttribute("key", "value");
   }
 
@@ -107,8 +106,8 @@ TEST(TracerManagerTest, SerializeDeserializeTraceParent) {
 TEST(TracerManagerTest, ServiceName) {
   auto& manager = crane::TracerManager::GetInstance();
   auto counter = std::make_shared<std::atomic<int>>(0);
-  ASSERT_TRUE(
-      manager.Initialize("MyService", std::make_unique<CountingExporter>(counter)));
+  ASSERT_TRUE(manager.Initialize("MyService",
+                                 std::make_unique<CountingExporter>(counter)));
   EXPECT_EQ(manager.ServiceName(), "MyService");
   manager.Shutdown();
 }

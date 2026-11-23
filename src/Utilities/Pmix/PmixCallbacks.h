@@ -96,7 +96,7 @@ class PmixServerCallbacks {
 
   // ── Internal async callbacks passed directly to PMIx API calls ───────────
 
-  static void AppCb(pmix_status_t status, pmix_info_t info[] [[maybe_unused]],
+  static void AppCb(pmix_status_t status, [[maybe_unused]] pmix_info_t info[],
                     size_t ninfo [[maybe_unused]], void* provided_cbdata,
                     pmix_op_cbfunc_t cbfunc [[maybe_unused]],
                     void* cbdata [[maybe_unused]]);

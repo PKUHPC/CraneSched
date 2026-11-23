@@ -1,0 +1,191 @@
+name: Build, Test and Publish
+
+on:
+  workflow_dispatch:
+    inputs:
+      source_ref:
+        description: Product branch, tag or commit (blank uses this workflow commit)
+        required: false
+        type: string
+      harness_ref:
+        description: Integration suite ref (blank matches the selected product branch, then master)
+        required: false
+        type: string
+      publish_packages:
+        description: Upload this build's RPMs to the configured package repository
+        required: false
+        default: false
+        type: boolean
+      integration_shards:
+        description: Independent integration environments
+        type: choice
+        default: '4'
+        options: ['1', '4']
+
+permissions:
+  contents: read
+
+defaults:
+  run:
+    shell: bash
+
+jobs:
+  build:
+    name: Format, build and prepare tests
+    timeout-minutes: 150
+    outputs:
+      harness_sha: ${{ steps.suite.outputs.harness_sha }}
+      rpm_dir: ${{ steps.build.outputs.rpm_dir }}
+      test_image: ${{ steps.prepare.outputs.test_image }}
+      asset_dir: ${{ steps.prepare.outputs.asset_dir }}
+    runs-on: crane-build
+    container:
+      image: ${{ vars.CRANE_CI_DEV_IMAGE }}
+
+    env:
+      CI_DEV_IMAGE: ${{ vars.CRANE_CI_DEV_IMAGE }}
+      CI_TEST_TARGET: ${{ vars.CRANE_CI_TEST_IMAGE }}
+      GOPROXY: ${{ vars.CRANE_CI_GOPROXY || 'https://goproxy.cn,direct' }}
+      GOWORK: 'off'
+    steps:
+      - name: Checkout the selected product source
+        uses: actions/checkout@93cb6efe18208431cddfb8368fd83d5badbf9bfd # v5
+        with:
+          ref: ${{ inputs.source_ref || github.sha }}
+          fetch-depth: 1
+          persist-credentials: false
+
+      - name: Checkout CI scripts from the workflow revision
+        uses: actions/checkout@93cb6efe18208431cddfb8368fd83d5badbf9bfd # v5
+        with:
+          ref: ${{ github.sha }}
+          path: .ci-tools
+          sparse-checkout: .github/ci
+          persist-credentials: false
+
+      - name: Record the selected product revision
+        id: source
+        env:
+          SOURCE_REF: ${{ inputs.source_ref }}
+          EVENT_BRANCH: ${{ github.head_ref || (github.ref_type == 'branch' && github.ref_name) || '' }}
+        run: |
+          echo "source_sha=$(git rev-parse HEAD)" >> "$GITHUB_OUTPUT"
+          if [[ -n "$SOURCE_REF" ]]; then
+            source_branch=$(git symbolic-ref --quiet HEAD || true)
+            source_branch=${source_branch#refs/heads/}
+          else
+            source_branch=$EVENT_BRANCH
+          fi
+          echo "source_branch=$source_branch" >> "$GITHUB_OUTPUT"
+
+      - name: Check C++ and proto formatting
+        run: |
+          clang-format --version
+          find src test -type f \( -name '*.c' -o -name '*.cc' -o -name '*.cpp' -o -name '*.cxx' \
+            -o -name '*.h' -o -name '*.hh' -o -name '*.hpp' -o -name '*.hxx' \) \
+            -exec clang-format --dry-run --Werror --style=file {} +
+          find protos -type f -name '*.proto' \
+            -exec clang-format --dry-run --Werror --style=file:.clang-format-proto {} +
+
+      - name: Select and freeze the integration suite
+        id: suite
+        env:
+          CI_TEST_REF: ${{ inputs.harness_ref }}
+          CI_PRODUCT_BRANCH: ${{ steps.source.outputs.source_branch }}
+        run: python3 /etc/ci-launcher/launch.py --select-suite
+
+      - name: Build, run native tests and package RPMs
+        id: build
+        env:
+          CI_SOURCE_SHA: ${{ steps.source.outputs.source_sha }}
+          CI_PACKAGING_TOKEN: ${{ github.token }}
+          HTTPS_PROXY: ${{ secrets.HTTPS_PROXY }}
+        run: bash .ci-tools/.github/ci/build_product.sh
+
+      - name: Prepare full-suite assets and push the Test image
+        id: prepare
+        env:
+          CI_SUITE_REVISION: ${{ steps.suite.outputs.harness_sha }}
+          CI_RPM_DIR: ${{ steps.build.outputs.rpm_dir }}
+        run: python3 /etc/ci-launcher/launch.py --prepare
+
+  integration:
+    name: Full integration tests
+    needs: build
+    if: ${{ !cancelled() && needs.build.result == 'success' }}
+    runs-on: crane-ci
+    timeout-minutes: 180
+    concurrency:
+      group: crane-ci-integration
+      cancel-in-progress: false
+      queue: max
+    container:
+      image: ${{ vars.CRANE_CI_DEV_IMAGE }}
+    outputs:
+      complete: ${{ steps.integration.outputs.complete }}
+      expected: ${{ steps.integration.outputs.expected }}
+      passed: ${{ steps.integration.outputs.passed }}
+    env:
+      CI_TEST_IMAGE: ${{ needs.build.outputs.test_image }}
+      CI_ASSET_DIR: ${{ needs.build.outputs.asset_dir }}
+      CI_SUITE_REVISION: ${{ needs.build.outputs.harness_sha }}
+      CI_SHARD_COUNT: ${{ inputs.integration_shards }}
+    steps:
+      - name: Run all prepared tests and reclaim their environments
+        id: integration
+        run: python3 /etc/ci-launcher/launch.py --integration
+
+  publish:
+    name: Publish this build's RPMs
+    needs: build
+    if: ${{ !cancelled() && needs.build.result == 'success' && inputs.publish_packages }}
+    concurrency:
+      group: crane-ci-publish-master-rhel10-amd64
+      cancel-in-progress: false
+      queue: max
+    runs-on: crane-ci
+    timeout-minutes: 20
+    container:
+      image: ${{ vars.CRANE_CI_DEV_IMAGE }}
+    env:
+      PACKAGE_DIR: ${{ needs.build.outputs.rpm_dir }}
+      NEXUS_URL: ${{ secrets.CCREPO_URL }}
+      NEXUS_USERNAME: ${{ secrets.CCREPO_USERNAME }}
+      NEXUS_PASSWORD: ${{ secrets.CCREPO_PASSWORD }}
+      RPM_REPO_NAME: crane
+      RPM_ARCH: x86_64
+      RPM_DISTRO: '10'
+      VERSION: master
+    steps:
+      - name: Checkout the uploader from the workflow revision
+        uses: actions/checkout@93cb6efe18208431cddfb8368fd83d5badbf9bfd # v5
+        with:
+          ref: ${{ github.sha }}
+          persist-credentials: false
+          sparse-checkout: .github/ci
+
+      - name: Verify and upload the build output
+        run: bash .github/ci/upload_packages.sh
+
+  summary:
+    name: CI result
+    needs: [build, integration, publish]
+    if: ${{ always() }}
+    runs-on: crane-ci
+    timeout-minutes: 5
+    container:
+      image: ${{ vars.CRANE_CI_DEV_IMAGE }}
+    env:
+      JOB_RESULTS: ${{ toJSON(needs) }}
+      PUBLISH_REQUESTED: ${{ inputs.publish_packages }}
+    steps:
+      - name: Checkout CI scripts from the workflow revision
+        uses: actions/checkout@93cb6efe18208431cddfb8368fd83d5badbf9bfd # v5
+        with:
+          ref: ${{ github.sha }}
+          path: .ci-tools
+          sparse-checkout: .github/ci
+          persist-credentials: false
+
+      - name: Report and enforce the required results
+        run: python3 .ci-tools/.github/ci/summarize_ci.py

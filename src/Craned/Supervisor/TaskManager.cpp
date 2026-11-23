@@ -591,13 +591,35 @@ std::unique_ptr<ITaskInstance> StepInstance::RemoveTaskInstance(
 bool StepInstance::AllTaskFinished() const { return m_task_map_.empty(); }
 
 bool StepInstance::AllTaskMainProcessesExited() const {
-  for (const auto& task : m_task_map_ | std::views::values) {
-    if (task->GetExecId().has_value() &&
-        !task->GetFinalInfo()->raw_exit.has_value()) {
+  for (const auto& task_entry : m_task_map_) {
+    const ITaskInstance& task_instance = *task_entry.second;
+    if (task_instance.GetExecId().has_value() &&
+        !task_instance.GetFinalInfo()->raw_exit.has_value()) {
       return false;
     }
   }
   return true;
+}
+
+void StepInstance::CleanResidualProcesses() {
+  if (!IsCrun() || m_residual_processes_cleaned_ || AllTaskFinished() ||
+      !AllTaskMainProcessesExited())
+    return;
+
+  if (step_user_cg && step_user_cg->KillSubtree()) {
+    m_residual_processes_cleaned_ = true;
+    return;
+  }
+
+  bool success = true;
+  for (const auto& [task_id, task] : m_task_map_) {
+    if (!task->GetExecId().has_value()) continue;
+    if (task->Kill(SIGKILL) != CraneErrCode::SUCCESS) {
+      CRANE_WARN("[Task #{}] Failed to kill residual task processes.", task_id);
+      success = false;
+    }
+  }
+  m_residual_processes_cleaned_ = success;
 }
 
 void StepInstance::InitOomMonitor() {
@@ -3465,12 +3487,8 @@ void TaskManager::EvCleanSigchldQueueCb_() {
       uint32_t exit_code = exit_info->value;
       if (exit_info->is_terminated_by_signal)
         exit_code += ExitCode::KCrunExitCodeStatusNum;
-      auto ok_to_free = m_step_.GetCforedClient()->TaskProcessStop(
-          task_id, exit_code, exit_info.value().is_terminated_by_signal);
-      if (ok_to_free) {
-        CRANE_TRACE("It's ok to unregister task #{}", task_id);
-        m_step_.GetCforedClient()->TaskEnd(task_id);
-      }
+      m_step_.GetCforedClient()->TaskProcessStop(
+          task_id, exit_code, exit_info->is_terminated_by_signal);
     } else /* Batch / Calloc */ {
       FinalizeTaskAsync(task_id);
     }
@@ -3481,18 +3499,7 @@ void TaskManager::EvCleanSigchldQueueCb_() {
     m_sigchld_queue_.enqueue(task);
   }
 
-  if (m_step_.IsCrun() && !m_residual_processes_killed_ &&
-      !m_step_.AllTaskFinished() && m_step_.AllTaskMainProcessesExited()) {
-    CRANE_INFO(
-        "[Step #{}.{}] All task main processes exited; killing residual "
-        "processes before waiting for output EOF.",
-        m_step_.job_id, m_step_.step_id);
-    m_residual_processes_killed_ = true;
-    for (task_id_t task_id : m_step_.GetTaskIds()) {
-      auto* task = m_step_.GetTaskInstance(task_id);
-      if (task->GetExecId().has_value()) task->Kill(SIGKILL);
-    }
-  }
+  m_step_.CleanResidualProcesses();
 }
 
 void TaskManager::EvCleanCriEventQueueCb_() {

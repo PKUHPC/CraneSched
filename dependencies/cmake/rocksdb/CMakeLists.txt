@@ -43,6 +43,13 @@ set(WITH_ZLIB OFF CACHE BOOL "" FORCE)
 set(WITH_ZSTD OFF CACHE BOOL "" FORCE)
 set(WITH_GFLAGS OFF CACHE BOOL "" FORCE)
 
+# RocksDB uses PORTABLE=0 for native builds and PORTABLE=1 for baseline builds.
+if (CRANE_NATIVE_ARCH_OPT)
+    set(PORTABLE 0 CACHE STRING "RocksDB minimum CPU architecture" FORCE)
+else ()
+    set(PORTABLE 1 CACHE STRING "RocksDB minimum CPU architecture" FORCE)
+endif ()
+
 FetchContent_Declare(rocksdb_repo
         URL ${ROCKSDB_SRC_URL}
         INACTIVITY_TIMEOUT 5
