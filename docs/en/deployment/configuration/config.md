@@ -163,6 +163,9 @@ DefaultPartition: CPU
 - **priority**: Higher values = higher priority (affects scheduling)
 - **DefaultMemPerCpu**: Default memory per CPU in MB (0 = let scheduler decide)
 - **MaxMemPerCpu**: Maximum memory per CPU in MB (0 = no limit)
+- **MaxMemPerNode**: Maximum memory per node in MB (0 = no limit)
+
+The two maximums apply when allocating a Job. A Step, including one with an explicit memory request, is limited by the resources allocated to its parent Job.
 
 ### Scheduling Policy
 
