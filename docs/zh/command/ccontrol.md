@@ -412,6 +412,14 @@ ERRO[0000] command execution failed
 
 暂挂指定作业以阻止其启动。
 
+普通用户暂挂的作业显示排队原因为 `JobHeldUser`，管理员暂挂的作业显示
+`JobHeldAdmin`。通过 `cbatch --hold` 提交的作业显示 `JobHeldUser`。
+系统自动暂挂及未记录操作者信息的旧版持久化作业显示 `JobHeldUser`。
+暂挂来源会在控制器重启后保留。
+
+管理员可以解除任何暂挂。作业所有者可以解除用户暂挂，但不能修改或解除
+管理员暂挂。管理员暂挂会替换已有的用户暂挂及其定时器。
+
 ```bash
 ccontrol hold <作业ID> [timelimit=<时长>]
 ```

@@ -311,6 +311,7 @@ message RuntimeAttrOfJob {
 
   // Normalized query request, retained for recovery archival.
   GresMap requested_gres = 30;
+  bool held_by_admin = 31;
 }
 
 message StepToCtld {

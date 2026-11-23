@@ -265,6 +265,80 @@ TEST(CtldPublicDefs, CanonicalizesCranedIdListsInInputOrder) {
   g_config.CranedIdByAlias = std::move(original_aliases);
 }
 
+TEST(CtldPublicDefs, HoldSourceSurvivesRecovery) {
+  for (bool by_admin : {false, true}) {
+    crane::grpc::JobToCtld request;
+    request.set_hold(false);
+    Ctld::JobInCtld job;
+    job.SetFieldsByJobToCtld(request);
+    EXPECT_FALSE(job.Held());
+    job.SetStatus(crane::grpc::Pending);
+    job.SetHeld(true, by_admin);
+
+    crane::grpc::RuntimeAttrOfJob saved;
+    ASSERT_TRUE(saved.ParseFromString(job.RuntimeAttr().SerializeAsString()));
+    Ctld::JobInCtld recovered;
+    recovered.SetFieldsByJobToCtld(request);
+    recovered.SetFieldsByRuntimeAttrOfJob(saved);
+    EXPECT_TRUE(recovered.Held());
+    EXPECT_EQ(recovered.HoldReason(),
+              by_admin ? "JobHeldAdmin" : "JobHeldUser");
+
+    recovered.SetHeld(false, true);
+    EXPECT_FALSE(recovered.Held());
+    EXPECT_TRUE(recovered.HoldReason().empty());
+    EXPECT_FALSE(recovered.RuntimeAttr().held_by_admin());
+    EXPECT_FALSE(recovered.RuntimeAttr().held());
+
+    recovered.SetHeld(true, !by_admin);
+    EXPECT_EQ(recovered.HoldReason(),
+              by_admin ? "JobHeldUser" : "JobHeldAdmin");
+    recovered.SetHeld(false, true);
+    EXPECT_FALSE(recovered.Held());
+  }
+}
+
+TEST(CtldPublicDefs, LegacyHoldDefaultsToUserHold) {
+  crane::grpc::JobToCtld request;
+  request.set_hold(true);
+  crane::grpc::RuntimeAttrOfJob saved;
+  saved.set_status(crane::grpc::Pending);
+  saved.set_held(true);
+  Ctld::JobInCtld recovered;
+  recovered.SetFieldsByJobToCtld(request);
+  recovered.SetFieldsByRuntimeAttrOfJob(saved);
+  EXPECT_TRUE(recovered.Held());
+  EXPECT_EQ(recovered.HoldReason(), "JobHeldUser");
+  recovered.SetHeld(false);
+  EXPECT_FALSE(recovered.Held());
+}
+
+TEST(CtldPublicDefs, HoldSetterWritesStateAndClearsSourceOnRelease) {
+  crane::grpc::JobToCtld request;
+  request.set_hold(true);
+  Ctld::JobInCtld job;
+  job.SetFieldsByJobToCtld(request);
+  EXPECT_EQ(job.HoldReason(), "JobHeldUser");
+  job.SetHeld(true, true);
+  EXPECT_EQ(job.HoldReason(), "JobHeldAdmin");
+  job.SetHeld(true, false);
+  EXPECT_TRUE(job.Held());
+  EXPECT_EQ(job.HoldReason(), "JobHeldUser");
+  EXPECT_FALSE(job.RuntimeAttr().held_by_admin());
+  job.SetHeld(true, true);
+  job.SetHeld(false);
+  EXPECT_FALSE(job.Held());
+  EXPECT_FALSE(job.RuntimeAttr().held_by_admin());
+  job.SetHeld(true, true);
+  job.SetHeld(false, true);
+  EXPECT_FALSE(job.Held());
+  EXPECT_FALSE(job.RuntimeAttr().held_by_admin());
+  job.SetHeld(true);
+  EXPECT_EQ(job.HoldReason(), "JobHeldUser");
+  job.SetHeld(false);
+  EXPECT_FALSE(job.Held());
+}
+
 TEST(CtldPublicDefs, JobRecoveryRetainsNormalizedGresRequest) {
   crane::grpc::JobToCtld request;
   request.set_type(crane::grpc::Batch);

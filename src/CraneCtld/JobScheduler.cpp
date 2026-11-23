@@ -1506,7 +1506,7 @@ void JobScheduler::ScheduleThread_() {
         const auto& job = it.second;
 
         if (job->Held()) {
-          job->pending_reason = "Held";
+          job->pending_reason = job->HoldReason();
           continue;
         }
         if (job->begin_time > now) {
@@ -2598,12 +2598,13 @@ void JobScheduler::CancelDeadlineJobCb_() {
 }
 
 std::future<CraneErrCode> JobScheduler::HoldReleaseJobAsync(job_id_t job_id,
-                                                            int64_t secs) {
+                                                            int64_t secs,
+                                                            bool by_admin) {
   std::promise<CraneErrCode> promise;
   std::future<CraneErrCode> future = promise.get_future();
 
   m_job_timer_queue_.enqueue(
-      {std::make_pair(job_id, secs), std::move(promise)});
+      {std::make_tuple(job_id, secs, by_admin), std::move(promise)});
   m_job_timeout_async_handle_->send();
 
   return std::move(future);
@@ -3966,8 +3967,8 @@ JobScheduler::SubmitJobToScheduler(std::unique_ptr<JobInCtld> job) {
   return std::unexpected(validation_result.error());
 }
 
-CraneErrCode JobScheduler::SetHoldForJobInRamAndDb_(job_id_t job_id,
-                                                    bool hold) {
+CraneErrCode JobScheduler::SetHoldForJobInRamAndDb_(job_id_t job_id, bool hold,
+                                                    bool by_admin) {
   m_pending_job_map_mtx_.Lock();
 
   auto pd_iter = m_pending_job_map_.find(job_id);
@@ -3978,7 +3979,11 @@ CraneErrCode JobScheduler::SetHoldForJobInRamAndDb_(job_id_t job_id,
   }
 
   JobInCtld* job = pd_iter->second.get();
-  job->SetHeld(hold);
+  if (!by_admin && job->Held() && job->RuntimeAttr().held_by_admin()) {
+    m_pending_job_map_mtx_.Unlock();
+    return CraneErrCode::ERR_USER_NO_PRIVILEGE;
+  }
+  job->SetHeld(hold, by_admin);
 
   // Copy persisted data to prevent inconsistency.
   job_db_id_t db_id = job->JobDbId();
@@ -5187,37 +5192,37 @@ void JobScheduler::CleanJobTimerQueueCb_(
   timer_to_create.resize(actual_size);
 
   for (auto& [req, promise] : timer_to_create) {
-    const auto& [job_id, secs] = req;
+    const auto& [job_id, secs, by_admin] = req;
 
-    // If any timer for the job exists, remove it.
+    CraneErrCode err = SetHoldForJobInRamAndDb_(job_id, secs != 0, by_admin);
+    if (err != CraneErrCode::SUCCESS) {
+      promise.set_value(err);
+      continue;
+    }
+
     auto timer_it = m_job_timer_handles_.find(job_id);
     if (timer_it != m_job_timer_handles_.end()) {
       timer_it->second->close();
       m_job_timer_handles_.erase(timer_it);
     }
 
-    CraneErrCode err;
     if (secs == 0) {  // Remove timer
       CRANE_TRACE("Remove hold constraint timer for job #{}.", job_id);
-      err = SetHoldForJobInRamAndDb_(job_id, false);
     } else if (secs == std::numeric_limits<int64_t>::max()) {
       CRANE_TRACE("Add a hold constraint for job #{} without timer.", job_id);
-      err = SetHoldForJobInRamAndDb_(job_id, true);
     } else {  // Set timer
       CRANE_TRACE("Add a hold constraint for job #{} with {}s timer.", job_id,
                   secs);
 
       auto on_timer_cb = [this, job_id](const uvw::timer_event&,
                                         uvw::timer_handle& handle) {
-        CraneErrCode err = SetHoldForJobInRamAndDb_(job_id, false);
+        CraneErrCode err = SetHoldForJobInRamAndDb_(job_id, false, true);
         if (err != CraneErrCode::SUCCESS)
           CRANE_ERROR("Failed to release job #{} after hold.", job_id);
 
         handle.close();
         m_job_timer_handles_.erase(job_id);
       };
-
-      err = SetHoldForJobInRamAndDb_(job_id, true);
 
       auto job_timer_handle = uvw_loop->resource<uvw::timer_handle>();
       job_timer_handle->on<uvw::timer_event>(std::move(on_timer_cb));
