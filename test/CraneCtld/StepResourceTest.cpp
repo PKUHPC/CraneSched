@@ -243,6 +243,34 @@ TEST_F(StepResourceTest, RejectsTasksThatCannotFitOnRequestedNodes) {
   EXPECT_EQ(result.error(), CraneErrCode::ERR_NO_ENOUGH_NODE);
 }
 
+TEST_F(StepResourceTest, ChecksFractionalCpuAgainstWholeTaskCapacity) {
+  SetJobAllocation(2);
+  auto allocation = job_.AllocatedRes();
+  auto& first_node = allocation.At("node0").GetCpuSet();
+  auto& second_node = allocation.At("node1").GetCpuSet();
+  first_node.cpu_count = second_node.cpu_count =
+      cpu_t::from_raw_value(cpu_t{4}.raw_value() - 1);
+
+  auto request = Request(1, 1, 4);
+  auto step = MakeStep(request);
+  ASSERT_TRUE(
+      Ctld::JobScheduler::AcquireStepAttributes(step.get()).has_value());
+  job_.SetAllocatedRes(ResourceV3{allocation});
+  const auto result = Ctld::JobScheduler::CheckStepValidity(step.get());
+  ASSERT_FALSE(result.has_value());
+  EXPECT_EQ(result.error(), CraneErrCode::ERR_NO_ENOUGH_NODE);
+
+  second_node.cpu_count = cpu_t{4};
+  job_.SetStepResAvail(allocation);
+  job_.SetAllocatedRes(std::move(allocation));
+  ASSERT_TRUE(Ctld::JobScheduler::CheckStepValidity(step.get()).has_value());
+  job_.AddStep(std::move(step));
+  std::vector<Ctld::CommonStepInCtld*> scheduled;
+  ASSERT_EQ(job_.SchedulePendingSteps(&scheduled), 1);
+  ASSERT_EQ(scheduled.size(), 1);
+  EXPECT_EQ(scheduled.front()->CranedIds(), std::vector<CranedId>{"node1"});
+}
+
 TEST_F(StepResourceTest, RejectsInsufficientCombinedCapacityOfRequestedNodes) {
   SetJobAllocation(3);
   auto request = Request(5, 2);

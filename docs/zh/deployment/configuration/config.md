@@ -161,6 +161,9 @@ DefaultPartition: CPU
 - **priority**：值越高优先级越高（影响调度）
 - **DefaultMemPerCpu**：每个 CPU 的默认内存（MB）（0 = 让调度器决定）
 - **MaxMemPerCpu**：每个 CPU 的最大内存（MB）（0 = 无限制）
+- **MaxMemPerNode**：每个节点的最大内存（MB）（0 = 无限制）
+
+这两项上限在分配作业时生效。继承内存和显式请求内存的步骤均受父作业已分配的资源约束。
 
 ### 调度策略
 

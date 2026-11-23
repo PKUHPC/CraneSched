@@ -9460,8 +9460,14 @@ CraneExpected<void> JobScheduler::CheckStepValidity(StepInCtld* step) {
 
     ResourceInNodeV3 remaining_res = job_res.At(craned_id);
     remaining_res -= node_res;
+    const auto remaining = remaining_res.ToResourceView();
+    // Fixed-point division rounds, so compute the whole-task CPU limit from
+    // the raw values before accepting a node near a capacity boundary.
+    const auto cpu_capacity = static_cast<uint64_t>(
+        remaining.GetCpuCount().raw_value() /
+        step->req_task_res_view.GetCpuCount().raw_value());
     const uint64_t task_capacity =
-        remaining_res.ToResourceView() / step->req_task_res_view;
+        std::min(cpu_capacity, remaining / step->req_task_res_view);
     if (task_capacity < step->ntasks_per_node_min) continue;
     node_task_capacities.push_back(
         std::min<uint64_t>(task_capacity, step->ntasks_per_node_max));

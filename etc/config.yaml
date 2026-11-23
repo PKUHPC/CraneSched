@@ -209,7 +209,8 @@ Partitions:
     DefaultMemPerCpu: 0
     # Optional default memory per node in MB, 0 lets scheduler decide
     # DefaultMemPerNode: 0
-    # MaxMemPerCpu and MaxMemPerNode can both be set. 0 indicates no limit.
+    # Both limits apply to Job allocation. Steps use their parent Job allocation.
+    # Set either limit to 0 for no limit.
     MaxMemPerCpu: 0
     MaxMemPerNode: 0
     # AllowedAccounts and DeniedAccounts are mutually exclusive, only one should be configured.
