@@ -46,42 +46,6 @@ func FormatQueueJobID(job *protos.JobInfo) string {
 	return util.FormatJobId(job.GetJobId(), job.GetArrayTask())
 }
 
-func FormatQueueState(job *protos.JobInfo) string {
-	if util.IsSlurmOutputMode() {
-		return FormatSlurmJobState(job.GetStatus())
-	}
-	return job.GetStatus().String()
-}
-
-func FormatSlurmJobState(status protos.JobStatus) string {
-	switch status {
-	case protos.JobStatus_Pending:
-		return "PENDING"
-	case protos.JobStatus_Running:
-		return "RUNNING"
-	case protos.JobStatus_Completed:
-		return "COMPLETED"
-	case protos.JobStatus_Failed:
-		return "FAILED"
-	case protos.JobStatus_ExceedTimeLimit:
-		return "TIMEOUT"
-	case protos.JobStatus_Cancelled:
-		return "CANCELLED"
-	case protos.JobStatus_OutOfMemory:
-		return "OUT_OF_MEMORY"
-	case protos.JobStatus_Configuring, protos.JobStatus_Starting:
-		return "CONFIGURING"
-	case protos.JobStatus_Completing:
-		return "COMPLETING"
-	case protos.JobStatus_Suspended:
-		return "SUSPENDED"
-	case protos.JobStatus_Deadline:
-		return "DEADLINE"
-	default:
-		return "?"
-	}
-}
-
 func FormatSlurmJobStateCompact(status protos.JobStatus) string {
 	switch status {
 	case protos.JobStatus_Pending:
@@ -111,13 +75,6 @@ func FormatSlurmJobStateCompact(status protos.JobStatus) string {
 	}
 }
 
-func FormatDefaultQueueState(job *protos.JobInfo) string {
-	if util.IsSlurmOutputMode() {
-		return FormatSlurmJobStateCompact(job.GetStatus())
-	}
-	return job.GetStatus().String()
-}
-
 func FormatTimeLimit(seconds int64) string {
 	if seconds >= util.InvalidDuration().Seconds {
 		return "unlimited"
@@ -126,16 +83,12 @@ func FormatTimeLimit(seconds int64) string {
 }
 
 func GenerateTableConfig() TableConfig {
-	stateHeader := "Status"
-	if util.IsSlurmOutputMode() {
-		stateHeader = "ST"
-	}
 	if FlagFull {
 		return TableConfig{
 			Header: []string{
 				"JobId", "JobName", "UserName", "Partition", "Account",
 				"NodeNum", "ReqCPUs", "ReqMemPerNode", "AllocCPUs", "AllocMemPerNode",
-				stateHeader, "Time", "TimeLimit", "StartTime", "SubmitTime",
+				"Status", "Time", "TimeLimit", "StartTime", "SubmitTime",
 				"Type", "Qos", "Exclusive", "Held", "Priority", "NodeList/Reason", "Deadline",
 			},
 			RowMapper: func(job *protos.JobInfo) []string {
@@ -154,7 +107,7 @@ func GenerateTableConfig() TableConfig {
 					ProcessReqMemPerNode(job),
 					ProcessAllocCpus(job),
 					ProcessAllocMemPerNode(job),
-					FormatDefaultQueueState(job),
+					job.GetStatus().String(),
 					GetElapsedTime(job),
 					timeLimit,
 					FormatTime(job.StartTime, "unknown"),
@@ -173,7 +126,7 @@ func GenerateTableConfig() TableConfig {
 		return TableConfig{
 			Header: []string{
 				"JobId", "Partition", "Name", "User", "Account",
-				stateHeader, "Type", "Time", "TimeLimit", "Nodes", "NodeList/Reason",
+				"Status", "Type", "Time", "TimeLimit", "Nodes", "NodeList/Reason",
 			},
 			RowMapper: func(job *protos.JobInfo) []string {
 				return []string{
@@ -182,7 +135,7 @@ func GenerateTableConfig() TableConfig {
 					job.Name,
 					job.Username,
 					job.Account,
-					FormatDefaultQueueState(job),
+					job.GetStatus().String(),
 					job.Type.String(),
 					GetElapsedTime(job),
 					FormatTimeLimit(job.TimeLimit.Seconds),
@@ -270,15 +223,7 @@ func QueryTableOutput(reply *protos.QueryJobsInfoReply) error {
 }
 
 func JsonOutput(reply *protos.QueryJobsInfoReply) error {
-	if util.IsSlurmOutputMode() {
-		output, err := util.FormatSlurmJobsJSON(reply)
-		if err != nil {
-			return util.WrapCraneErr(util.ErrorInvalidFormat, "%v", err)
-		}
-		fmt.Println(output)
-	} else {
-		fmt.Println(util.FmtJson.FormatReply(reply))
-	}
+	fmt.Println(util.FmtJson.FormatReply(reply))
 	if reply.GetOk() {
 		return nil
 	} else {

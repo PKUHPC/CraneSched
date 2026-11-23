@@ -6,6 +6,7 @@ package utils
 
 import (
 	"fmt"
+	"iter"
 	"sort"
 	"strconv"
 	"strings"
@@ -108,6 +109,39 @@ func hostEndpoint(raw string) (uint64, string, bool) {
 	}
 	value, err := strconv.ParseUint(text[:end], 10, 64)
 	return value, text[end:], err == nil
+}
+
+// Names visits requested hosts without materializing the Cartesian product.
+// A consumer validating against an inventory can stop at the first unknown host.
+func (h *HostList) Names() iter.Seq[string] {
+	return func(yield func(string) bool) {
+		var visit func([]*hostSegment, string) bool
+		visit = func(segments []*hostSegment, prefix string) bool {
+			if len(segments) == 0 {
+				return yield(prefix)
+			}
+			first, rest := segments[0], segments[1:]
+			if first.Literal != "" {
+				return visit(rest, prefix+first.Literal)
+			}
+			for _, r := range first.Ranges {
+				for n := r.low; ; n++ {
+					if !visit(rest, prefix+fmt.Sprintf("%0*d", r.width, n)) {
+						return false
+					}
+					if n == r.high {
+						break
+					}
+				}
+			}
+			return true
+		}
+		for _, pattern := range h.hosts {
+			if !visit(pattern.Segments, "") {
+				return
+			}
+		}
+	}
 }
 
 func (h *HostList) Match(name string) bool {

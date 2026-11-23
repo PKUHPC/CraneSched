@@ -19,65 +19,6 @@ import (
 	"github.com/PKUHPC/CraneSched/go/compat/utils"
 )
 
-func parseSerializerEnvironment(env map[string]string) (map[string]utils.SerializerOptions, error) {
-	settings := make(map[string]utils.SerializerOptions)
-	for _, kind := range []string{"json", "yaml"} {
-		flags := utils.SerializerOptions{Compact: env["SLURM_"+strings.ToUpper(kind)] != ""}
-		for _, flag := range strings.Split(env["SLURM_"+strings.ToUpper(kind)], ",") {
-			switch strings.ToLower(flag) {
-			case "":
-			case "compact":
-				flags.Compact = true
-			case "pretty":
-				flags.Compact = false
-			case "complex":
-				flags.Complex = true
-			case "no_tag":
-				flags.NoTag = true
-			default:
-				return nil, &commandError{fmt.Sprintf("sinfo: fatal: Unable to parse serializer %q flags: Invalid argument\n", env["SLURM_"+strings.ToUpper(kind)])}
-			}
-		}
-		settings[kind] = flags
-	}
-	return settings, nil
-}
-
-type schemaOptions struct {
-	Complex  bool
-	SpecOnly bool
-	Plugin   string
-}
-
-func selectSchema(o *plan, diagnostics io.Writer) (schemaOptions, error) {
-	version, flags, _ := strings.Cut(o.DataParser, "+")
-	if !o.HasDataParser {
-		version = "v0.0.45"
-	}
-	version = strings.TrimPrefix(version, "data_parser/")
-	result := schemaOptions{Plugin: "data_parser/" + version}
-	if strings.Contains(o.DataParser, "+") {
-		result.Plugin += "+" + flags
-	}
-	if version != "v0.0.45" {
-		return result, unsupported("--"+o.Serialization, fmt.Sprintf("data parser %q (supported: v0.0.45)", version))
-	}
-	for _, flag := range strings.Split(flags, "+") {
-		switch strings.ToLower(flag) {
-		case "", "fast", "minimize_refs":
-		case "spec_only":
-			result.SpecOnly = true
-		case "complex":
-			result.Complex = true
-		case "prefer_refs":
-			fmt.Fprintln(diagnostics, "sinfo: data_parser/v0.0.45 ignoring default flag FLAG_PREFER_REFS")
-		default:
-			fmt.Fprintf(diagnostics, "sinfo: warning: data_parser/v0.0.45 ignoring unknown flag %s\n", flag)
-		}
-	}
-	return result, nil
-}
-
 func reportLimit(l durationLimit) v45.Number[v45.Int32] {
 	return v45.Numeric[v45.Int32](l.Seconds/60, l.Unset, l.Infinite)
 }
@@ -178,10 +119,7 @@ func structuredPartition(p *partition) v45.PartitionInfo {
 	if configured == "" {
 		configured = utils.CompressHosts(p.Nodes)
 	}
-	tres := p.TRES
-	if tres == "" {
-		tres = fmt.Sprintf("cpu=%d,mem=%s,node=%d,billing=%d", p.TotalCPUs, memoryTRES(p.TotalMemory), len(p.Nodes), p.TotalCPUs)
-	}
+	tres := fmt.Sprintf("cpu=%d,mem=%s,node=%d,billing=%d", p.TotalCPUs, memoryTRES(p.TotalMemory), len(p.Nodes), p.TotalCPUs)
 	result := v45.PartitionInfo{
 		Nodes:    v45.PartitionNodes{Configured: configured, Total: v45.Int32(len(p.Nodes))},
 		Accounts: v45.PartitionAccounts{Allowed: strings.Join(p.AllowedAccounts, ","), Deny: strings.Join(p.DeniedAccounts, ",")},
@@ -228,11 +166,10 @@ func renderStructured(w, diagnostics io.Writer, argv []string, rows []*row, snap
 		_, err := io.WriteString(w, "data_parser/v0.0.45\n")
 		return err
 	}
-	schema, err := selectSchema(o, diagnostics)
-	if err != nil {
+	if _, err := io.WriteString(diagnostics, o.ParserWarnings); err != nil {
 		return err
 	}
-	if schema.SpecOnly {
+	if o.Parser.SpecOnly {
 		return utils.WriteSchema[v45.SinfoResponse](w, o.Serialization, o.Serializer)
 	}
 	entries := make([]v45.SinfoRecord, 0, len(rows))
@@ -247,10 +184,10 @@ func renderStructured(w, diagnostics io.Writer, argv []string, rows []*row, snap
 	report := v45.SinfoResponse{
 		Sinfo: entries,
 		Meta: v45.Meta{
-			Plugin: v45.MetaPlugin{DataParser: schema.Plugin},
+			Plugin: v45.MetaPlugin{DataParser: o.Parser.Plugin},
 			Client: v45.MetaClient{User: name, Group: group}, Command: argv,
 			Slurm: v45.SlurmMeta{Version: v45.SlurmVersion{Major: "26", Micro: "4", Minor: "05"}, Release: compatibilityVersion, Cluster: snap.Cluster},
 		},
 	}
-	return utils.WriteReport(w, report, o.Serialization, o.Serializer, schema.Complex)
+	return utils.WriteReport(w, report, o.Serialization, o.Serializer, o.Parser.Complex)
 }

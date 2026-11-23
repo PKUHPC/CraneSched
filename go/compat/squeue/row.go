@@ -50,20 +50,21 @@ func (r row) id() string {
 	}
 	return util.FormatJobId(r.job.JobId, r.job.ArrayTask)
 }
-func (r row) stepID() string {
+func (r row) stepID() string { return r.id() + "." + r.stepSuffix() }
+func (r row) stepSuffix() string {
 	switch r.step.StepType {
 	case pb.StepType_DAEMON:
-		return r.id() + ".extern"
+		return "extern"
 	case pb.StepType_PRIMARY:
 		if r.job.Type == pb.JobType_Batch {
-			return r.id() + ".batch"
+			return "batch"
 		}
 	}
 	offset := uint32(1)
 	if r.job.Type == pb.JobType_Batch {
 		offset = 2
 	}
-	return r.id() + "." + num(r.step.StepId-offset)
+	return num(r.step.StepId - offset)
 }
 func num(n uint32) string { return strconv.FormatUint(uint64(n), 10) }
 func duration(sec int64) string {
@@ -118,18 +119,7 @@ func (o *options) timestamp(stamp *timestamppb.Timestamp) string {
 	if !ok {
 		return "N/A"
 	}
-	t = t.In(utils.CommandTimezone(o.env))
-	f := o.env["SLURM_TIME_FORMAT"]
-	switch strings.ToLower(f) {
-	case "", "standard":
-		return t.Format("2006-01-02T15:04:05")
-	case "relative":
-		if t.Format(time.DateOnly) == time.Now().In(t.Location()).Format(time.DateOnly) {
-			return t.Format("15:04:05")
-		}
-		return t.Format("01/02")
-	}
-	return utils.Strftime(f, t)
+	return o.formatTime(t)
 }
 func supported(f string) bool {
 	switch f {

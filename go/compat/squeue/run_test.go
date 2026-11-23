@@ -10,18 +10,23 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
-	"google.golang.org/protobuf/types/known/timestamppb"
 	"io"
 	"net"
 	"os"
 	"path/filepath"
 	"slices"
+	"strings"
+	"sync/atomic"
 	"testing"
 	"time"
 
+	"github.com/PKUHPC/CraneSched/go/compat/utils"
 	pb "github.com/PKUHPC/CraneSched/go/generated/protos"
 	"google.golang.org/grpc"
+	"google.golang.org/grpc/codes"
+	"google.golang.org/grpc/status"
 	"google.golang.org/protobuf/types/known/durationpb"
+	"google.golang.org/protobuf/types/known/timestamppb"
 )
 
 func TestQueuePresentation(t *testing.T) {
@@ -68,6 +73,14 @@ type referenceQueue struct {
 	jobs []*pb.JobInfo
 }
 
+func (s *referenceQueue) QueryClusterInfo(_ context.Context, req *pb.QueryClusterInfoRequest) (*pb.QueryClusterInfoReply, error) {
+	reply := &pb.QueryClusterInfoReply{Ok: true, ClusterName: "compute"}
+	if req.IncludeNodes {
+		reply.Nodes = []*pb.CranedInfo{{Hostname: "slurm03", NodeHostname: "host03"}}
+	}
+	return reply, nil
+}
+
 func (s *referenceQueue) QueryJobsInfo(_ context.Context, req *pb.QueryJobsInfoRequest) (*pb.QueryJobsInfoReply, error) {
 	reply := &pb.QueryJobsInfoReply{Ok: true}
 	for _, j := range s.jobs {
@@ -80,6 +93,23 @@ func (s *referenceQueue) QueryJobsInfo(_ context.Context, req *pb.QueryJobsInfoR
 		reply.JobInfoList = append(reply.JobInfoList, j)
 	}
 	return reply, nil
+}
+
+func serveQueue(t *testing.T, controller pb.CraneCtldServer) string {
+	t.Helper()
+	l, err := net.Listen("tcp", "127.0.0.1:0")
+	if err != nil {
+		t.Fatal(err)
+	}
+	server := grpc.NewServer()
+	pb.RegisterCraneCtldServer(server, controller)
+	go server.Serve(l)
+	t.Cleanup(server.Stop)
+	config := filepath.Join(t.TempDir(), "config.yaml")
+	if err := os.WriteFile(config, []byte(fmt.Sprintf("ControlMachine: 127.0.0.1\nCraneCtldListenPort: '%d'\n", l.Addr().(*net.TCPAddr).Port)), 0600); err != nil {
+		t.Fatal(err)
+	}
+	return config
 }
 
 // The golden streams were captured from squeue 26.05.4 with a held job,
@@ -106,18 +136,7 @@ func TestSlurm26054Queue(t *testing.T) {
 			Status: pb.JobStatus_Running, TimeLimit: &durationpb.Duration{Seconds: 315576000000}, Ntasks: new(uint32(1)),
 			ExecutionNode: []string{"slurm03"}, QueryVisibility: details})
 	}
-	l, err := net.Listen("tcp", "127.0.0.1:0")
-	if err != nil {
-		t.Fatal(err)
-	}
-	server := grpc.NewServer()
-	pb.RegisterCraneCtldServer(server, &referenceQueue{jobs: []*pb.JobInfo{held, active, array}})
-	go server.Serve(l)
-	t.Cleanup(server.Stop)
-	config := filepath.Join(t.TempDir(), "config.yaml")
-	if err := os.WriteFile(config, []byte(fmt.Sprintf("ControlMachine: 127.0.0.1\nCraneCtldListenPort: '%d'\n", l.Addr().(*net.TCPAddr).Port)), 0600); err != nil {
-		t.Fatal(err)
-	}
+	config := serveQueue(t, &referenceQueue{jobs: []*pb.JobInfo{held, active, array}})
 	f, err := os.Open("testdata/slurm-26.05.4.jsonl")
 	if err != nil {
 		t.Fatal(err)
@@ -161,6 +180,7 @@ func TestStepFiltersUseStepFacts(t *testing.T) {
 		{StepId: 1, StepType: pb.StepType_PRIMARY, Status: pb.JobStatus_Running, ExecutionNode: []string{"n1"}},
 		{StepId: 2, StepType: pb.StepType_COMMON, Status: pb.JobStatus_Running, ExecutionNode: []string{"n2"}},
 	}}
+	o.nodeNames = map[string]bool{"n2": true}
 	rows, e := o.rows(&pb.QueryJobsInfoReply{JobInfoList: []*pb.JobInfo{j}})
 	if e != nil || len(rows) != 1 || rows[0].stepID() != "42.0" {
 		t.Fatalf("steps %v, err %v", rows, e)
@@ -181,7 +201,7 @@ func TestJobReportKeepsKnownFalseAndFractionalBilling(t *testing.T) {
 		t.Fatal(err)
 	}
 	var buf bytes.Buffer
-	if err := o.writeReport(&buf, reportOptions{}, []string{"squeue", "--json"}, rows); err != nil {
+	if err := o.writeReport(&buf, utils.DataParserOptions{}, []string{"squeue", "--json"}, rows); err != nil {
 		t.Fatal(err)
 	}
 	var data struct{ Jobs []map[string]json.RawMessage }
@@ -307,5 +327,141 @@ func TestJobSortWithoutAllocatedNodes(t *testing.T) {
 		if !slices.Equal(got, tc.want) {
 			t.Errorf("%s: %v, want %v", tc.order, got, tc.want)
 		}
+	}
+}
+
+func TestStepQueryScopes(t *testing.T) {
+	active := func(id uint32) *pb.JobInfo {
+		return &pb.JobInfo{JobId: id, Type: pb.JobType_Batch, Status: pb.JobStatus_Running,
+			StepInfoList: []*pb.StepInfo{{StepId: 2, StepType: pb.StepType_COMMON, Status: pb.JobStatus_Running}}}
+	}
+	first, child := active(41), active(93)
+	child.ArrayTask = &pb.ArrayTaskIdentity{ArrayJobId: 42, TaskId: 3}
+	reply := &pb.QueryJobsInfoReply{JobInfoList: []*pb.JobInfo{first, child}}
+	for _, tc := range []struct {
+		args []string
+		want []string
+	}{
+		{[]string{"-j41", "--steps=42.0"}, nil},
+		{[]string{"--steps=42.0"}, []string{"42_3.0"}},
+		{[]string{"--steps=42_3.0"}, []string{"42_3.0"}},
+		{[]string{"--steps=93.0"}, []string{"42_3.0"}},
+		{[]string{"-j41", "--steps=42.0", "--json"}, []string{"41.0", "42_3.0"}},
+		{[]string{"-j41", "-s", "-p", "absent", "--yaml"}, []string{"41.0", "42_3.0"}},
+	} {
+		o, err := parse(tc.args, nil, io.Discard)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if req := o.queueRequest(); o.serializer != "" && (len(req.FilterJobIds) > 0 || len(req.FilterPartitions) > 0 || !req.IncludePublicQueueDetails || !req.OptionQueryStepsOnly) {
+			t.Fatalf("%v: wrong request %v", tc.args, req)
+		}
+		rows, err := o.rows(reply)
+		if err != nil {
+			t.Fatal(err)
+		}
+		var got []string
+		for _, r := range rows {
+			got = append(got, r.stepID())
+		}
+		if !slices.Equal(got, tc.want) {
+			t.Errorf("%v: got %v, want %v", tc.args, got, tc.want)
+		}
+	}
+}
+
+func TestStructuredPendingArray(t *testing.T) {
+	j := &pb.JobInfo{JobId: 42, ArraySpec: &pb.ArraySpec{Start: 1, End: 5, Stride: new(uint32(2))}}
+	for _, tc := range []struct {
+		args []string
+		want []string
+	}{
+		{[]string{"-r", "--json", "-j42"}, []string{"42_[1,3,5]"}},
+		{[]string{"-r", "--json", "-j42_1,42_5"}, []string{"42_[1,5]"}},
+		{[]string{"--only-job-state", "--yaml", "-j42_3"}, []string{"42_1", "42_3", "42_5"}},
+		{[]string{"--only-job-state", "--json", "-j42_2"}, nil},
+		{[]string{"--only-job-state", "--json", "-j42_1,42_5"}, []string{"42_1", "42_3", "42_5", "42_1", "42_3", "42_5"}},
+	} {
+		o, err := parse(tc.args, nil, io.Discard)
+		if err != nil {
+			t.Fatal(err)
+		}
+		rows, err := o.rows(&pb.QueryJobsInfoReply{JobInfoList: []*pb.JobInfo{j}})
+		if err != nil {
+			t.Fatal(err)
+		}
+		var got []string
+		for _, r := range rows {
+			got = append(got, r.id())
+		}
+		if !slices.Equal(got, tc.want) {
+			t.Errorf("%v: %v, want %v", tc.args, got, tc.want)
+		}
+	}
+}
+
+type intermittentQueue struct {
+	pb.UnimplementedCraneCtldServer
+	calls atomic.Int32
+	stop  context.CancelFunc
+}
+
+func (s *intermittentQueue) QueryJobsInfo(_ context.Context, _ *pb.QueryJobsInfoRequest) (*pb.QueryJobsInfoReply, error) {
+	switch s.calls.Add(1) {
+	case 1:
+		return nil, status.Error(codes.Unavailable, "test outage")
+	case 2:
+		return &pb.QueryJobsInfoReply{Ok: true, JobInfoList: []*pb.JobInfo{{JobId: 12, QueryVisibility: pb.QueryVisibility_QUERY_VISIBILITY_PUBLIC}}}, nil
+	default:
+		s.stop()
+		return nil, status.Error(codes.Canceled, "test finished")
+	}
+}
+
+func TestIterateRecoversAfterQueryFailure(t *testing.T) {
+	ctx, cancel := context.WithTimeout(t.Context(), 6*time.Second)
+	defer cancel()
+	c := &intermittentQueue{stop: cancel}
+	var out, diag bytes.Buffer
+	execute(ctx, serveQueue(t, c), []string{"squeue", "-hi1", "-o", "%i"}, nil, &out, &diag)
+	if !strings.Contains(diag.String(), "test outage") || !strings.Contains(out.String(), "12\n") || c.calls.Load() < 3 {
+		t.Fatalf("calls=%d, stdout=%q stderr=%q", c.calls.Load(), out.String(), diag.String())
+	}
+}
+
+func TestQueueNodeInventory(t *testing.T) {
+	server := &referenceQueue{jobs: []*pb.JobInfo{{JobId: 12, ExecutionNode: []string{"slurm03"}, QueryVisibility: pb.QueryVisibility_QUERY_VISIBILITY_PUBLIC}}}
+	config := serveQueue(t, server)
+	for _, name := range []string{"slurm03", "host03", "host[03,09]"} {
+		var out, diag bytes.Buffer
+		rc := execute(t.Context(), config, []string{"squeue", "-h", "-w", name, "-o", "%i"}, nil, &out, &diag)
+		if name == "host[03,09]" {
+			if rc != 1 || out.Len() != 0 || diag.String() != "squeue: error: Invalid node name host09\n" {
+				t.Fatalf("%s: %d %q %q", name, rc, &out, &diag)
+			}
+		} else if rc != 0 || out.String() != "12\n" {
+			t.Fatalf("%s: %d %q %q", name, rc, &out, &diag)
+		}
+	}
+}
+
+func TestQueueLocalOptionPrecedence(t *testing.T) {
+	for _, tc := range []struct {
+		args    []string
+		env     []string
+		message string
+	}{
+		{[]string{"--json", "--version"}, []string{"SLURM_JSON=unknown"}, "Unable to parse serializer"},
+		{[]string{"-i3", "-ibad", "--help"}, nil, "--iterate=bad"},
+	} {
+		var out, diag bytes.Buffer
+		if rc := execute(t.Context(), "", append([]string{"squeue"}, tc.args...), tc.env, &out, &diag); rc != 1 || out.Len() != 0 || !strings.Contains(diag.String(), tc.message) {
+			t.Errorf("%v: %d %q %q", tc.args, rc, &out, &diag)
+		}
+	}
+	var out, diag bytes.Buffer
+	rc := execute(t.Context(), "", []string{"squeue", "--autocomplete=-"}, nil, &out, &diag)
+	if rc != 0 || strings.Contains(out.String(), "--") || !strings.Contains(out.String(), "-j\n") {
+		t.Fatalf("%d %q %q", rc, &out, &diag)
 	}
 }

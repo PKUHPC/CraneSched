@@ -9,6 +9,7 @@ import (
 	"context"
 	"fmt"
 	"io"
+	"os"
 	"slices"
 	"strconv"
 	"strings"
@@ -63,16 +64,19 @@ func run(ctx context.Context, config string, argv []string, env map[string]strin
 		_, err = fmt.Fprintln(out, "data_parser/v0.0.45")
 		return err
 	case "autocomplete":
-		local = completion(o.actionValue)
+		local = utils.CompleteOptions(vocabulary, o.actionValue)
 	}
 	if o.action != "" {
 		_, err = io.WriteString(out, local)
 		return err
 	}
 	var cols []column
-	var report reportOptions
+	var report utils.DataParserOptions
 	if o.serializer != "" {
-		report, err = o.reportOptions(diag)
+		report, err = utils.ParseDataParser("squeue", o.parser, o.parserAttached, diag)
+		if err != nil {
+			return unsupported(err.Error())
+		}
 	} else {
 		cols, err = o.columns(diag)
 	}
@@ -89,82 +93,27 @@ func run(ctx context.Context, config string, argv []string, env map[string]strin
 		return fmt.Errorf("squeue: error: %w", err)
 	}
 	defer session.Close()
+	if o.nodes != nil {
+		if err := o.loadInventory(ctx, session, true); err != nil {
+			return err
+		}
+	}
+	needCluster := !report.SpecOnly && (o.serializer != "" || slices.ContainsFunc(cols, func(c column) bool { return c.field.name == "Cluster" }))
+	req := o.queueRequest()
 	for {
 		if !o.noHeader && (o.long || o.iterate > 0 || o.verbose > 0) {
 			if _, err = fmt.Fprintln(out, time.Now().In(utils.CommandTimezone(env)).Format(time.ANSIC)); err != nil {
 				return err
 			}
 		}
-		var reply *pb.QueryJobsInfoReply
-		err = session.Query(ctx, func(ctx context.Context, client pb.CraneCtldClient, uid uint32) error {
-			ctx, cancel := context.WithTimeout(ctx, 20*time.Second)
-			defer cancel()
-			if o.clusterName == "" && (o.serializer != "" || slices.ContainsFunc(cols, func(c column) bool { return c.field.name == "Cluster" })) {
-				info, err := client.QueryClusterInfo(ctx, &pb.QueryClusterInfoRequest{Uid: &uid})
-				if err != nil {
-					return err
-				}
-				if !info.GetOk() {
-					return fmt.Errorf("cluster information unavailable")
-				}
-				o.clusterName = info.GetClusterName()
-			}
-			req := o.req
-			// Slurm loads a single job by its allocation ID, then applies array
-			// and display filters. A missing task in an existing array is empty.
-			if !o.steps && len(req.FilterJobIds) == 1 {
-				req = &pb.QueryJobsInfoRequest{IncludePublicQueueDetails: req.IncludePublicQueueDetails, Mode: req.Mode, NumLimit: req.NumLimit, FilterJobIds: []*pb.JobIdSelector{{JobId: req.FilterJobIds[0].JobId}}}
-			}
-			var e error
-			reply, e = util.QueryJobsInfo(ctx, client, req)
-			return e
-		})
+		reply, err := o.loadQueue(ctx, session, req, needCluster)
 		if err != nil {
-			return fmt.Errorf("slurm_load_jobs error: %w", err)
-		}
-		if !reply.GetOk() || reply.HasMore {
-			return fmt.Errorf("squeue: error: incomplete queue response")
-		}
-		if !o.onlyState && len(list(o.jobIDs)) == 1 && len(reply.JobInfoList) == 0 && !o.steps {
-			return fmt.Errorf("slurm_load_jobs error: Invalid job id specified")
-		}
-		if o.verbose > 0 && !o.onlyState && o.serializer == "" {
-			n := len(reply.JobInfoList)
-			if o.steps {
-				n = 0
-				for _, j := range reply.JobInfoList {
-					n += len(j.StepInfoList)
-				}
-			}
-			if _, err := fmt.Fprintf(out, "last_update_time=%d records=%d\n", time.Now().Unix(), n); err != nil {
+			if o.iterate == 0 {
 				return err
 			}
-		}
-		if report.schema {
-			return o.writeReport(out, report, argv, nil)
-		}
-		if strings.Contains(o.sort, "b") && o.serializer == "" {
-			fmt.Fprintln(diag, "squeue: Invalid sort specification: b")
-		}
-		rows, err := o.rows(reply)
-		if err != nil {
+			fmt.Fprintln(diag, err)
+		} else if err := o.printFrame(out, diag, argv, cols, report, reply); err != nil {
 			return err
-		}
-		if o.serializer != "" {
-			if err := o.writeReport(out, report, argv, rows); err != nil {
-				return err
-			}
-		} else {
-			if !o.noHeader {
-				if err := printLine(out, cols, nil, o); err != nil {
-					return err
-				}
-			}
-			for i := range rows {
-				if err := printLine(out, cols, &rows[i], o); err != nil {
-					return err
-				}
-			}
 		}
 		if o.iterate == 0 {
 			return nil
@@ -179,50 +128,211 @@ func run(ctx context.Context, config string, argv []string, env map[string]strin
 		}
 	}
 }
-func completion(q string) string {
-	if q == "" {
-		return ""
+
+func (o *options) loadInventory(ctx context.Context, session *utils.Session, nodes bool) error {
+	var reply *pb.QueryClusterInfoReply
+	err := session.Query(ctx, func(ctx context.Context, client pb.CraneCtldClient, uid uint32) error {
+		ctx, cancel := context.WithTimeout(ctx, 20*time.Second)
+		defer cancel()
+		var err error
+		reply, err = client.QueryClusterInfo(ctx, &pb.QueryClusterInfoRequest{Uid: &uid, IncludeNodes: nodes})
+		return err
+	})
+	if err != nil {
+		return fmt.Errorf("slurm_load_node error: %w", err)
 	}
-	var result strings.Builder
-	for _, op := range vocabulary {
-		if op.Short != 0 {
-			short := "-" + string(op.Short)
-			if strings.Contains(short, q) {
-				fmt.Fprintln(&result, short)
+	if !reply.GetOk() {
+		return fmt.Errorf("slurm_load_node error: cluster information unavailable")
+	}
+	o.clusterName = reply.ClusterName
+	if !nodes {
+		return nil
+	}
+	local, err := os.Hostname()
+	if err != nil {
+		return err
+	}
+	short, _, _ := strings.Cut(local, ".")
+	names := make(map[string]string, len(reply.Nodes)*2)
+	for _, n := range reply.Nodes {
+		if n.GetHostname() == "" {
+			continue
+		}
+		for _, alias := range []string{n.Hostname, n.NodeHostname} {
+			if alias != "" && names[alias] == "" {
+				names[alias] = n.Hostname
 			}
 		}
-		s := "--" + op.Name
-		if strings.Contains(s, q) {
-			if op.Argument == required || op.Argument == optional {
-				fmt.Fprintln(&result, s+"=")
+	}
+	o.nodeNames = make(map[string]bool)
+	for item := range o.nodes.Names() {
+		name := item
+		if strings.EqualFold(name, "localhost") {
+			name = short
+		}
+		canonical, ok := names[name]
+		if !ok {
+			return fmt.Errorf("squeue: error: Invalid node name %s", item)
+		}
+		o.nodeNames[canonical] = true
+	}
+	return nil
+}
+
+func (o *options) queueRequest() *pb.QueryJobsInfoRequest {
+	// Slurm loads the unfiltered step snapshot before serializing it.
+	if o.steps && o.serializer != "" {
+		return &pb.QueryJobsInfoRequest{Mode: o.req.Mode, NumLimit: o.req.NumLimit, IncludePublicQueueDetails: true, OptionQueryStepsOnly: true}
+	}
+	if !o.steps && len(o.req.FilterJobIds) == 1 && (!o.onlyState || o.serializer == "") {
+		// The single-job path fetches the allocation before applying display filters.
+		return &pb.QueryJobsInfoRequest{Mode: o.req.Mode, NumLimit: o.req.NumLimit, IncludePublicQueueDetails: true, FilterJobIds: []*pb.JobIdSelector{{JobId: o.req.FilterJobIds[0].JobId}}}
+	}
+	return o.req
+}
+
+func (o *options) loadQueue(ctx context.Context, session *utils.Session, req *pb.QueryJobsInfoRequest, needCluster bool) (*pb.QueryJobsInfoReply, error) {
+	if needCluster && o.clusterName == "" {
+		if err := o.loadInventory(ctx, session, false); err != nil {
+			return nil, err
+		}
+	}
+	var reply *pb.QueryJobsInfoReply
+	err := session.Query(ctx, func(ctx context.Context, client pb.CraneCtldClient, uid uint32) error {
+		ctx, cancel := context.WithTimeout(ctx, 20*time.Second)
+		defer cancel()
+		var e error
+		reply, e = util.QueryJobsInfo(ctx, client, req)
+		return e
+	})
+	if err != nil {
+		kind := "slurm_load_jobs"
+		if o.steps {
+			kind = "slurm_get_job_steps"
+		}
+		return nil, fmt.Errorf("%s error: %w", kind, err)
+	}
+	if !reply.GetOk() || reply.HasMore {
+		return nil, fmt.Errorf("squeue: error: incomplete queue response")
+	}
+	if !o.onlyState && len(list(o.jobIDs)) == 1 && len(reply.JobInfoList) == 0 && !o.steps {
+		return nil, fmt.Errorf("slurm_load_jobs error: Invalid job id specified")
+	}
+	return reply, nil
+}
+
+func (o *options) printFrame(out, diag io.Writer, argv []string, cols []column, report utils.DataParserOptions, reply *pb.QueryJobsInfoReply) error {
+	if o.verbose > 0 && !o.onlyState && o.serializer == "" {
+		n := len(reply.JobInfoList)
+		if o.steps {
+			n = 0
+			for _, j := range reply.JobInfoList {
+				n += len(j.StepInfoList)
 			}
-			if op.Argument == optional {
-				fmt.Fprintln(&result, s+" ")
+		}
+		if _, err := fmt.Fprintf(out, "last_update_time=%d records=%d\n", time.Now().Unix(), n); err != nil {
+			return err
+		}
+	}
+	if report.SpecOnly {
+		return o.writeReport(out, report, argv, nil)
+	}
+	if strings.Contains(o.sort, "b") && o.serializer == "" {
+		fmt.Fprintln(diag, "squeue: Invalid sort specification: b")
+	}
+	rows, err := o.rows(reply)
+	if err != nil {
+		return err
+	}
+	if o.serializer != "" {
+		if err := o.writeReport(out, report, argv, rows); err != nil {
+			return err
+		}
+	} else {
+		if !o.noHeader {
+			if err := printLine(out, cols, nil, o); err != nil {
+				return err
 			}
-			if op.Argument == none {
-				fmt.Fprintln(&result, s)
+		}
+		for i := range rows {
+			if err := printLine(out, cols, &rows[i], o); err != nil {
+				return err
 			}
 		}
 	}
-	if result.Len() > 0 {
-		result.WriteByte('\n')
+	return nil
+}
+
+func matchesJob(j *pb.JobInfo, sel *pb.JobIdSelector) bool {
+	a := j.ArrayTask
+	if sel.ArrayTaskId != nil {
+		return a != nil && a.ArrayJobId == sel.JobId && a.TaskId == *sel.ArrayTaskId
 	}
-	return result.String()
+	return j.JobId == sel.JobId || a != nil && a.ArrayJobId == sel.JobId
+}
+
+func (o *options) matchesStep(r row) bool {
+	s := r.step
+	if s.Status == pb.JobStatus_Pending || o.users != nil && !slices.Contains(o.users, num(s.Uid)) ||
+		o.nodeNames != nil && !slices.ContainsFunc(s.ExecutionNode, func(name string) bool { return o.nodeNames[name] }) ||
+		len(o.req.FilterPartitions) > 0 && !slices.Contains(o.req.FilterPartitions, r.job.Partition) {
+		return false
+	}
+	if len(o.req.FilterJobIds) > 0 && !slices.ContainsFunc(o.req.FilterJobIds, func(sel *pb.JobIdSelector) bool { return matchesJob(r.job, sel) }) {
+		return false
+	}
+	return len(o.stepSelectors) == 0 || slices.ContainsFunc(o.stepSelectors, func(sel stepSelector) bool {
+		return matchesJob(r.job, sel.job) && r.stepSuffix() == num(sel.index)
+	})
+}
+
+// The v45 state parser expands the pending bitmap for every matching selector,
+// even when a selector named just one member of that bitmap.
+func (o *options) stateRows(reply *pb.QueryJobsInfoReply) []row {
+	var rows []row
+	appendJob := func(j *pb.JobInfo, sel *pb.JobIdSelector) {
+		if util.IsPendingArrayParent(j) {
+			spec := j.ArraySpec
+			stride := max(1, spec.GetStride())
+			if sel != nil {
+				if sel.JobId != j.JobId {
+					return
+				}
+				if t := sel.ArrayTaskId; t != nil && (*t < spec.Start || *t > spec.End || (*t-spec.Start)%stride != 0) {
+					return
+				}
+			}
+			for t := uint64(spec.Start); t <= uint64(spec.End); t += uint64(stride) {
+				rows = append(rows, row{job: j, task: new(uint32(t))})
+			}
+		} else if sel == nil || matchesJob(j, sel) {
+			rows = append(rows, row{job: j})
+		}
+	}
+	if len(o.req.FilterJobIds) == 0 {
+		for _, j := range reply.JobInfoList {
+			appendJob(j, nil)
+		}
+	} else {
+		for _, sel := range o.req.FilterJobIds {
+			for _, j := range reply.JobInfoList {
+				appendJob(j, sel)
+			}
+		}
+	}
+	return rows
 }
 
 func (o *options) rows(reply *pb.QueryJobsInfoReply) ([]row, error) {
+	if o.onlyState && o.serializer != "" {
+		return o.stateRows(reply), nil
+	}
 	var result []row
 	for _, j := range reply.JobInfoList {
 		if o.steps {
 			for _, step := range j.StepInfoList {
-				if step.Status == pb.JobStatus_Pending || o.users != nil && !slices.Contains(o.users, num(step.Uid)) {
-					continue
-				}
-				if o.nodes != nil && !slices.ContainsFunc(step.ExecutionNode, o.nodes.Match) {
-					continue
-				}
 				r := row{job: j, step: step}
-				if o.stepIDs == "" || slices.Contains(list(o.stepIDs), r.stepID()) {
+				if o.serializer != "" || o.matchesStep(r) {
 					result = append(result, r)
 				}
 			}
@@ -247,10 +357,10 @@ func (o *options) rows(reply *pb.QueryJobsInfoReply) ([]row, error) {
 		if o.users != nil && !slices.Contains(o.users, num(j.Uid)) || o.notUser == num(j.Uid) || !matchesFold(o.reservations, j.Reservation) {
 			continue
 		}
-		if !(o.onlyState && o.serializer != "") && len(o.states) > 0 && !slices.Contains(o.states, j.Status) {
+		if len(o.states) > 0 && !slices.Contains(o.states, j.Status) {
 			continue
 		}
-		if o.nodes != nil && !slices.ContainsFunc(j.ExecutionNode, o.nodes.Match) {
+		if o.nodeNames != nil && !slices.ContainsFunc(j.ExecutionNode, func(name string) bool { return o.nodeNames[name] }) {
 			continue
 		}
 		if o.over > 0 || o.under > 0 {
@@ -283,7 +393,7 @@ func (o *options) rows(reply *pb.QueryJobsInfoReply) ([]row, error) {
 			if !allTasks {
 				slices.Sort(indexes)
 				indexes = slices.Compact(indexes)
-				if len(indexes) == 1 || o.array {
+				if len(indexes) == 1 || o.array && o.serializer == "" {
 					for _, i := range indexes {
 						result = append(result, row{job: j, task: new(i)})
 					}
@@ -293,7 +403,7 @@ func (o *options) rows(reply *pb.QueryJobsInfoReply) ([]row, error) {
 				continue
 			}
 		}
-		if o.array && util.IsPendingArrayParent(j) {
+		if o.array && o.serializer == "" && util.IsPendingArrayParent(j) {
 			spec := j.ArraySpec
 			stride := max(1, spec.GetStride())
 			for i := uint64(spec.Start); i <= uint64(spec.End); i += uint64(stride) {

@@ -271,10 +271,9 @@ func column(text string, width int, right bool, cut bool) string {
 
 // Validate facts only after querying, in the same order for each output mode.
 func validateProjection(rows []*row, o *plan) error {
-	needsTopology, needsIntegralCPUs := false, o.Serialization != ""
-	needsGRES := o.Serialization != ""
-	needsLoad := o.Serialization != "" || strings.ContainsRune(o.Sort, 'O')
-	needsFreeMemory := o.Serialization != "" || strings.ContainsRune(o.Sort, 'e')
+	var needsTopology, needsIntegralCPUs, needsGRES bool
+	needsLoad := strings.ContainsRune(o.Sort, 'O')
+	needsFreeMemory := strings.ContainsRune(o.Sort, 'e')
 	for _, item := range o.Fields {
 		if item.Field == nil {
 			continue
@@ -292,7 +291,6 @@ func validateProjection(rows []*row, o *plan) error {
 			needsTopology = true
 		}
 	}
-	needsTopology = needsTopology || o.Serialization != ""
 	for _, r := range rows {
 		for _, n := range r.Nodes {
 			if n.TelemetryExpected && needsLoad && n.CPULoad == nil {

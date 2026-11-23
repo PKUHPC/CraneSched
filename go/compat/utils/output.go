@@ -19,6 +19,67 @@ import (
 // SerializerOptions controls encoding independently of data-parser complex values.
 type SerializerOptions struct{ Compact, NoTag, Complex bool }
 
+// ParseSerializerOptions validates the serializer environment when the CLI
+// encounters an output option. Slurm initializes both serializer plugins.
+func ParseSerializerOptions(kind string, env map[string]string) (SerializerOptions, error) {
+	var selected SerializerOptions
+	for _, plugin := range []string{"json", "yaml"} {
+		raw := env["SLURM_"+strings.ToUpper(plugin)]
+		options := SerializerOptions{Compact: raw != ""}
+		for flag := range strings.SplitSeq(strings.ToLower(raw), ",") {
+			switch flag {
+			case "":
+			case "compact":
+				options.Compact = true
+			case "pretty":
+				options.Compact = false
+			case "complex":
+				options.Complex = true
+			case "no_tag":
+				options.NoTag = true
+			default:
+				return selected, fmt.Errorf("Unable to parse serializer %q flags: Invalid argument", raw)
+			}
+		}
+		if kind == plugin {
+			selected = options
+		}
+	}
+	return selected, nil
+}
+
+type DataParserOptions struct {
+	Plugin            string
+	SpecOnly, Complex bool
+}
+
+// ParseDataParser recognizes the v45 parser and emits its flag diagnostics.
+func ParseDataParser(command, raw string, attached bool, diag io.Writer) (DataParserOptions, error) {
+	if !attached {
+		raw = "v0.0.45"
+	}
+	raw = strings.TrimPrefix(raw, "data_parser/")
+	version, flags, _ := strings.Cut(raw, "+")
+	result := DataParserOptions{Plugin: "data_parser/" + raw}
+	if version != "v0.0.45" {
+		return result, fmt.Errorf("data parser %q (supported: v0.0.45)", version)
+	}
+	for flag := range strings.SplitSeq(flags, "+") {
+		switch strings.ToLower(flag) {
+		case "", "fast", "minimize_refs":
+		case "spec_only":
+			result.SpecOnly = true
+		case "complex":
+			result.Complex = true
+		case "prefer_refs":
+			fmt.Fprintf(diag, "%s: data_parser/v0.0.45 ignoring default flag FLAG_PREFER_REFS\n", command)
+		default:
+			fmt.Fprintf(diag, "%s: warning: data_parser/v0.0.45 ignoring unknown flag %s\n", command, flag)
+		}
+	}
+	return result, nil
+}
+
 // WriteSchema emits a report type's ordered schema without a second definition.
 func WriteSchema[T any](w io.Writer, format string, options SerializerOptions) error {
 	return writeOutput(w, reportSchema(reflect.TypeFor[T](), "", ""), format, options)

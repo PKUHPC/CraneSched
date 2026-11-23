@@ -146,3 +146,36 @@ func (s *OptionScanner) longOption(name, arg string) (OptionSpec, error) {
 	}
 	return OptionSpec{}, fmt.Errorf("unrecognized option '%s'", arg)
 }
+
+// CompleteOptions lists matching public options in declaration order.
+func CompleteOptions(specs []OptionSpec, query string) string {
+	var output strings.Builder
+	if query == "" {
+		return ""
+	}
+	alpha := query[0] >= 'a' && query[0] <= 'z' || query[0] >= 'A' && query[0] <= 'Z'
+	for _, spec := range specs {
+		if spec.Short != 0 && (query[0] == '-' || alpha) {
+			flag := "-" + string(spec.Short)
+			if strings.Contains(flag, query) {
+				output.WriteString(flag + "\n")
+			}
+		}
+		flag := "--" + spec.Name
+		if (len(query) > 1 || alpha) && strings.Contains(flag, query) {
+			if spec.Argument != NoArgument {
+				output.WriteString(flag + "=\n")
+			}
+			if spec.Argument == OptionalArgument {
+				output.WriteString(flag + " \n")
+			}
+			if spec.Argument == NoArgument {
+				output.WriteString(flag + "\n")
+			}
+		}
+	}
+	if output.Len() != 0 {
+		output.WriteByte('\n')
+	}
+	return output.String()
+}

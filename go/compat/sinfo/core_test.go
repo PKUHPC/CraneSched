@@ -379,7 +379,7 @@ func TestTimeAndDurationContracts(t *testing.T) {
 		{"%300Y", now, strings.Repeat("#", 255)},
 	}
 	for _, tc := range cases {
-		if got := timeFormatter(tc.format, now, io.Discard)(tc.t); got != tc.want {
+		if got := utils.TimeFormatter("sinfo", tc.format, now, io.Discard)(tc.t); got != tc.want {
 			t.Errorf("%q: %q != %q", tc.format, got, tc.want)
 		}
 	}

@@ -162,6 +162,20 @@ func TestRunActionsAndCapabilityPrecedence(t *testing.T) {
 	}
 }
 
+func TestStructuredExplicitUnsupportedGrouping(t *testing.T) {
+	for _, args := range [][]string{{"--json", "-O", "Features,NodeList"}, {"--yaml", "-o", "%f"}} {
+		source := &memorySource{load: func(context.Context, query) (*snapshot, error) {
+			t.Fatal("unsupported grouping reached controller")
+			return nil, nil
+		}}
+		var out, diag bytes.Buffer
+		rc := testRunner(source).run(t.Context(), append([]string{"sinfo"}, args...), nil, &out, &diag)
+		if rc != 1 || out.Len() != 0 || !strings.Contains(diag.String(), "field Features") {
+			t.Fatalf("%v: %d %q %q", args, rc, &out, &diag)
+		}
+	}
+}
+
 func TestRunSchemaOnlyIgnoresUnusedProjections(t *testing.T) {
 	for _, kind := range []string{"json", "yaml"} {
 		for _, flags := range [][]string{{"-o", "%f"}, {"-S", "f"}, {"-t", "cloud"}, {"--future"}, {"--long"}} {

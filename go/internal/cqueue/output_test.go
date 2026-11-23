@@ -2,10 +2,8 @@ package cqueue
 
 import (
 	"github.com/PKUHPC/CraneSched/go/generated/protos"
-	"github.com/PKUHPC/CraneSched/go/internal/util"
-	"testing"
 
-	"google.golang.org/protobuf/types/known/durationpb"
+	"testing"
 )
 
 func uint32Pointer(value uint32) *uint32 {
@@ -46,40 +44,6 @@ func TestFormatPendingArrayJobID(t *testing.T) {
 				t.Fatalf("FormatQueueJobID() = %q, want %q", got, test.want)
 			}
 		})
-	}
-}
-
-func TestSlurmQueueStatesAreConsistent(t *testing.T) {
-	util.SetOutputMode(util.OutputModeSlurm)
-	t.Cleanup(func() { util.SetOutputMode(util.OutputModeNative) })
-
-	pending := &protos.JobInfo{
-		JobId:     10,
-		Status:    protos.JobStatus_Pending,
-		ArraySpec: &protos.ArraySpec{Start: 1, End: 3},
-		TimeLimit: durationpb.New(0),
-	}
-	running := &protos.JobInfo{
-		JobId:     11,
-		Status:    protos.JobStatus_Running,
-		TimeLimit: durationpb.New(0),
-	}
-
-	config := GenerateTableConfig()
-	if got := config.Header[5]; got != "ST" {
-		t.Fatalf("default state header = %q, want ST", got)
-	}
-	if got := config.RowMapper(pending)[5]; got != "PD" {
-		t.Fatalf("pending default state = %q, want PD", got)
-	}
-	if got := config.RowMapper(running)[5]; got != "R" {
-		t.Fatalf("running default state = %q, want R", got)
-	}
-	if got := FormatQueueState(pending); got != "PENDING" {
-		t.Fatalf("pending long state = %q, want PENDING", got)
-	}
-	if got := FormatQueueState(running); got != "RUNNING" {
-		t.Fatalf("running long state = %q, want RUNNING", got)
 	}
 }
 

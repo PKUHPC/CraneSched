@@ -318,7 +318,10 @@ func TestStructuredImplicitCapabilitiesDoNotBecomeZeroValues(t *testing.T) {
 			t.Fatalf("missing load or known counts misreported: %v", cpus)
 		}
 		out.Reset()
-		o.DataParser, o.HasDataParser = "v0.0.45+spec_only", true
+		o, err = parseCommand([]string{"sinfo", "--" + kind + "=v0.0.45+spec_only"}, nil)
+		if err != nil {
+			t.Fatal(err)
+		}
 		if err := renderStructured(&out, &diagnostics, []string{"sinfo"}, nil, s, o, newTextRenderer().UserName); err != nil || out.Len() == 0 {
 			t.Fatalf("schema-only output: %v", err)
 		}

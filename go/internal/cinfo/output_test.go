@@ -134,19 +134,3 @@ func (s *clusterQueryController) QueryClusterInfo(_ context.Context, req *protos
 	s.requests <- req
 	return clusterFixture(), nil
 }
-
-func TestExistingSlurmOutputUsesNativeRows(t *testing.T) {
-	got, err := formatSlurmClusterJSON(clusterFixture())
-	if err != nil {
-		t.Fatal(err)
-	}
-	var reply slurmClusterOutput
-	if err := json.Unmarshal([]byte(got), &reply); err != nil {
-		t.Fatal(err)
-	}
-	if !reply.OK || reply.Partitions[0].NodeLists == nil || len(reply.Partitions[0].NodeLists) != 0 ||
-		reply.Partitions[1].Name != "batch*" || reply.Partitions[1].NodeLists[0].NodeList != "n[1-2]" ||
-		reply.Partitions[1].NodeLists[1].Reason != "offline" {
-		t.Fatal(got)
-	}
-}

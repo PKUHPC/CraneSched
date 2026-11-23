@@ -52,8 +52,7 @@ type partition struct {
 	AllowedAccounts, DeniedAccounts                      []string
 	DefaultMemCPU, MaxMemCPU, DefaultMemNode, MaxMemNode uint64 // MiB; zero is unconfigured.
 	TotalCPUs, TotalMemory                               uint64
-	ConfiguredNodes, NodeSets, TRES                      string
-	DefaultQoS                                           string
+	ConfiguredNodes                                      string
 }
 
 type durationLimit struct {

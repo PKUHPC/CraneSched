@@ -173,11 +173,11 @@ func parseOptions(argv []string, env map[string]string) (*options, error) {
 		case "noconvert":
 			o.NoConvert = true
 		case "json", "yaml":
-			settings, err := parseSerializerEnvironment(env)
+			settings, err := utils.ParseSerializerOptions(name, env)
 			if err != nil {
-				return err
+				return &commandError{fmt.Sprintf("sinfo: fatal: %s\n", err)}
 			}
-			o.Serializer = settings[name]
+			o.Serializer = settings
 			o.Serialization, o.DataParser = name, value
 		default:
 			o.Action, o.ActionValue = name, value
@@ -273,34 +273,7 @@ func writeAction(w io.Writer, o *plan) error {
 		}
 		output.WriteByte('\n')
 	case "autocomplete":
-		query := o.ActionValue
-		if query == "" {
-			return nil
-		}
-		alpha := query[0] >= 'a' && query[0] <= 'z' || query[0] >= 'A' && query[0] <= 'Z'
-		for _, spec := range optionSpecs {
-			if spec.Short != 0 && (query[0] == '-' || alpha) {
-				flag := "-" + string(spec.Short)
-				if strings.Contains(flag, query) {
-					output.WriteString(flag + "\n")
-				}
-			}
-			flag := "--" + spec.Name
-			if (len(query) > 1 || alpha) && strings.Contains(flag, query) {
-				if spec.Argument != utils.NoArgument {
-					output.WriteString(flag + "=\n")
-				}
-				if spec.Argument == utils.OptionalArgument {
-					output.WriteString(flag + " \n")
-				}
-				if spec.Argument == utils.NoArgument {
-					output.WriteString(flag + "\n")
-				}
-			}
-		}
-		if output.Len() != 0 {
-			output.WriteByte('\n')
-		}
+		output.WriteString(utils.CompleteOptions(optionSpecs, o.ActionValue))
 	}
 	_, err := io.WriteString(w, output.String())
 	return err
@@ -322,22 +295,14 @@ func validateCapabilities(o *plan) error {
 	if o.Reservations {
 		return nil
 	}
-	if o.Serialization != "" && !strings.EqualFold(o.DataParser, "list") {
-		schema, err := selectSchema(o, io.Discard)
-		if err != nil {
-			return err
-		}
-		// Schema output still queries the controller, but does not project
-		// node fields, states or sort keys into a data report.
-		if schema.SpecOnly {
-			return nil
-		}
+	if o.Parser.SpecOnly {
+		return nil
 	}
 	if o.Future {
 		return unsupported("--future", "future node registration")
 	}
 	for _, item := range o.Fields {
-		if o.Serialization == "" && item.Field != nil && item.Field.Capability != "" {
+		if (o.Serialization == "" || o.HasFormat) && item.Field != nil && item.Field.Capability != "" {
 			return unsupported("field "+item.Field.Name, item.Field.Capability)
 		}
 	}
@@ -363,6 +328,8 @@ func validateCapabilities(o *plan) error {
 // The embedded options are a copy; selecting defaults never mutates raw input.
 type plan struct {
 	options
+	Parser                            utils.DataParserOptions
+	ParserWarnings                    string
 	Query                             query
 	Fields                            []formatItem
 	Diagnostics                       []string
@@ -377,6 +344,14 @@ func parseCommand(argv []string, env map[string]string) (*plan, error) {
 	o := &plan{options: *input, Query: query{ReservationsOnly: input.Reservations}}
 	if o.Action != "" {
 		return o, nil
+	}
+	if o.Serialization != "" && !o.Reservations && !o.HasClusters && (!o.Federation || o.Local) && !strings.EqualFold(o.DataParser, "list") {
+		var warnings strings.Builder
+		o.Parser, err = utils.ParseDataParser("sinfo", o.DataParser, o.HasDataParser, &warnings)
+		if err != nil {
+			return nil, unsupported("--"+o.Serialization, err.Error())
+		}
+		o.ParserWarnings = warnings.String()
 	}
 	if !o.HasFormat {
 		o.LongFormat = true
@@ -397,7 +372,7 @@ func parseCommand(argv []string, env map[string]string) (*plan, error) {
 			}
 		default:
 			if value, exists := env["SINFO_FORMAT"]; exists {
-				o.Format, o.LongFormat = value, false
+				o.Format, o.LongFormat, o.HasFormat = value, false, true
 			} else {
 				o.AutoPartitionWidth = true
 				o.Format = "partition:9 ,available:.5 ,time:.10 ,nodes:.6 ,statecompact:.6 ,nodelist:0"

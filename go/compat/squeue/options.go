@@ -14,6 +14,7 @@ import (
 	"slices"
 	"strconv"
 	"strings"
+	"time"
 
 	"github.com/PKUHPC/CraneSched/go/compat/utils"
 	pb "github.com/PKUHPC/CraneSched/go/generated/protos"
@@ -53,9 +54,17 @@ var vocabulary = []utils.OptionSpec{
 	{Name: "json", Argument: optional}, {Name: "yaml", Argument: optional},
 }
 
+type stepSelector struct {
+	job   *pb.JobIdSelector
+	index uint32
+}
+
 type options struct {
+	stepSelectors                                        []stepSelector
+	nodeNames                                            map[string]bool
+	formatTime                                           func(time.Time) string
+	encoding                                             utils.SerializerOptions
 	req                                                  *pb.QueryJobsInfoRequest
-	env                                                  map[string]string
 	jobs, steps, array, all                              bool
 	local, federation, sibling                           bool
 	long, noHeader, start, onlyState                     bool
@@ -80,7 +89,7 @@ func assigned(m map[string]string, k string) bool { _, ok := m[k]; return ok }
 func list(s string) []string                      { return strings.FieldsFunc(s, func(r rune) bool { return r == ',' }) }
 
 func parse(args []string, env map[string]string, diag io.Writer) (*options, error) {
-	o := &options{env: env, sort: env["SQUEUE_SORT"], customSort: assigned(env, "SQUEUE_SORT"), all: assigned(env, "SQUEUE_ALL"), array: assigned(env, "SQUEUE_ARRAY"), priority: assigned(env, "SQUEUE_PRIORITY"),
+	o := &options{formatTime: utils.TimeFormatter("squeue", env["SLURM_TIME_FORMAT"], time.Now().In(utils.CommandTimezone(env)), diag), sort: env["SQUEUE_SORT"], customSort: assigned(env, "SQUEUE_SORT"), all: assigned(env, "SQUEUE_ALL"), array: assigned(env, "SQUEUE_ARRAY"), priority: assigned(env, "SQUEUE_PRIORITY"),
 		clusters: env["SLURM_CLUSTERS"], local: assigned(env, "SQUEUE_LOCAL"), federation: assigned(env, "SQUEUE_FEDERATION"), sibling: assigned(env, "SQUEUE_SIB") || assigned(env, "SQUEUE_SIBLING"),
 		req: &pb.QueryJobsInfoRequest{IncludePublicQueueDetails: true, Mode: pb.QueryJobsInfoMode_QUERY_JOBS_INFO_QUEUE, NumLimit: math.MaxUint32}}
 	s := utils.NewOptionScanner(args, vocabulary, assigned(env, "POSIXLY_CORRECT"))
@@ -171,6 +180,7 @@ func parse(args []string, env map[string]string, diag io.Writer) (*options, erro
 		case "reservation":
 			o.reservations = list(v)
 		case "iterate":
+			o.iterate = 0
 			_, _ = fmt.Sscanf(strings.TrimSpace(v), "%d", &o.iterate)
 			if o.iterate <= 0 {
 				return nil, fmt.Errorf("squeue: error: --iterate=%s\n", v)
@@ -192,6 +202,10 @@ func parse(args []string, env map[string]string, diag io.Writer) (*options, erro
 				o.under = n
 			}
 		case "json", "yaml":
+			o.encoding, err = utils.ParseSerializerOptions(op.Name, env)
+			if err != nil {
+				return nil, fmt.Errorf("squeue: fatal: %w", err)
+			}
 			o.serializer, o.parser = op.Name, v
 			o.parserAttached = op.Attached
 			if v == "list" {
@@ -304,13 +318,13 @@ func (o *options) selectIDs() error {
 			return fmt.Errorf("squeue: error: Invalid job_step id: %s", v)
 		}
 		selectedSteps = append(selectedSteps, job+"."+num(uint32(index)))
-		// Crane and Slurm use different special step IDs. Select the job here
-		// and match the translated step after reading its type.
+		// Crane and Slurm use different special step IDs. Match the numeric selector
+		// after reading the Crane step type.
 		ids, err := util.ParseJobIdSelectorList(job, ",")
 		if err != nil {
 			return fmt.Errorf("squeue: error: Invalid job_step id: %s", v)
 		}
-		o.req.FilterJobIds = append(o.req.FilterJobIds, ids...)
+		o.stepSelectors = append(o.stepSelectors, stepSelector{ids[0], uint32(index)})
 	}
 	o.stepIDs = strings.Join(selectedSteps, ",")
 	return nil
