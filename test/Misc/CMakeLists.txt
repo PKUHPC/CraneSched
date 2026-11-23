@@ -5,7 +5,7 @@ endif ()
 
 include(GoogleTest)
 
-add_executable(misc_unqlite_test unqlite_test.cpp)
+add_executable(misc_unqlite_test UnqliteTest.cpp)
 target_link_libraries(misc_unqlite_test
         GTest::gtest GTest::gtest_main
         unqlite
@@ -13,14 +13,14 @@ target_link_libraries(misc_unqlite_test
 )
 gtest_discover_tests(misc_unqlite_test)
 
-add_executable(misc_cgroup_v2_fs_test cgroup_v2_fs_test.cpp)
+add_executable(misc_cgroup_v2_fs_test CgroupV2FsTest.cpp)
 target_link_libraries(misc_cgroup_v2_fs_test
         GTest::gtest GTest::gtest_main
         craned_common
 )
 gtest_discover_tests(misc_cgroup_v2_fs_test)
 
-add_executable(misc_pam_util_test pam_util_test.cpp)
+add_executable(misc_pam_util_test PamUtilTest.cpp)
 target_include_directories(misc_pam_util_test PRIVATE
         ${CMAKE_SOURCE_DIR}/src/Misc/Pam
 )
@@ -31,7 +31,7 @@ target_link_libraries(misc_pam_util_test
 gtest_discover_tests(misc_pam_util_test)
 
 if (CRANE_ENABLE_TRACING)
-    add_executable(misc_tracer_manager_test tracer_manager_test.cpp)
+    add_executable(misc_tracer_manager_test TracerManagerTest.cpp)
     target_link_libraries(misc_tracer_manager_test
             GTest::gtest GTest::gtest_main
             crane_tracer
