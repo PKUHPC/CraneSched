@@ -35,9 +35,12 @@ TEST_F(CranedCompletionConfigTest, RejectsInvalidTimeoutWithFieldName) {
   for (const char* value : {"0", "-1", "4294967296", "1.5"}) {
     SCOPED_TRACE(value);
     EXPECT_EXIT(
-        ParseCranedConfig(
-            YAML::Load(std::string("Craned: {SupervisorCompletionTimeout: ") +
-                       value + "}")),
+        {
+          spdlog::set_default_logger(spdlog::stderr_color_mt("config-test"));
+          ParseCranedConfig(
+              YAML::Load(std::string("Craned: {SupervisorCompletionTimeout: ") +
+                         value + "}"));
+        },
         ::testing::ExitedWithCode(1),
         "Craned[.]SupervisorCompletionTimeout must be a positive integer");
   }

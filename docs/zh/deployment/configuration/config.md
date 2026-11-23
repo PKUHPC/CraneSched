@@ -211,18 +211,12 @@ CranedListenPort: 10010
 Craned:
   PingInterval: 15        # 每 15 秒 ping cranectld
   CraneCtldTimeout: 5     # cranectld 连接超时时间
-  SupervisorCompletionTimeout: 30  # Supervisor 收尾等待时间，单位秒
+  SupervisorCompletionTimeout: 30
 ```
 
-`Craned.SupervisorCompletionTimeout` 必须为正整数，单位为秒，默认为 `30`。
-从 Craned 开始等待正在收尾的 Supervisor 退出时计时，超时后向 Supervisor
-发送 SIGKILL。若已收到步骤终态，Craned 保留其状态、退出码、原因和完成时间，
-避免因清理缓慢将已完成作业改判为可自动重排队的 RPC 失败；未收到终态时仍报告失败。
-修改此配置后需重启 Craned 生效。
-
-此超时同样适用于 daemon step 和静默清理。启用 `RunInJob` 时，要为 Job Epilog
-及其他退出操作留出时间。如果此超时短于 Epilog 的运行时间，Craned 可能在 Epilog
-超时前结束 Supervisor。Craned 通过定时器检查超时，等待关闭 RPC 可能延后检查。
+`Craned.SupervisorCompletionTimeout` 控制 Craned 等待 Supervisor 收尾退出的时间，单位为秒，
+取正整数，默认 `30`。超时后 Craned 发送 `SIGKILL`，保留已收到的步骤终态，缺少终态时报告失败。
+启用 `RunInJob` 时，为 Job Epilog 留足时间。修改后需重启 Craned。
 
 ## 高级选项
 

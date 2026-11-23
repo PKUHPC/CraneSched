@@ -332,9 +332,9 @@ void ParseCranedConfig(const YAML::Node& config) {
     if (const auto timeout = craned_config["SupervisorCompletionTimeout"]) {
       conf.SupervisorCompletionTimeoutSec = timeout.as<uint32_t>(0);
       if (conf.SupervisorCompletionTimeoutSec == 0) {
-        fmt::print(stderr,
-                   "Craned.SupervisorCompletionTimeout must be a positive "
-                   "integer (1-4294967295).\n");
+        CRANE_ERROR(
+            "Craned.SupervisorCompletionTimeout must be a positive integer "
+            "(1-4294967295).");
         std::exit(1);
       }
     }

@@ -213,23 +213,14 @@ CranedListenPort: 10010
 Craned:
   PingInterval: 15        # Ping cranectld every 15 seconds
   CraneCtldTimeout: 5     # Timeout for cranectld connection
-  SupervisorCompletionTimeout: 30  # Seconds allowed for Supervisor cleanup
+  SupervisorCompletionTimeout: 30
 ```
 
-`Craned.SupervisorCompletionTimeout` is a positive number of seconds (default:
-`30`). It starts when Craned begins waiting for a completing Supervisor to exit.
-After this timeout, Craned sends SIGKILL to the Supervisor. If the step has
-already reported its terminal status, Craned preserves that status, exit code,
-reason, and completion timestamp; slow cleanup does not turn a completed job
-into an RPC failure eligible for automatic requeue. If no terminal status was
-received, the timeout is still reported as a failure. Restart Craned to apply
-changes to this setting.
-
-The same timeout applies to daemon steps and silent cleanup. With `RunInJob`,
-allow enough time for the Job Epilog and other shutdown work. If this timeout
-is shorter than the Epilog runtime, Craned may kill the Supervisor before the
-Epilog timeout elapses. Craned checks the deadline on a timer, so a pending
-shutdown RPC may delay the check.
+`Craned.SupervisorCompletionTimeout` is the time Craned waits for a completing
+Supervisor before sending `SIGKILL`. Use a positive integer in seconds (default
+`30`). Craned preserves any reported step result and reports failure if the
+result is missing. With `RunInJob`, allow enough time for the Job Epilog.
+Restart Craned after changing this setting.
 
 ## Advanced Options
 
