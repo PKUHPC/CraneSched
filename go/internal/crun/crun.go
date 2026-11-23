@@ -1610,9 +1610,17 @@ func shellJoinArgs(args []string) string {
 func MainCrun(cmd *cobra.Command, args []string) error {
 	util.InitDiagLogger(FlagDebugLevel)
 
+	var err error
+	var signals []*protos.Signal
+	if cmd.Flags().Changed("signal") {
+		signals, err = util.ParseInteractiveSignalParamString(FlagSignal)
+		if err != nil {
+			return util.WrapCraneErr(util.ErrorCmdArg, "invalid argument: --signal: %v", err)
+		}
+	}
+
 	gVars.globalCtx, gVars.globalCtxCancel = context.WithCancel(context.Background())
 
-	var err error
 	if gVars.cwd, err = os.Getwd(); err != nil {
 		return util.WrapCraneErr(util.ErrorSystem, "Failed to get working directory: %s.", err)
 	}
@@ -1654,6 +1662,7 @@ func MainCrun(cmd *cobra.Command, args []string) error {
 			IoMeta:   &protos.IoMeta{},
 			CmdLine:  strings.Join(args, " "),
 			Cwd:      gVars.cwd,
+			Signals:  signals,
 
 			Env: make(map[string]string), TaskProlog: FlagTaskProlog,
 			TaskEpilog: FlagTaskEpilog,
@@ -1959,20 +1968,6 @@ func MainCrun(cmd *cobra.Command, args []string) error {
 
 	}
 
-	if FlagSignal != "" {
-		if jobMode {
-			signals, err := util.ParseSignalParamString(FlagSignal)
-			if err != nil {
-				return util.WrapCraneErr(util.ErrorCmdArg, "invalid argument: %s", err)
-			}
-			for _, sig := range signals {
-				if sig.SignalFlag == protos.Signal_BATCH_ONLY {
-					return util.NewCraneErr(util.ErrorCmdArg, "Invalid --signal specification")
-				}
-				job.Signals = append(job.Signals, sig)
-			}
-		}
-	}
 	if FlagDeadlineTime != "" {
 		deadlineTime, err := util.ParseTime(FlagDeadlineTime)
 		if err != nil {

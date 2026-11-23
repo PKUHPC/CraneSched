@@ -3847,6 +3847,28 @@ JobScheduler::SubmitJobToScheduler(std::unique_ptr<JobInCtld> job) {
     return std::unexpected(
         FormatRichErr(CraneErrCode::ERR_INVALID_PARAM, "{}", valid.error()));
 
+  using crane::grpc::Signal;
+  for (const auto& signal : job->JobToCtld().signals()) {
+    if (auto valid = util::os::ValidateJobSignal(signal.signal_number(),
+                                                 signal.signal_time());
+        !valid)
+      return std::unexpected(FormatRichErr(CraneErrCode::ERR_INVALID_PARAM,
+                                           "Invalid --signal {}",
+                                           valid.error()));
+
+    if (!Signal::SignalFlag_IsValid(signal.signal_flag()))
+      return std::unexpected(FormatRichErr(
+          CraneErrCode::ERR_INVALID_PARAM, "Invalid --signal flag {}",
+          static_cast<int>(signal.signal_flag())));
+
+    if (signal.signal_flag() == Signal::BATCH_ONLY &&
+        (job->IsInteractive() ||
+         std::holds_alternative<InteractiveMeta>(job->meta)))
+      return std::unexpected(FormatRichErr(
+          CraneErrCode::ERR_INVALID_PARAM,
+          "Invalid --signal: B: is only supported for batch submissions"));
+  }
+
   if (!job->password_entry->Valid()) {
     CRANE_DEBUG("Uid {} not found on the controller node", job->uid);
     validate_span.SetStatus(crane::StatusCode::kError, "invalid_uid");

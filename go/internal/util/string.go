@@ -2109,62 +2109,67 @@ func SetJobDependencies(job *protos.JobToCtld, depStr string) error {
 	return nil
 }
 
+var signalPattern = regexp.MustCompile(`^(?:(R|B):)?([A-Za-z0-9]+)(?:@(\d+))?$`)
+
 func ParseSignalParamString(input string) ([]*protos.Signal, error) {
 	var signals []*protos.Signal
-
-	var signalPattern = regexp.MustCompile(`^(?:(R|B):)?([A-Za-z0-9]+)(?:@(\d+))?$`)
-
-	items := strings.Split(input, ",")
-	for _, item := range items {
+	for item := range strings.SplitSeq(input, ",") {
 		item = strings.TrimSpace(item)
 		if item == "" {
-			continue
+			return nil, fmt.Errorf("empty signal specification in %q", input)
 		}
 		matches := signalPattern.FindStringSubmatch(item)
 		if matches == nil {
-			return nil, fmt.Errorf("invalid signal format: %v", input)
+			return nil, fmt.Errorf("invalid signal format: %q", item)
 		}
 
-		signal := &protos.Signal{}
-
-		// matches[1]: Source (R or B)
-		if matches[1] != "" {
-			if matches[1] == "R" {
-				signal.SignalFlag = protos.Signal_RESERVATION_OVERLAP
-			} else if matches[1] == "B" {
-				signal.SignalFlag = protos.Signal_BATCH_ONLY
-			}
+		signal := &protos.Signal{SignalTime: 60}
+		switch matches[1] {
+		case "R":
+			signal.SignalFlag = protos.Signal_RESERVATION_OVERLAP
+		case "B":
+			signal.SignalFlag = protos.Signal_BATCH_ONLY
 		}
 
-		// matches[2]: Number or string
-		sigName := strings.ToUpper(matches[2])
-		if strings.HasPrefix(sigName, "SIG") && len(sigName) > 3 {
-			sigName = sigName[3:]
-		}
-		if sig_num, ok := SignalMap[sigName]; ok {
-			signal.SignalNumber = sig_num
+		sigName := strings.TrimPrefix(strings.ToUpper(matches[2]), "SIG")
+		if number, ok := SignalMap[sigName]; ok {
+			signal.SignalNumber = number
 		} else {
-			num, err := strconv.Atoi(matches[2])
+			number, err := strconv.ParseInt(matches[2], 10, 32)
 			if err != nil {
-				return nil, fmt.Errorf("invalid signal number: %v", matches[2])
+				return nil, fmt.Errorf("invalid signal name or number %q", matches[2])
 			}
-			signal.SignalNumber = int32(num)
+			// Linux application signals. glibc reserves 32 and 33 for NPTL.
+			if number < 1 || number > 64 || number == 32 || number == 33 {
+				return nil, fmt.Errorf("invalid signal number %d (expected 1–31 or 34–64)", number)
+			}
+			signal.SignalNumber = int32(number)
 		}
 
-		// matches[3]: Time (optional)
 		if matches[3] != "" {
-			t, err := strconv.Atoi(matches[3])
+			seconds, err := strconv.ParseUint(matches[3], 10, 16)
 			if err != nil {
-				return nil, fmt.Errorf("invalid signal time: %v", matches[3])
+				return nil, fmt.Errorf("invalid signal time %q (expected 0–65535 seconds)", matches[3])
 			}
-			signal.SignalTime = uint32(t)
-		} else {
-			signal.SignalTime = 60
+			signal.SignalTime = uint32(seconds)
 		}
 
 		signals = append(signals, signal)
 	}
 
+	return signals, nil
+}
+
+func ParseInteractiveSignalParamString(input string) ([]*protos.Signal, error) {
+	signals, err := ParseSignalParamString(input)
+	if err != nil {
+		return nil, err
+	}
+	for _, signal := range signals {
+		if signal.SignalFlag == protos.Signal_BATCH_ONLY {
+			return nil, fmt.Errorf("B: is only supported for batch submissions")
+		}
+	}
 	return signals, nil
 }
 

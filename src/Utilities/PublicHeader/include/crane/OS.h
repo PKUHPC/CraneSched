@@ -89,6 +89,10 @@ class ChildExitWatcher {
 
 namespace util::os {
 
+// Check a Linux signal number and Crane's lead time for job signals.
+std::expected<void, std::string> ValidateJobSignal(int32_t signal_number,
+                                                   uint32_t lead_time_seconds);
+
 // Check Crane's container identity restrictions. The first host GID is the
 // effective GID. These checks do not query NSS or validate SubID mappings.
 std::expected<void, std::string> ValidateContainerIdentity(

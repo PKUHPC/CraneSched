@@ -349,6 +349,14 @@ func MainCalloc(cmd *cobra.Command, args []string) error {
 	util.InitDiagLogger(FlagDebugLevel)
 
 	var err error
+	var signals []*protos.Signal
+	if cmd.Flags().Changed("signal") {
+		signals, err = util.ParseInteractiveSignalParamString(FlagSignal)
+		if err != nil {
+			return util.WrapCraneErr(util.ErrorCmdArg, "invalid argument: --signal: %v", err)
+		}
+	}
+
 	gVars.globalCtx, gVars.globalCtxCancel = context.WithCancel(context.Background())
 
 	if gVars.cwd, err = os.Getwd(); err != nil {
@@ -390,6 +398,7 @@ func MainCalloc(cmd *cobra.Command, args []string) error {
 		CmdLine:         strings.Join(os.Args, " "),
 		Cwd:             gVars.cwd,
 		Env:             make(map[string]string),
+		Signals:         signals,
 	}
 
 	structExtraFromCli := &util.JobExtraAttrs{}
@@ -545,19 +554,6 @@ func MainCalloc(cmd *cobra.Command, args []string) error {
 	job.SubmitHostname, err = os.Hostname()
 	if err != nil {
 		return util.WrapCraneErr(util.ErrorSystem, "Get submit hostname err: %s.", err)
-	}
-
-	if FlagSignal != "" {
-		signals, err := util.ParseSignalParamString(FlagSignal)
-		if err != nil {
-			return util.NewCraneErr(util.ErrorCmdArg, fmt.Sprintf("Invalid argument: --signal value '%s'", FlagSignal))
-		}
-		for _, signal := range signals {
-			if signal.SignalFlag == protos.Signal_BATCH_ONLY {
-				return util.NewCraneErr(util.ErrorCmdArg, "Invalid --signal specification")
-			}
-			job.Signals = append(job.Signals, signal)
-		}
 	}
 
 	// Marshal extra attributes

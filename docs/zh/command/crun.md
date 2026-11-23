@@ -187,10 +187,16 @@ nodes个任务，或ntasks个任务，以较小者为准。默认值：1。
 :   **适用于：** `作业`, `作业步`  
 如果指定了--mail-type，则接收作业状态通知的电子邮件地址。
 
-**--signal=&lt;sig_num&gt;[@sig_time]**
+**--signal=&lt;signal&gt;[@seconds]**
 
 :   **适用于：** `作业`  
-如果指定了--signal，则发送给作业信号。格式为"&lt;sig_num&gt;[@sig_time]"，其中sig_num是信号编号，sig_time是信号发送时间，距离time limit前sig_time秒发送。
+用 `crun` 创建新作业时，使用 `--signal` 请求鹤思在作业达到时间限制前发送信号。下面的命令给作业设置 30 分钟的时限，并请求提前 2 分钟发送 `USR1`。
+
+```bash
+crun --time=00:30:00 --signal=USR1@120 ./my_program
+```
+
+信号可以写名称或编号。`@seconds` 指定提前秒数，取值为 0–65535 的整数。`--signal=USR1` 默认提前 60 秒。通过 `calloc` 取得分配后再运行 `crun` 时，请在 `calloc` 命令上设置此选项。
 
 **--external-launcher**
 

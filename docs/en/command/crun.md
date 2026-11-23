@@ -210,11 +210,16 @@ Default: NONE.
 Email address to receive job status notifications if --mail-type is specified.
 
 
-**--signal=&lt;sig_num&gt;[@sig_time]**
+**--signal=&lt;signal&gt;[@seconds]**
 
 :   **Applies to:** `job`  
-Send signal to the job if --signal is specified. The format is "&lt;sig_num&gt;[@sig_time]", where sig_num is the signal number and sig_time is the signal sending time, sent sig_time seconds before the time limit.
+When starting a new job allocation with `crun`, use `--signal` to request a signal before the job reaches its time limit. The following command requests `USR1` two minutes before the 30-minute time limit.
 
+```bash
+crun --time=00:30:00 --signal=USR1@120 ./my_program
+```
+
+Use a signal name or number. The optional `@seconds` sets the lead time as an integer from 0 through 65535. With `--signal=USR1`, the lead time defaults to 60 seconds. If you launch `crun` inside a `calloc` allocation, set this option on `calloc`.
 
 **--external-launcher**
 

@@ -313,11 +313,9 @@ func BuildCbatchJob(cmd *cobra.Command, args []string, config *util.Config) (*pr
 	if cmd.Flags().Changed("signal") {
 		signals, err := util.ParseSignalParamString(FlagSignal)
 		if err != nil {
-			return nil, fmt.Errorf("invalid argument: --signal value '%s'", FlagSignal)
+			return nil, fmt.Errorf("invalid argument: --signal: %w", err)
 		}
-		for _, signal := range signals {
-			job.Signals = append(job.Signals, signal)
-		}
+		job.Signals = append(job.Signals, signals...)
 	}
 
 	// Set and check the extra attributes
@@ -558,11 +556,9 @@ func applyScriptArgs(cmd *cobra.Command, cbatchArgs []CbatchArg, job *protos.Job
 		case "-s", "--signal":
 			signals, err := util.ParseSignalParamString(arg.val)
 			if err != nil {
-				return fmt.Errorf("invalid argument: %s value '%s' in script", arg.name, arg.val)
+				return fmt.Errorf("invalid argument: %s in script: %w", arg.name, err)
 			}
-			for _, signal := range signals {
-				job.Signals = append(job.Signals, signal)
-			}
+			job.Signals = append(job.Signals, signals...)
 		case "--deadline":
 			deadlineTime, err := util.ParseTime(arg.val)
 			if err != nil {
