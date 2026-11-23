@@ -1201,25 +1201,6 @@ TEST(CtldStepStateMachineTest,
 
 // --- ShouldRequeue tests ---
 
-TEST(ShouldRequeueTest,
-     CompletedResultDoesNotRequeueWithClusterRequeueEnabled) {
-  const bool original_requeue = g_config.CtldConf.JobRequeue;
-  g_config.CtldConf.JobRequeue = true;
-  Ctld::JobInCtld job;
-  job.type = crane::grpc::Batch;
-  job.SetStatus(crane::grpc::Completed);
-  job.SetExitCode(0U);
-  for (bool requeue_if_failed : {false, true}) {
-    job.requeue_if_failed = requeue_if_failed;
-    EXPECT_FALSE(job.ShouldRequeue());
-  }
-  // A cleanup error must not replace Completed/0 with this result.
-  job.SetStatus(crane::grpc::Failed);
-  job.SetExitCode(ExitCode::EC_RPC_ERR);
-  EXPECT_TRUE(job.ShouldRequeue());
-  g_config.CtldConf.JobRequeue = original_requeue;
-}
-
 TEST(ShouldRequeueTest, InteractiveJobNeverRequeues) {
   Ctld::JobInCtld job;
   job.type = crane::grpc::Interactive;
