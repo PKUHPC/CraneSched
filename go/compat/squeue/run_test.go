@@ -400,6 +400,31 @@ func TestStructuredPendingArray(t *testing.T) {
 	}
 }
 
+func TestStateTableArrayBitmap(t *testing.T) {
+	j := &pb.JobInfo{JobId: 4591, ArraySpec: &pb.ArraySpec{Start: 1, End: 21, Stride: new(uint32(2)), MaxConcurrent: new(uint32(1))}}
+	for _, tc := range []struct {
+		env    map[string]string
+		wantID string
+	}{
+		{nil, "4591_[1,3,5,7,9,11,13,15,17,19,"},
+		{map[string]string{"SLURM_BITSTR_LEN": "0"}, "4591_[1,3,5,7,9,11,13,15,17,19,21]"},
+	} {
+		o, err := parse([]string{"--only-job-state"}, tc.env, io.Discard)
+		if err != nil {
+			t.Fatal(err)
+		}
+		rows, err := o.rows(&pb.QueryJobsInfoReply{JobInfoList: []*pb.JobInfo{j}})
+		if err != nil || len(rows) != 1 {
+			t.Fatalf("rows = %v, error = %v", rows, err)
+		}
+		for field, want := range map[string]string{"JobArrayId": tc.wantID, "ArrayTaskId": "1,3,5,7,9,11,13,15,17,19,21"} {
+			if got, err := rows[0].value(field, o); err != nil || got != want {
+				t.Errorf("%s = %q, %v; want %q", field, got, err, want)
+			}
+		}
+	}
+}
+
 type intermittentQueue struct {
 	pb.UnimplementedCraneCtldServer
 	calls atomic.Int32

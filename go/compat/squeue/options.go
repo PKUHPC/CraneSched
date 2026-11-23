@@ -60,6 +60,7 @@ type stepSelector struct {
 }
 
 type options struct {
+	fullBitmapID                                         bool
 	stepSelectors                                        []stepSelector
 	nodeNames                                            map[string]bool
 	formatTime                                           func(time.Time) string
@@ -89,7 +90,7 @@ func assigned(m map[string]string, k string) bool { _, ok := m[k]; return ok }
 func list(s string) []string                      { return strings.FieldsFunc(s, func(r rune) bool { return r == ',' }) }
 
 func parse(args []string, env map[string]string, diag io.Writer) (*options, error) {
-	o := &options{formatTime: utils.TimeFormatter("squeue", env["SLURM_TIME_FORMAT"], time.Now().In(utils.CommandTimezone(env)), diag), sort: env["SQUEUE_SORT"], customSort: assigned(env, "SQUEUE_SORT"), all: assigned(env, "SQUEUE_ALL"), array: assigned(env, "SQUEUE_ARRAY"), priority: assigned(env, "SQUEUE_PRIORITY"),
+	o := &options{fullBitmapID: assigned(env, "SLURM_BITSTR_LEN"), formatTime: utils.TimeFormatter("squeue", env["SLURM_TIME_FORMAT"], time.Now().In(utils.CommandTimezone(env)), diag), sort: env["SQUEUE_SORT"], customSort: assigned(env, "SQUEUE_SORT"), all: assigned(env, "SQUEUE_ALL"), array: assigned(env, "SQUEUE_ARRAY"), priority: assigned(env, "SQUEUE_PRIORITY"),
 		clusters: env["SLURM_CLUSTERS"], local: assigned(env, "SQUEUE_LOCAL"), federation: assigned(env, "SQUEUE_FEDERATION"), sibling: assigned(env, "SQUEUE_SIB") || assigned(env, "SQUEUE_SIBLING"),
 		req: &pb.QueryJobsInfoRequest{IncludePublicQueueDetails: true, Mode: pb.QueryJobsInfoMode_QUERY_JOBS_INFO_QUEUE, NumLimit: math.MaxUint32}}
 	s := utils.NewOptionScanner(args, vocabulary, assigned(env, "POSIXLY_CORRECT"))

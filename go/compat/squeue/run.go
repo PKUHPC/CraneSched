@@ -306,7 +306,12 @@ func (o *options) stateRows(reply *pb.QueryJobsInfoReply) []row {
 				rows = append(rows, row{job: j, task: new(uint32(t))})
 			}
 		} else if sel == nil || matchesJob(j, sel) {
-			rows = append(rows, row{job: j})
+			r := row{job: j}
+			if child := j.ArrayTask; child != nil {
+				// v45 state IDs qualify the task with its own job record ID.
+				r.task = &child.TaskId
+			}
+			rows = append(rows, r)
 		}
 	}
 	if len(o.req.FilterJobIds) == 0 {
@@ -411,7 +416,12 @@ func (o *options) rows(reply *pb.QueryJobsInfoReply) ([]row, error) {
 			}
 			continue
 		}
-		result = append(result, row{job: j})
+		r := row{job: j}
+		if o.onlyState && util.IsPendingArrayParent(j) {
+			// State records carry only the remaining bitmap, without a throttle.
+			r.selection = stateArrayBitmap(j.ArraySpec)
+		}
+		result = append(result, r)
 	}
 	if o.serializer != "" {
 		return result, nil

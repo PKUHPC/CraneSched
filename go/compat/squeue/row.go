@@ -172,7 +172,12 @@ func (r row) value(f string, o *options) (string, error) {
 	case "JobId":
 		return num(j.JobId), nil
 	case "JobArrayId":
-		return r.id(), nil
+		id := r.id()
+		if o.onlyState && r.selection != "" && !o.fullBitmapID && len(id) > 31 {
+			// The default state-table JOBID buffer includes the terminating NUL.
+			id = id[:31]
+		}
+		return id, nil
 	case "StepId":
 		return r.stepID(), nil
 	case "ArrayJobId":
@@ -591,6 +596,21 @@ func taskRanges(ids []uint32) string {
 		i = end + 1
 	}
 	return strings.Join(groups, ",")
+}
+
+// The state table groups adjacent set bits, but spells out separated tasks.
+func stateArrayBitmap(spec *pb.ArraySpec) string {
+	if spec.GetStride() <= 1 {
+		return util.FormatArraySpec(spec, false)
+	}
+	var b strings.Builder
+	for i := uint64(spec.Start); i <= uint64(spec.End); i += uint64(spec.GetStride()) {
+		if b.Len() > 0 {
+			b.WriteByte(',')
+		}
+		b.WriteString(strconv.FormatUint(i, 10))
+	}
+	return b.String()
 }
 
 // The job record contains a compact bitmap display. Small noncontiguous
