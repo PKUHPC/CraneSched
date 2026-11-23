@@ -214,7 +214,12 @@ CranedListenPort: 10010
 Craned:
   PingInterval: 15        # 每 15 秒 ping cranectld
   CraneCtldTimeout: 5     # cranectld 连接超时时间
+  SupervisorCompletionTimeout: 30
 ```
+
+`Craned.SupervisorCompletionTimeout` 控制 Craned 等待 Supervisor 收尾退出的时间，单位为秒，
+取正整数，默认 `30`。超时后 Craned 发送 `SIGKILL`，保留已收到的步骤终态，缺少终态时报告失败。
+启用 `RunInJob` 时，为 Job Epilog 留足时间。修改后需重启 Craned。
 
 ## 高级选项
 

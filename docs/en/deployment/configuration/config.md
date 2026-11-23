@@ -216,7 +216,14 @@ CranedListenPort: 10010
 Craned:
   PingInterval: 15        # Ping cranectld every 15 seconds
   CraneCtldTimeout: 5     # Timeout for cranectld connection
+  SupervisorCompletionTimeout: 30
 ```
+
+`Craned.SupervisorCompletionTimeout` is the time Craned waits for a completing
+Supervisor before sending `SIGKILL`. Use a positive integer in seconds (default
+`30`). Craned preserves any reported step result and reports failure if the
+result is missing. With `RunInJob`, allow enough time for the Job Epilog.
+Restart Craned after changing this setting.
 
 ## Advanced Options
 
