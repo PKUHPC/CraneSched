@@ -102,7 +102,7 @@ jobs:
           HTTPS_PROXY: ${{ secrets.HTTPS_PROXY }}
         run: bash .ci-tools/.github/ci/build_product.sh
 
-      - name: Prepare validation assets and push the Test image
+      - name: Prepare full-suite assets and push the Test image
         id: prepare
         env:
           CI_SUITE_REVISION: ${{ steps.suite.outputs.harness_sha }}
@@ -110,7 +110,7 @@ jobs:
         run: python3 /etc/ci-launcher/launch.py --prepare
 
   integration:
-    name: OOM integration tests
+    name: Full integration tests
     needs: build
     if: ${{ !cancelled() && needs.build.result == 'success' }}
     runs-on: crane-ci
@@ -131,7 +131,7 @@ jobs:
       CI_SUITE_REVISION: ${{ needs.build.outputs.harness_sha }}
       CI_SHARD_COUNT: ${{ inputs.integration_shards }}
     steps:
-      - name: Run OOM validation and reclaim its environment
+      - name: Run all prepared tests and reclaim their environments
         id: integration
         run: python3 /etc/ci-launcher/launch.py --integration
 
