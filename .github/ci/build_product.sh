@@ -78,6 +78,11 @@ make -C go test
 HTTPS_PROXY="$download_proxy" cmake --preset ci-debug
 cmake --build --preset ci-debug --target crane_unit_tests --parallel "${BUILD_JOBS:-6}"
 ctest --test-dir cmake-build-ci-debug --output-on-failure
+# Build the opt-in kernel fixture for the isolated integration environment.
+cmake --preset ci-debug -DCRANE_ENABLE_KERNEL_TESTS=ON
+cmake --build --preset ci-debug --target oom_cgroup_integration_test --parallel "${BUILD_JOBS:-6}"
+mkdir -p "$artifact_dir/kernel"
+cp cmake-build-ci-debug/test/Craned/oom_cgroup_integration_test "$artifact_dir/kernel/"
 cmake --build --preset ci-debug --parallel "${BUILD_JOBS:-6}"
 
 make -C go clean
