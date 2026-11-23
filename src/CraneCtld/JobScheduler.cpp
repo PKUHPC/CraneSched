@@ -2578,8 +2578,8 @@ void JobScheduler::CancelDeadlineJobCb_() {
   m_pending_job_map_mtx_.Lock();
   while (m_job_deadline_timer_queue_.try_dequeue(job_id)) {
     if (m_array_manager_->IsRegisteredParent(job_id)) {
-      EnqueueArrayParentTerminationNoLock_(
-          job_id, crane::grpc::Deadline, ExitCode::EC_REACHED_DEADLINE, false);
+      CancelArrayParentNoLock_(job_id, crane::grpc::Deadline,
+                               ExitCode::EC_REACHED_DEADLINE, false);
       continue;
     }
 
@@ -4092,9 +4092,9 @@ void JobScheduler::CancelRunningJobNoLock_(
   TerminateRunningStepNoLock_(primary_step, terminate_source);
 }
 
-void JobScheduler::EnqueueArrayParentTerminationNoLock_(
+std::vector<job_id_t> JobScheduler::CancelArrayParentNoLock_(
     job_id_t parent_job_id, crane::grpc::JobStatus status, uint32_t exit_code,
-    bool terminate_running_children) {
+    bool terminate_children) {
   m_pending_job_map_mtx_.AssertHeld();
   // Child completion may overtake the queued parent work. Record the result
   // under the same lock before publishing it; the queue carries only the work.
@@ -4102,12 +4102,9 @@ void JobScheduler::EnqueueArrayParentTerminationNoLock_(
                                                exit_code);
   m_cancel_job_queue_.enqueue(CancelArrayParentQueueElem{
       .parent_job_id = parent_job_id,
-      .terminate_running_children = terminate_running_children});
-}
+      .terminate_running_children = terminate_children});
+  if (!terminate_children) return {};
 
-std::vector<job_id_t> JobScheduler::CancelPendingArrayChildrenNoLock_(
-    job_id_t parent_job_id) {
-  m_pending_job_map_mtx_.AssertHeld();
   auto child_ids = m_array_manager_->RunningChildJobIdsForParent(parent_job_id);
   for (job_id_t child_id : child_ids) {
     // Requeued children retain their array membership while waiting for a
@@ -4254,17 +4251,12 @@ crane::grpc::CancelJobReply JobScheduler::CancelPendingOrRunningJob(
       add_cancelled(job_id);
       not_found_job_ids.erase(job_id);
 
-      bool terminate_running_children = has_explicit_job_filter;
-      EnqueueArrayParentTerminationNoLock_(job_id, crane::grpc::Cancelled,
-                                           ExitCode::EC_TERMINATED,
-                                           terminate_running_children);
-      if (terminate_running_children) {
-        for (job_id_t child_id : CancelPendingArrayChildrenNoLock_(job_id)) {
-          // The parent request owns Pending and running child cancellation.
-          // Avoid cancelling them twice.
-          job_steps.erase(child_id);
-          not_found_job_ids.erase(child_id);
-        }
+      for (job_id_t child_id : CancelArrayParentNoLock_(
+               job_id, crane::grpc::Cancelled, ExitCode::EC_TERMINATED,
+               has_explicit_job_filter)) {
+        // The parent request owns child cancellation; deduplicate selectors.
+        job_steps.erase(child_id);
+        not_found_job_ids.erase(child_id);
       }
       m_job_deadline_timer_del_queue_.enqueue(job_id);
       m_job_deadline_timer_del_async_handle_->send();
