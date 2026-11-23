@@ -31,51 +31,6 @@
 
 namespace {
 
-TEST(JobSignalOptionsTest, ValidatesSubmittedSignals) {
-  using crane::grpc::Signal;
-  struct TestCase {
-    int number;
-    uint32_t seconds;
-    Signal::SignalFlag flag;
-    crane::grpc::JobType type;
-    const char* error;
-  };
-  const TestCase cases[] = {
-      {0, 0, Signal::NONE, crane::grpc::Batch, "number"},
-      {-1, 0, Signal::NONE, crane::grpc::Batch, "number"},
-      {999, 3, Signal::NONE, crane::grpc::Batch, "number"},
-      {32, 0, Signal::NONE, crane::grpc::Batch, "number"},
-      {33, 0, Signal::NONE, crane::grpc::Batch, "number"},
-      {10, 65536, Signal::RESERVATION_OVERLAP, crane::grpc::Interactive,
-       "time"},
-      {10, 0, static_cast<Signal::SignalFlag>(3), crane::grpc::Batch, "flag"},
-      {10, 60, Signal::BATCH_ONLY, crane::grpc::Interactive, "B:"},
-      {17, 0, Signal::BATCH_ONLY, crane::grpc::Batch, nullptr},
-      {34, 65535, Signal::RESERVATION_OVERLAP, crane::grpc::Interactive,
-       nullptr},
-      {64, 60, Signal::NONE, crane::grpc::Batch, nullptr},
-  };
-  for (const auto& test : cases) {
-    crane::grpc::JobToCtld request;
-    request.set_type(test.type);
-    auto* signal = request.add_signals();
-    signal->set_signal_number(test.number);
-    signal->set_signal_time(test.seconds);
-    signal->set_signal_flag(test.flag);
-    SCOPED_TRACE(request.ShortDebugString());
-    Ctld::JobInCtld job;
-    job.SetFieldsByJobToCtld(request);
-    auto valid = job.CheckSignalOptions();
-    if (test.error) {
-      ASSERT_FALSE(valid);
-      EXPECT_NE(valid.error().find(test.error), std::string::npos);
-    } else {
-      EXPECT_TRUE(valid);
-    }
-  }
-  EXPECT_TRUE(Ctld::JobInCtld{}.CheckSignalOptions());
-}
-
 class ControllerHookTest : public ::testing::Test {
  protected:
   void SetUp() override {

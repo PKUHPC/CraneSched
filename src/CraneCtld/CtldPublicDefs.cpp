@@ -2109,31 +2109,6 @@ void JobInCtld::TriggerTerminalDependencyEvents(absl::Time end_time) {
                           exit_code != 0 ? end_time : absl::InfiniteFuture());
 }
 
-std::expected<void, std::string> JobInCtld::CheckSignalOptions() const {
-  using crane::grpc::Signal;
-  for (const auto& signal : job_to_ctld.signals()) {
-    const auto number = signal.signal_number();
-    // Linux application signals. glibc reserves 32 and 33 for NPTL.
-    if (number < 1 || number > 64 || number == 32 || number == 33)
-      return std::unexpected(fmt::format(
-          "Invalid --signal number {} (expected 1-31 or 34-64)", number));
-
-    if (signal.signal_time() > 65535)
-      return std::unexpected(
-          fmt::format("Invalid --signal time {} (expected 0-65535 seconds)",
-                      signal.signal_time()));
-
-    if (!Signal::SignalFlag_IsValid(signal.signal_flag()))
-      return std::unexpected(fmt::format(
-          "Invalid --signal flag {}", static_cast<int>(signal.signal_flag())));
-
-    if (IsInteractive() && signal.signal_flag() == Signal::BATCH_ONLY)
-      return std::unexpected(
-          "Invalid --signal: B: is only supported for batch submissions");
-  }
-  return {};
-}
-
 void JobInCtld::SetFieldsByJobToCtld(crane::grpc::JobToCtld const& val) {
   job_to_ctld = val;
 

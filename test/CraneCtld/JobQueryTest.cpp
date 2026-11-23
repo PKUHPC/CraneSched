@@ -2,6 +2,7 @@
 // Changsha Institute for Computing and Digital Economy
 // SPDX-License-Identifier: AGPL-3.0-or-later
 
+#include <absl/cleanup/cleanup.h>
 #include <gtest/gtest.h>
 
 #include <filesystem>
@@ -26,23 +27,101 @@ using Ctld::BuildJobQueryReply;
 using Ctld::ProjectJobForQuery;
 constexpr char kPrivate[] = "private-query-test-marker";
 
-TEST(JobSubmission, RejectsInvalidSignalBeforeEnqueue) {
-  Ctld::JobScheduler scheduler;
-  crane::grpc::JobToCtld request;
-  request.set_type(crane::grpc::Batch);
-  request.set_uid(std::numeric_limits<uid_t>::max());
-  request.add_gids(::getgid());
-  request.add_signals()->set_signal_number(999);
-  auto job = std::make_unique<Ctld::JobInCtld>();
-  job->SetFieldsByJobToCtld(request);
+TEST(JobSignalOptionsTest, ValidatesSubmittedSignals) {
+  using crane::grpc::Signal;
+  struct TestCase {
+    int number;
+    uint32_t seconds;
+    Signal::SignalFlag flag;
+    crane::grpc::JobType type;
+    const char* error;
+  };
+  const TestCase cases[] = {
+      {0, 0, Signal::NONE, crane::grpc::Batch, "number"},
+      {-1, 0, Signal::NONE, crane::grpc::Batch, "number"},
+      {999, 3, Signal::NONE, crane::grpc::Batch, "number"},
+      {32, 0, Signal::NONE, crane::grpc::Batch, "number"},
+      {33, 0, Signal::NONE, crane::grpc::Batch, "number"},
+      {10, 65536, Signal::RESERVATION_OVERLAP, crane::grpc::Interactive,
+       "time"},
+      {10, 0, static_cast<Signal::SignalFlag>(3), crane::grpc::Batch, "flag"},
+      {10, 60, Signal::BATCH_ONLY, crane::grpc::Interactive, "B:"},
+      {17, 0, Signal::BATCH_ONLY, crane::grpc::Batch, nullptr},
+      {34, 65535, Signal::RESERVATION_OVERLAP, crane::grpc::Interactive,
+       nullptr},
+      {64, 60, Signal::NONE, crane::grpc::Batch, nullptr},
+  };
+  for (const auto& test : cases) {
+    crane::grpc::JobToCtld request;
+    request.set_type(test.type);
+    auto* signal = request.add_signals();
+    signal->set_signal_number(test.number);
+    signal->set_signal_time(test.seconds);
+    signal->set_signal_flag(test.flag);
+    SCOPED_TRACE(request.ShortDebugString());
+    auto error = Ctld::ValidateJobSignals(
+        request, test.type != crane::grpc::Interactive);
+    if (test.error) {
+      ASSERT_TRUE(error);
+      EXPECT_NE(error->find(test.error), std::string::npos);
+    } else {
+      EXPECT_FALSE(error);
+    }
+  }
+  EXPECT_FALSE(Ctld::ValidateJobSignals(crane::grpc::JobToCtld{}, false));
+}
 
-  auto result = scheduler.SubmitJobToScheduler(std::move(job));
+TEST(JobSubmission, RpcRejectsInvalidSignalsBeforeAdmission) {
+  ASSERT_EQ(g_job_scheduler, nullptr);
+  const bool was_ready = g_runtime_status.srv_ready.exchange(true);
+  absl::Cleanup reset = [was_ready] {
+    g_runtime_status.srv_ready.store(was_ready);
+    g_job_scheduler.reset();
+  };
+  g_job_scheduler = std::make_unique<Ctld::JobScheduler>();
+  Ctld::CraneCtldServiceImpl service(nullptr);
 
-  ASSERT_FALSE(result.has_value());
-  EXPECT_EQ(result.error().code(), CraneErrCode::ERR_INVALID_PARAM);
-  EXPECT_NE(result.error().description().find("Invalid --signal number 999"),
+  crane::grpc::SubmitBatchJobRequest request;
+  auto* job = request.mutable_job();
+  job->set_type(crane::grpc::Batch);
+  job->set_uid(std::numeric_limits<uid_t>::max());
+  job->add_gids(::getgid());
+  job->add_signals()->set_signal_number(999);
+
+  grpc::ServerContext context;
+  crane::grpc::SubmitBatchJobReply reply;
+  ASSERT_TRUE(service.SubmitBatchJob(&context, &request, &reply).ok());
+  EXPECT_FALSE(reply.ok());
+  EXPECT_EQ(reply.code(), CraneErrCode::ERR_INVALID_PARAM);
+  EXPECT_NE(reply.reason().find("Invalid --signal number 999"),
             std::string::npos);
-  EXPECT_EQ(scheduler.PendingQueueSize(), 0);
+
+  crane::grpc::SubmitBatchJobsRequest repeated;
+  *repeated.mutable_job() = *job;
+  repeated.set_count(2);
+  grpc::ServerContext repeated_context;
+  crane::grpc::SubmitBatchJobsReply repeated_reply;
+  ASSERT_TRUE(
+      service.SubmitBatchJobs(&repeated_context, &repeated, &repeated_reply)
+          .ok());
+  ASSERT_EQ(repeated_reply.job_id_list_size(), 2);
+  ASSERT_EQ(repeated_reply.code_list_size(), 2);
+  for (int i = 0; i < 2; ++i) {
+    EXPECT_EQ(repeated_reply.job_id_list(i), 0);
+    EXPECT_EQ(repeated_reply.code_list(i), CraneErrCode::ERR_INVALID_PARAM);
+  }
+
+  repeated.set_count(1);
+  repeated.mutable_job()->mutable_array_spec();
+  grpc::ServerContext array_context;
+  crane::grpc::SubmitBatchJobsReply array_reply;
+  ASSERT_TRUE(
+      service.SubmitBatchJobs(&array_context, &repeated, &array_reply).ok());
+  ASSERT_EQ(array_reply.job_id_list_size(), 1);
+  ASSERT_EQ(array_reply.code_list_size(), 1);
+  EXPECT_EQ(array_reply.job_id_list(0), 0);
+  EXPECT_EQ(array_reply.code_list(0), CraneErrCode::ERR_INVALID_PARAM);
+  EXPECT_EQ(g_job_scheduler->PendingQueueSize(), 0);
 }
 
 #ifdef CRANE_HAVE_UNQLITE
