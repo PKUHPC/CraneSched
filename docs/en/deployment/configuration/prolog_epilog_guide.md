@@ -97,14 +97,17 @@ behavior as setting no flags. Crane always creates a daemon step for each job;
 with PAM configured, SSH and other external processes can be adopted into the
 daemon step's user-process cgroup. These capabilities do not depend on this flag.
 `Contain` does not change when or where Prolog/Epilog runs and does not migrate
-Prolog into the job cgroup. Use `RunInJob` to execute these scripts within the job.
+Prolog into the job cgroup. Use `RunInJob` to execute these scripts through the
+daemon step's supervisor.
 
 [//]: # (### **ForceRequeueOnFail**)
 
 [//]: # (Requeue batch jobs that fail due to Prolog errors, even if not requested.)
 
 ### **RunInJob**
-Runs Prolog/Epilog through the daemon step's csupervisor, within the job cgroup.
+Runs Prolog/Epilog through the daemon step's csupervisor. Prolog startup is not
+synchronized with migration of the supervisor into the job cgroup, so Prolog
+is not guaranteed to run within that cgroup.
 Implies **Contain**.
 
 ### **Serial**

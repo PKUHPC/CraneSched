@@ -109,7 +109,8 @@ JobLifecycleHook:
   Crane 始终为作业创建 daemon step；配置 PAM 后，SSH 等外部进程可被接管到
   daemon step 的用户进程 cgroup，这些能力不依赖此标志。
   `Contain` 不改变 Prolog/Epilog 的执行时机或执行位置，也不会将 Prolog
-  迁移到作业 cgroup。需要在作业内执行这些脚本时，请使用 `RunInJob`。
+  迁移到作业 cgroup。需要由 daemon step 的 supervisor 执行这些脚本时，
+  请使用 `RunInJob`。
 
 [//]: # (- **ForceRequeueOnFail**  )
 
@@ -117,8 +118,8 @@ JobLifecycleHook:
 
 - **RunInJob**  
   使 Prolog/Epilog 由 daemon step 的 csupervisor 执行。
-  这将把其包含为作业的进程之一。
-  如果配置了 cgroup，则会被包含在 cgroup 中。
+  Prolog 的启动与 supervisor 迁移到作业 cgroup 之间没有同步，
+  因此不能保证 Prolog 在该 cgroup 中执行。
   设置 RunInJob 标志会隐式地设置 Contain 标志。
 
 - **Serial**  
