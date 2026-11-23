@@ -1604,18 +1604,23 @@ void CopyTime(const Time& source, Time* target) {
   target->set_nanos(source.nanos());
 }
 
+void CopyGres(const crane::grpc::GresMap& source,
+              crane::grpc::GresMap* target) {
+  auto* devices = target->mutable_name_gres_map();
+  for (const auto& [name, count] : source.name_gres_map()) {
+    auto& device = (*devices)[name];
+    device.set_total(count.total());
+    *device.mutable_specified() = count.specified();
+  }
+}
+
 void CopyResource(const crane::grpc::ResourceView& source,
                   crane::grpc::ResourceView* target) {
   target->set_cpu_count(source.cpu_count());
   target->set_memory_bytes(source.memory_bytes());
   target->set_memory_sw_bytes(source.memory_sw_bytes());
   if (source.has_gres_map()) {
-    auto* devices = target->mutable_gres_map()->mutable_name_gres_map();
-    for (const auto& [name, count] : source.gres_map().name_gres_map()) {
-      auto& device = (*devices)[name];
-      device.set_total(count.total());
-      *device.mutable_specified() = count.specified();
-    }
+    CopyGres(source.gres_map(), target->mutable_gres_map());
   }
 }
 
@@ -1665,6 +1670,8 @@ crane::grpc::StepInfo ProjectStep(const crane::grpc::StepInfo& source,
   result.set_held(source.held());
   result.set_status(source.status());
   result.set_exit_code(source.exit_code());
+  if (source.has_gres_per_node())
+    CopyGres(source.gres_per_node(), result.mutable_gres_per_node());
   result.set_craned_list(source.craned_list());
   *result.mutable_execution_node() = source.execution_node();
   result.set_query_visibility(crane::grpc::QUERY_VISIBILITY_PUBLIC);
@@ -1731,6 +1738,15 @@ crane::grpc::JobInfo ProjectJobForQuery(
     *result.mutable_execution_node() = source.execution_node();
     result.set_exclusive(source.exclusive());
     result.set_submit_hostname(source.submit_hostname());
+    if (source.has_max_nodes()) result.set_max_nodes(source.max_nodes());
+    if (source.has_tasks_per_node())
+      result.set_tasks_per_node(source.tasks_per_node());
+    if (source.has_memory_per_cpu())
+      result.set_memory_per_cpu(source.memory_per_cpu());
+    if (source.has_gres_per_node())
+      CopyGres(source.gres_per_node(), result.mutable_gres_per_node());
+    *result.mutable_allocated_licenses() = source.allocated_licenses();
+    *result.mutable_scheduled_nodes() = source.scheduled_nodes();
     if (source.has_array_spec()) {
       const auto& spec = source.array_spec();
       auto* output = result.mutable_array_spec();

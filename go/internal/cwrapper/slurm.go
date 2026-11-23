@@ -27,7 +27,6 @@ import (
 	"github.com/PKUHPC/CraneSched/go/internal/ccancel"
 	"github.com/PKUHPC/CraneSched/go/internal/ccontrol"
 	"github.com/PKUHPC/CraneSched/go/internal/ceff"
-	"github.com/PKUHPC/CraneSched/go/internal/cqueue"
 	"github.com/PKUHPC/CraneSched/go/internal/creport"
 	"github.com/PKUHPC/CraneSched/go/internal/crun"
 	"github.com/PKUHPC/CraneSched/go/internal/util"
@@ -83,7 +82,6 @@ func (w SlurmWrapper) SubCommands() []*cobra.Command {
 		scancel(),
 		scontrol(),
 		seff(),
-		squeue(),
 		sreport(),
 		srun(),
 	}
@@ -92,7 +90,7 @@ func (w SlurmWrapper) SubCommands() []*cobra.Command {
 func (w SlurmWrapper) HasCommand(cmd string) bool {
 	return slices.Contains([]string{
 		"sacct", "sacctmgr", "salloc", "sbatch", "scancel",
-		"scontrol", "seff", "squeue", "sreport", "srun",
+		"scontrol", "seff", "sreport", "srun",
 	}, cmd)
 }
 
@@ -1021,197 +1019,6 @@ func seff() *cobra.Command {
 	}
 
 	return cmd
-}
-
-func squeue() *cobra.Command {
-	cmd := &cobra.Command{
-		Use:                "squeue",
-		Short:              "View job queue information",
-		Long:               "",
-		GroupID:            "slurm",
-		DisableFlagParsing: true,
-		Run: func(cmd *cobra.Command, args []string) {
-			if slices.Contains(args, "--help") {
-				if err := cmd.Help(); err != nil {
-					log.Error(err)
-				}
-				return
-			}
-
-			cqueue.RootCmd.Use = "squeue [flags]"
-			// Slurm uses -V for version and -v for verbose.
-			cqueue.RootCmd.Flags().BoolP("version", "V", false, "version for squeue")
-			convertedArgs := make([]string, 0, len(args))
-			for i := 0; i < len(args); i++ {
-				arg := args[i]
-				switch {
-				case isSlurmVerboseArg(arg) || arg == "--verbose":
-					log.Warning("The feature --verbose/-v is not yet supported by Crane, the use is ignored.")
-				case arg == "-h":
-					convertedArgs = append(convertedArgs, "-N")
-				case arg == "--jobs":
-					convertedArgs = append(convertedArgs, "--job")
-				case arg == "--states":
-					convertedArgs = append(convertedArgs, "--state")
-				case arg == "-o" || arg == "--format":
-					convertedArgs = append(convertedArgs, arg)
-					if i+1 < len(args) {
-						converted, err := convertSqueueFormat(args[i+1])
-						if err != nil {
-							log.Errorf("squeue: error: %v", err)
-							os.Exit(util.ErrorCmdArg)
-						}
-						convertedArgs = append(convertedArgs, converted)
-						i++
-					}
-				case strings.HasPrefix(arg, "--format="):
-					converted, err := convertSqueueFormat(strings.TrimPrefix(arg, "--format="))
-					if err != nil {
-						log.Errorf("squeue: error: %v", err)
-						os.Exit(util.ErrorCmdArg)
-					}
-					convertedArgs = append(convertedArgs, "--format="+converted)
-				default:
-					convertedArgs = append(convertedArgs, arg)
-				}
-			}
-			cqueue.RootCmd.SetArgs(convertedArgs)
-			err := cqueue.RootCmd.Execute()
-			if err != nil {
-				exitWithCommandError("squeue", err)
-			} else {
-				os.Exit(util.ErrorSuccess)
-			}
-		},
-	}
-
-	addConfigPathFlag(cmd, &cqueue.FlagConfigFilePath)
-	// As --noheader will use -h, we need to add the help flag manually
-	cmd.Flags().BoolP("help", "", false, "Help for this command.")
-	cmd.Flags().BoolVarP(&cqueue.FlagStartTime, "start", "S", false,
-		"Report the expected start time and resources to be allocated for pending jobs in order of \nincreasing start time.")
-	cmd.Flags().StringVarP(&cqueue.FlagFilterPartitions, "partition", "p", "",
-		"Specify the partitions of the jobs or steps to view. Accepts a comma separated list of \npartition names.")
-	cmd.Flags().StringVarP(&cqueue.FlagFilterJobIDs, "jobs", "j", "",
-		"Specify a comma separated list of job IDs to display (jobid or jobid_arraytaskid). Defaults to all jobs. ")
-	cmd.Flags().StringVarP(&cqueue.FlagFilterJobNames, "name", "n", "",
-		"Request jobs or job steps having one of the specified names. The list consists of a comma \nseparated list of job names.")
-	cmd.Flags().StringVarP(&cqueue.FlagFilterQos, "qos", "q", "",
-		"Specify the qos(s) of the jobs or steps to view. Accepts a comma separated list of qos's.")
-	cmd.Flags().StringVarP(&cqueue.FlagFilterUsers, "user", "u", "",
-		"Request jobs or job steps from a comma separated list of users.")
-	cmd.Flags().StringVarP(&cqueue.FlagFilterAccounts, "account", "A", "",
-		"Specify the accounts of the jobs to view. Accepts a comma separated list of account names.")
-	cmd.Flags().StringVarP(&cqueue.FlagFilterReservations, "reservation", "R", "",
-		"Specify the reservations of the jobs to view. Accepts a comma separated list of reservation names.")
-	cmd.Flags().Uint64VarP(&cqueue.FlagIterate, "iterate", "i", 0,
-		"Repeatedly gather and report the requested information at the interval specified (in seconds). \nBy default, prints a time stamp with the header.")
-	cmd.Flags().StringVarP(&cqueue.FlagFormat, "format", "o", "",
-		`Specify the output format.
-	Fields are identified by a percent sign (%) followed by a character or string. 
-	Use a dot (.) and a number between % and the format character or string to specify a minimum width for the field.
-	
-Supported Slurm format identifiers:
-	%a/%Account            - Display the account associated with the job.
-	%C/%ReqCpus            - Display the cpus requested by the job.
-	%D/%NodeNum            - Display the number of nodes requested by the job.
-	%i/%JobID              - Display the logical job ID.
-	                          Materialized array tasks use jobId_arrayTaskId; active array parents use jobId_[range%maxConcurrent] when limited.
-	%j/%Name               - Display the name of the job.
-	%k/%Comment            - Display the comment of the job.
-	%l/%TimeLimit          - Display the time limit for the job.
-	%M/%ElapsedTime        - Display the elapsed time from the start of the job.
-	%m/%ReqMemPerNode      - Display the requested memory per node.
-	%N/%NodeList           - Display the nodes allocated to the job.
-	%n/%ReqNodes           - Display the requested nodes.
-	%o/%Command            - Display the command line of the job.
-	%P/%Partition          - Display the partition the job is running in.
-	%p/%Priority           - Display the priority of the job.
-	%q/%QoS                - Display the Quality of Service level for the job.
-	%r/%Reason             - Display the pending reason.
-	%S/%StartTime          - Display the start time of the job.
-	%t/%StateCompact       - Display the compact state of the job.
-	%T/%State              - Display the full state of the job.
-	%u/%User               - Display the user who submitted the job.
-	%U/%Uid                - Display the uid of the job.
-	%V/%SubmitTime         - Display the submission time of the job.
-	%v/%Reservation        - Display the reservation associated with the job.
-
-Supported Crane extension identifiers (long form only):
-	%AllocCpus             - Display the cpus allocated to the job.
-	%AllocMemPerNode       - Display the memory allocated per node.
-	%Deadline              - Display the deadline time of the job.
-	%ExcludeNodes          - Display the excluded nodes.
-	%Exclusive             - Display the exclusive status of the job.
-	%Held                  - Display the hold state of the job.
-	%JobType               - Display the job type.
-	%ReqCpuPerTask         - Display the requested cpus per task.
-	%StepId                - Display the step ID (for steps only).
-	%Wckey                 - Display the wckey of the job.
-Each format specifier or string can be modified with a width specifier (e.g., "%.5j").
-If the width is specified, the field will be formatted to at least that width. 
-If the format is invalid or unrecognized, the program will terminate with an error message.
-
-Example: --format "%.5i %.20j %t" would output the job's ID with a minimum width of 5,
-         Name with a minimum width of 20, and the State.
-`)
-	return cmd
-}
-
-var squeueFormatSpecRegex = regexp.MustCompile(`%(\.?\d*)([a-zA-Z]+)`)
-
-// Maps Slurm squeue format specifiers to cqueue equivalents.
-var squeueFormatSpecMapping = map[string]string{
-	"a": "a",
-	"C": "C",
-	"D": "N",
-	"i": "j",
-	"j": "n",
-	"k": "k",
-	"l": "l",
-	"M": "e",
-	"m": "M",
-	"N": "L",
-	"n": "r",
-	"o": "o",
-	"P": "P",
-	"p": "p",
-	"q": "q",
-	"r": "R",
-	"S": "S",
-	"T": "state",
-	"t": "statecompact",
-	"u": "u",
-	"U": "U",
-	"V": "s",
-	"v": "v",
-}
-
-// convertSqueueFormat rewrites the Slurm single-letter format specifiers in a
-// format string to their cqueue equivalents. Multi-letter (cqueue-style)
-// specifiers are passed through unchanged. Slurm specifiers that have no
-// cqueue field with the same meaning (e.g. %L time left, %e end time) are
-// rejected instead of silently displaying different data.
-func convertSqueueFormat(format string) (string, error) {
-	var invalid string
-	converted := squeueFormatSpecRegex.ReplaceAllStringFunc(format, func(spec string) string {
-		sub := squeueFormatSpecRegex.FindStringSubmatch(spec)
-		if len(sub[2]) > 1 {
-			return spec
-		}
-		mapped, ok := squeueFormatSpecMapping[sub[2]]
-		if !ok {
-			if invalid == "" {
-				invalid = sub[2]
-			}
-			return spec
-		}
-		return "%" + sub[1] + mapped
-	})
-	if invalid != "" {
-		return "", fmt.Errorf("format specifier %%%s is not supported by cwrapper", invalid)
-	}
-	return converted, nil
 }
 
 func sreport() *cobra.Command {

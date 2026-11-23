@@ -236,7 +236,7 @@ After generating the packages, follow the [Frontend Components Deployment Guide]
 
 ## Slurm-compatible commands
 
-The optional `cranesched-slurm-compat` RPM/DEB installs `sinfo`. Install this package only where the Crane implementation of the Slurm command name is required. It is separate from `cranesched-client`. All packages are built from the same product version.
+The optional `cranesched-slurm-compat` RPM/DEB installs `sinfo` and `squeue`. Install this package only where the Crane implementation of the Slurm command name is required. It is separate from `cranesched-client`. All packages are built from the same product version.
 
 Service templates are read from the root `etc/`; CNI samples come from `etc/cni/` and package licenses from the root `LICENSE`. Run GoReleaser from `go/`; outputs remain in `go/build/dist/`. Official plugin YAML examples are in `etc/plugins/` and are supplied as deployment examples rather than automatically installed configuration.
 

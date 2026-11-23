@@ -143,12 +143,7 @@ func (p *JobIDsProcessor) Process(req *protos.QueryJobsInfoRequest) error {
 	}
 	for _, selector := range selectors {
 		if len(selector.Steps) > 0 {
-			commandName := "cqueue"
-			if util.IsSlurmOutputMode() {
-				commandName = "squeue"
-			}
-			return util.NewCraneErr(util.ErrorCmdArg, fmt.Sprintf(
-				"Step selector is unsupported in %s --job, use --step for step queries.", commandName))
+			return util.NewCraneErr(util.ErrorCmdArg, "Step selector is unsupported in cqueue --job, use --step for step queries.")
 		}
 	}
 

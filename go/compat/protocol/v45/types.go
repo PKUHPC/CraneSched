@@ -13,7 +13,7 @@ type Int32 uint64
 // SchemaFormat annotates the wire schema without narrowing resource counts.
 func (Int32) SchemaFormat() string { return "int32" }
 
-type Number[T ~uint64] struct {
+type Number[T ~uint64 | float64] struct {
 	Set      bool `json:"set" description:"True if number has been set; False if number is unset"`
 	Infinite bool `json:"infinite" description:"True if number has been set to infinite; \"set\" and \"number\" will be ignored"`
 	Number   T    `json:"number" description:"If \"set\" is True the number will be set with value; otherwise ignore number contents"`
@@ -27,6 +27,9 @@ func (n Number[T]) ComplexValue() any {
 	}
 	if !n.Set {
 		return nil
+	}
+	if v, ok := any(n.Number).(float64); ok {
+		return v
 	}
 	return uint64(n.Number)
 }

@@ -267,6 +267,13 @@ JobInfo MakeJob(uint32_t id = 71, uint32_t owner = 1001,
   condition->set_job_id(69);
   condition->set_type(crane::grpc::AFTER_OK);
   condition->set_delay_seconds(60);
+  job.mutable_io_meta()->set_output_file_pattern(kPrivate);
+  job.set_max_nodes(4);
+  job.set_tasks_per_node(2);
+  job.set_memory_per_cpu(128);
+  job.add_scheduled_nodes("node2");
+  *job.mutable_gres_per_node() = res->gres_map();
+  (*job.mutable_allocated_licenses())["test-license"] = 2;
   job.set_cmd_line(kPrivate);
   job.set_cwd(kPrivate);
   job.set_extra_attr(kPrivate);
@@ -297,6 +304,8 @@ JobInfo MakeJob(uint32_t id = 71, uint32_t owner = 1001,
   *step->mutable_submit_time() = job.submit_time();
   *step->mutable_elapsed_time() = job.elapsed_time();
   *step->mutable_deadline_time() = job.deadline_time();
+  *step->mutable_io_meta() = job.io_meta();
+  *step->mutable_gres_per_node() = job.gres_per_node();
   step->set_cmd_line(kPrivate);
   step->set_cwd(kPrivate);
   step->set_extra_attr(kPrivate);
@@ -322,11 +331,13 @@ TEST(JobQuery, PublicViewPreservesEveryKnownSummaryField) {
   expected.clear_env();
   expected.clear_extra_attr();
   expected.clear_pod_meta();
+  expected.clear_io_meta();
   expected.set_query_visibility(QUERY_VISIBILITY_PUBLIC);
   for (auto& step : *expected.mutable_step_info_list()) {
     step.clear_cmd_line();
     step.clear_cwd();
     step.clear_extra_attr();
+    step.clear_io_meta();
     step.mutable_container_meta()->Clear();
     step.set_query_visibility(QUERY_VISIBILITY_PUBLIC);
   }
@@ -393,6 +404,8 @@ TEST(JobQuery, UnknownNestedFieldsCannotLeakOrAlterSource) {
   AddUnknown(&(*source.mutable_req_total_res_view()
                     ->mutable_gres_map()
                     ->mutable_name_gres_map())["gpu"]);
+  AddUnknown(source.mutable_gres_per_node());
+  AddUnknown(source.mutable_step_info_list(0)->mutable_gres_per_node());
   AddUnknown(source.mutable_array_spec());
   AddUnknown(source.mutable_array_task());
   AddUnknown(source.mutable_dependency_status()->mutable_pending(0));
@@ -605,6 +618,13 @@ TEST(JobQuery, QuerySchemaRequiresExplicitFieldClassification) {
                                        "requeue_if_failed",
                                        "array_spec",
                                        "array_task",
+                                       "io_meta",
+                                       "max_nodes",
+                                       "tasks_per_node",
+                                       "memory_per_cpu",
+                                       "gres_per_node",
+                                       "scheduled_nodes",
+                                       "allocated_licenses",
                                        "query_visibility"});
   ExpectFields(crane::grpc::StepInfo::descriptor(), {"type",
                                                      "step_type",
@@ -634,6 +654,8 @@ TEST(JobQuery, QuerySchemaRequiresExplicitFieldClassification) {
                                                      "execution_node",
                                                      "allocated_res_view",
                                                      "deadline_time",
+                                                     "io_meta",
+                                                     "gres_per_node",
                                                      "query_visibility"});
   ExpectFields(crane::grpc::ResourceView::descriptor(),
                {"cpu_count", "memory_bytes", "memory_sw_bytes", "gres_map"});

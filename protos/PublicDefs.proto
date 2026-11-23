@@ -712,6 +712,13 @@ message JobInfo {
   ArraySpec array_spec = 50;
   ArrayTaskIdentity array_task = 51;
   QueryVisibility query_visibility = 52;
+  IoMeta io_meta = 53;
+  optional uint32 max_nodes = 54;
+  optional uint32 tasks_per_node = 55;
+  optional uint64 memory_per_cpu = 56;
+  GresMap gres_per_node = 57;
+  repeated string scheduled_nodes = 58;
+  map<string, uint32> allocated_licenses = 59;
 }
 
 message StepInfo {
@@ -761,6 +768,8 @@ message StepInfo {
   ResourceView allocated_res_view = 40;
   google.protobuf.Timestamp deadline_time = 41;
   QueryVisibility query_visibility = 42;
+  IoMeta io_meta = 43;
+  GresMap gres_per_node = 44;
 }
 
 // Physical CPU topology of a node or job topology constraint.

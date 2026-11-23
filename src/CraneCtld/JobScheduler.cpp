@@ -1506,6 +1506,7 @@ void JobScheduler::ScheduleThread_() {
       for (auto& it : m_pending_job_map_) {
         const auto& job = it.second;
 
+        job->scheduled_nodes.clear();
         if (job->Held()) {
           job->pending_reason = job->HoldReason();
           continue;
@@ -1643,6 +1644,8 @@ void JobScheduler::ScheduleThread_() {
         if (!job_in_scheduler->materializes_array_child ||
             !job->IsArrayParentStarted()) {
           job->SetStartTime(job_in_scheduler->start_time);
+          job->scheduled_nodes.assign(job_in_scheduler->craned_ids.begin(),
+                                      job_in_scheduler->craned_ids.end());
         }
         if (!job_in_scheduler->reason.empty()) {
           job->pending_reason = job_in_scheduler->reason;

@@ -39,10 +39,11 @@ type Option struct {
 // OptionScanner scans lazily so that commands can stop on help/version before
 // later arguments are inspected. It never decides a command's option semantics.
 type OptionScanner struct {
-	args  []string
-	specs []OptionSpec
-	posix bool
-	short string
+	args     []string
+	specs    []OptionSpec
+	posix    bool
+	short    string
+	operands []string
 }
 
 // NewOptionScanner takes arguments excluding argv[0]. The caller owns process
@@ -50,6 +51,9 @@ type OptionScanner struct {
 func NewOptionScanner(args []string, specs []OptionSpec, posix bool) *OptionScanner {
 	return &OptionScanner{args: args, specs: specs, posix: posix}
 }
+
+// Operands returns non-option arguments in input order after scanning.
+func (s *OptionScanner) Operands() []string { return s.operands }
 
 // Next returns io.EOF at the end of options. Errors contain only the GNU
 // diagnostic body; callers add their command's prefix and help hint.
@@ -61,11 +65,14 @@ func (s *OptionScanner) Next() (Option, error) {
 		arg := s.args[0]
 		s.args = s.args[1:]
 		if arg == "--" {
+			s.operands = append(s.operands, s.args...)
 			s.args = nil
 			return Option{}, io.EOF
 		}
 		if arg == "-" || !strings.HasPrefix(arg, "-") {
+			s.operands = append(s.operands, arg)
 			if s.posix {
+				s.operands = append(s.operands, s.args...)
 				s.args = nil
 				return Option{}, io.EOF
 			}

@@ -76,6 +76,8 @@ func reportSchema(t reflect.Type, description, enum string) object {
 		kind = "string"
 	case reflect.Bool:
 		kind = "boolean"
+	case reflect.Float64:
+		kind, format = "number", "double"
 	case reflect.Uint64, reflect.Int64:
 		kind, format = "integer", "int64"
 		if annotated, ok := reflect.Zero(t).Interface().(interface{ SchemaFormat() string }); ok {
@@ -142,6 +144,8 @@ func reportValue(v reflect.Value, complex, keepEmpty bool) any {
 		return v.String()
 	case reflect.Bool:
 		return v.Bool()
+	case reflect.Float64:
+		return v.Float()
 	case reflect.Uint64:
 		return v.Uint()
 	case reflect.Int64:

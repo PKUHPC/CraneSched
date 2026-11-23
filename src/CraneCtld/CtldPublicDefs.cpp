@@ -437,6 +437,10 @@ void StepInCtld::SetFieldsOfStepInfo(
   step_info->set_job_id(job_id);
   step_info->set_step_id(m_step_id_);
 
+  if (StepToCtld().has_io_meta())
+    *step_info->mutable_io_meta() = StepToCtld().io_meta();
+  if (StepToCtld().has_gres_per_node())
+    *step_info->mutable_gres_per_node() = StepToCtld().gres_per_node();
   step_info->set_name(name);
   step_info->set_cwd(cwd);
   step_info->set_extra_attr(extra_attr);
@@ -2297,6 +2301,18 @@ void JobInCtld::SetFieldsOfJobInfo(crane::grpc::JobInfo* job_info) const {
   job_info->set_reservation(reservation);
 
   job_info->set_submit_hostname(submit_hostname);
+  if (job_to_ctld.has_io_meta())
+    *job_info->mutable_io_meta() = job_to_ctld.io_meta();
+  job_info->set_max_nodes(node_num_max);
+  job_info->set_tasks_per_node(job_to_ctld.ntasks_per_node());
+  if (job_to_ctld.has_mem_per_cpu())
+    job_info->set_memory_per_cpu(job_to_ctld.mem_per_cpu());
+  if (job_to_ctld.has_gres_per_node())
+    *job_info->mutable_gres_per_node() = job_to_ctld.gres_per_node();
+  if (Status() == crane::grpc::Pending)
+    job_info->mutable_scheduled_nodes()->Assign(scheduled_nodes.begin(),
+                                                scheduled_nodes.end());
+  *job_info->mutable_allocated_licenses() = runtime_attr.actual_licenses();
 
   if (const auto* array_spec = GetArraySpec(); array_spec != nullptr) {
     *job_info->mutable_array_spec() = *array_spec;

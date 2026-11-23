@@ -1117,6 +1117,7 @@ struct JobInCtld {
   std::vector<CranedId> executing_craned_ids;
   std::string allocated_craneds_regex;
   std::string pending_reason;
+  std::vector<CranedId> scheduled_nodes;
 
   double mandated_priority{0.0};
 
