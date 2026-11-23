@@ -60,7 +60,7 @@ struct OomMonitor::Watch {
       return std::unexpected(n < 0 ? SystemError()
                                    : std::make_error_code(std::errc::io_error));
     }
-    return notifications;
+    return notifications - baseline;
   }
 
   void LogError(const std::error_code& error) {
@@ -162,6 +162,17 @@ std::unique_ptr<OomMonitor::Watch> OomMonitor::MakeWatch_(
                error.message());
     return nullptr;
   }
+  if (!events_only) {
+    // Registration while under_oom can signal once before the normal ancestor
+    // notification arrives. Exclude everything observed before workload launch
+    // from this watch, but retain the job's full history for attribution.
+    auto initial = watch->Sample();
+    if (!initial) {
+      watch->LogError(initial.error());
+      return nullptr;
+    }
+    watch->baseline = *initial;
+  }
   CRANE_DEBUG("[OOM] Monitoring v1 OOM notifications at {}", path);
   return watch;
 }
@@ -245,7 +256,8 @@ const OomMonitor::Evidence& OomMonitor::Sample_(
                              "; victim step is unknown";
     }
   }
-  // One ancestor event contributes at most one notification to each watch.
+  // After excluding registration notifications, each ancestor traversal adds
+  // at most one notification per watch.
   // Keep cumulative counts: propagation can straddle samples, and task watches
   // may be sampled only at exit. The earlier ancestor registration makes this
   // comparison conservative for watches registered later.

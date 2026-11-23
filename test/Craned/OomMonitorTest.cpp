@@ -7,11 +7,36 @@
 #include <sys/eventfd.h>
 #include <unistd.h>
 
+#include <cstdio>
 #include <fstream>
 #include <optional>
 #include <string>
 
 #include "OomMonitor.h"
+
+namespace {
+
+uint64_t registration_notifications = 0;
+
+}  // namespace
+
+extern "C" ssize_t __real_write(int fd, const void* data, size_t size);
+extern "C" ssize_t __wrap_write(int fd, const void* data, size_t size) {
+  auto result = __real_write(fd, data, size);
+  if (registration_notifications && result == static_cast<ssize_t>(size)) {
+    // Inject the kernel's synchronous under_oom signal during registration.
+    std::string registration(static_cast<const char*>(data), size);
+    int event_fd = -1, control_fd = -1;
+    if (std::sscanf(registration.c_str(), "%d %d", &event_fd, &control_fd) ==
+            2 &&
+        control_fd >= 0) {
+      auto count = registration_notifications;
+      registration_notifications = 0;
+      EXPECT_EQ(eventfd_write(event_fd, count), 0);
+    }
+  }
+  return result;
+}
 
 namespace Craned::Common {
 namespace {
@@ -29,7 +54,10 @@ class OomMonitorTest : public ::testing::Test {
     std::filesystem::create_directories(task_);
   }
 
-  void TearDown() override { std::filesystem::remove_all(root_); }
+  void TearDown() override {
+    registration_notifications = 0;
+    std::filesystem::remove_all(root_);
+  }
 
   static void Write(const std::filesystem::path& file, std::string_view data) {
     std::ofstream output(file, std::ios::trunc);
@@ -242,6 +270,25 @@ TEST_F(OomMonitorTest, OldV1DoesNotAttributeDelayedAncestorPropagation) {
   monitor.FinishTask(task_);
   EXPECT_TRUE(monitor.Sample().workload.empty());
   EXPECT_FALSE(monitor.GetEvidence().ancestor.empty());
+}
+
+TEST_F(OomMonitorTest, OldV1ExcludesRegistrationNotifications) {
+  for (bool propagated_before_return : {false, true}) {
+    SCOPED_TRACE(propagated_before_return);
+    for (const auto& path : {job_, step_, task_}) V1(path);
+    OomMonitor monitor;
+    ASSERT_TRUE(monitor.Start(step_, job_, false));
+    registration_notifications = propagated_before_return ? 2 : 1;
+    ASSERT_TRUE(monitor.AddTask(task_));
+    ASSERT_EQ(registration_notifications, 0);
+    // One job event, plus an immediate under_oom notification at registration.
+    Notify(job_);
+    Notify(step_);
+    if (!propagated_before_return) Notify(task_);
+    monitor.FinishTask(task_);
+    EXPECT_TRUE(monitor.Sample().workload.empty());
+    EXPECT_FALSE(monitor.GetEvidence().ancestor.empty());
+  }
 }
 
 TEST_F(OomMonitorTest,
