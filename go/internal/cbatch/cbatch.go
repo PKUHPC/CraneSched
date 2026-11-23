@@ -85,6 +85,15 @@ func BuildCbatchJob(cmd *cobra.Command, args []string, config *util.Config) (*pr
 	job.Payload = &protos.JobToCtld_BatchMeta{
 		BatchMeta: &protos.BatchJobAdditionalMeta{},
 	}
+	var scriptPath string
+	if len(args) > 0 {
+		var err error
+		scriptPath, err = filepath.Abs(args[0])
+		if err != nil {
+			return nil, err
+		}
+	}
+	job.GetBatchMeta().ScriptPath = &scriptPath
 	job.IoMeta = &protos.IoMeta{}
 	job.ShScript = shScript
 
@@ -348,6 +357,7 @@ func BuildCbatchJob(cmd *cobra.Command, args []string, config *util.Config) (*pr
 	if err := util.CheckFileLength(job.GetIoMeta().ErrorFilePattern); err != nil {
 		return nil, fmt.Errorf("invalid argument: error file path is invalid: %w", err)
 	}
+	job.RequestedTasksPerNode = new(job.NtasksPerNode)
 	if err := util.CheckJobArgs(job); err != nil {
 		return nil, fmt.Errorf("invalid argument: %w", err)
 	}

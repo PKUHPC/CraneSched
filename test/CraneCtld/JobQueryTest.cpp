@@ -347,6 +347,32 @@ TEST(JobQuery, PublicViewPreservesEveryKnownSummaryField) {
   EXPECT_EQ(result.SerializeAsString().find(kPrivate), std::string::npos);
 }
 
+TEST(JobQuery, PublicQueueExposesOnlyQueueFields) {
+  auto source = MakeJob();
+  source.set_script_path("/tmp/script.sh");
+  source.set_requeue_eligible(false);
+  source.set_extra_attr(R"({"comment":"public","other":"private"})");
+  for (auto caller :
+       {std::optional<uint32_t>(1002), std::optional<uint32_t>()}) {
+    auto result = ProjectJobForQuery(source, caller, false, true);
+    EXPECT_EQ(result.script_path(), "/tmp/script.sh");
+    EXPECT_EQ(result.cwd(), source.cwd());
+    EXPECT_EQ(result.cmd_line(), source.cmd_line());
+    EXPECT_EQ(result.extra_attr(), R"({"comment":"public"})");
+    EXPECT_EQ(result.io_meta().output_file_pattern(),
+              source.io_meta().output_file_pattern());
+    EXPECT_TRUE(result.has_requeue_eligible());
+    EXPECT_FALSE(result.requeue_eligible());
+    EXPECT_TRUE(result.env().empty());
+    EXPECT_FALSE(result.has_pod_meta());
+    EXPECT_FALSE(result.step_info_list(0).container_meta().has_image());
+    auto native = ProjectJobForQuery(source, caller, false);
+    EXPECT_FALSE(native.has_script_path());
+    EXPECT_TRUE(native.cwd().empty());
+    EXPECT_TRUE(native.extra_attr().empty());
+  }
+}
+
 TEST(JobQuery, OwnerAndAdministratorRetainDetailsExceptPassword) {
   const auto source = MakeJob();
   auto expected = source;
@@ -562,6 +588,25 @@ TEST(JobQuery, RpcRejectsNotReadyAndMissingUidWithoutReturningStaleData) {
   g_runtime_status.srv_ready = was_ready;
 }
 
+TEST(JobQuery, PublicQueueDetailsRequireLiveQueue) {
+  Ctld::CraneCtldServiceImpl service(nullptr);
+  grpc::ServerContext context;
+  crane::grpc::QueryJobsInfoRequest request;
+  crane::grpc::QueryJobsInfoReply reply;
+  request.set_uid(1001);
+  request.set_include_public_queue_details(true);
+  const bool was_ready = g_runtime_status.srv_ready.exchange(true);
+  for (auto mode : {crane::grpc::QUERY_JOBS_INFO_QUEUE,
+                    crane::grpc::QUERY_JOBS_INFO_ACCOUNTING}) {
+    request.set_mode(mode);
+    request.set_option_include_completed_jobs(
+        mode == crane::grpc::QUERY_JOBS_INFO_QUEUE);
+    EXPECT_EQ(service.QueryJobsInfo(&context, &request, &reply).error_code(),
+              grpc::StatusCode::INVALID_ARGUMENT);
+  }
+  g_runtime_status.srv_ready = was_ready;
+}
+
 void ExpectFields(const google::protobuf::Descriptor* descriptor,
                   std::initializer_list<const char*> classified) {
   std::set<std::string> actual;
@@ -625,6 +670,8 @@ TEST(JobQuery, QuerySchemaRequiresExplicitFieldClassification) {
                                        "gres_per_node",
                                        "scheduled_nodes",
                                        "allocated_licenses",
+                                       "requeue_eligible",
+                                       "script_path",
                                        "query_visibility"});
   ExpectFields(crane::grpc::StepInfo::descriptor(), {"type",
                                                      "step_type",

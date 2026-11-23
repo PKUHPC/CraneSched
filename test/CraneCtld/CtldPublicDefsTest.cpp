@@ -1232,6 +1232,23 @@ TEST(CtldStepStateMachineTest,
 
 // --- ShouldRequeue tests ---
 
+TEST(ShouldRequeueTest, EligibilityUsesClusterDefaultAndSubmissionFlags) {
+  const bool old_default = g_config.CtldConf.JobRequeue;
+  Ctld::JobInCtld job;
+  job.type = crane::grpc::Batch;
+  for (bool policy : {false, true}) {
+    g_config.CtldConf.JobRequeue = policy;
+    for (bool enabled : {false, true}) {
+      job.requeue_if_failed = enabled;
+      for (bool disabled : {false, true}) {
+        job.MutableJobToCtld()->set_no_requeue(disabled);
+        EXPECT_EQ(job.RequeueEligible(), !disabled && (enabled || policy));
+      }
+    }
+  }
+  g_config.CtldConf.JobRequeue = old_default;
+}
+
 TEST(ShouldRequeueTest, InteractiveJobNeverRequeues) {
   Ctld::JobInCtld job;
   job.type = crane::grpc::Interactive;

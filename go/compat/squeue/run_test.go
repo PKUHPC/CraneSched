@@ -89,7 +89,7 @@ func TestSlurm26054Queue(t *testing.T) {
 		return &pb.JobInfo{
 			JobId: id, Name: name, Type: pb.JobType_Batch, Partition: "compute", Account: "root", Username: "root", Qos: "normal",
 			Held: true, NodeNum: 1, Ntasks: new(uint32(1)), TimeLimit: &durationpb.Duration{Seconds: 900}, Cwd: "/tmp",
-			RequeueIfFailed: true, QueryVisibility: details, IoMeta: &pb.IoMeta{OutputFilePattern: "/tmp/sqcmp-%j.out"},
+			RequeueEligible: new(true), ScriptPath: new(""), RequeueIfFailed: true, QueryVisibility: details, IoMeta: &pb.IoMeta{OutputFilePattern: "/tmp/sqcmp-%j.out"},
 			ReqTotalResView: &pb.ResourceView{CpuCount: 1, MemoryBytes: 100 << 20},
 		}
 	}
@@ -162,5 +162,44 @@ func TestStepFiltersUseStepFacts(t *testing.T) {
 	rows, e := o.rows(&pb.QueryJobsInfoReply{JobInfoList: []*pb.JobInfo{j}})
 	if e != nil || len(rows) != 1 || rows[0].stepID() != "42.0" {
 		t.Fatalf("steps %v, err %v", rows, e)
+	}
+}
+
+func TestJobReportKeepsKnownFalseAndFractionalBilling(t *testing.T) {
+	job := &pb.JobInfo{
+		Type: pb.JobType_Batch, Status: pb.JobStatus_Pending,
+		RequeueEligible: new(false), ReqTotalResView: &pb.ResourceView{CpuCount: 0.5},
+	}
+	o, err := parse([]string{"--json", "--sort=?"}, nil, io.Discard)
+	if err != nil {
+		t.Fatal(err)
+	}
+	rows, err := o.rows(&pb.QueryJobsInfoReply{JobInfoList: []*pb.JobInfo{job}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	var buf bytes.Buffer
+	if err := o.writeReport(&buf, reportOptions{}, []string{"squeue", "--json"}, rows); err != nil {
+		t.Fatal(err)
+	}
+	var data struct{ Jobs []map[string]json.RawMessage }
+	if err := json.Unmarshal(buf.Bytes(), &data); err != nil || len(data.Jobs) != 1 {
+		t.Fatalf("jobs: %v, err: %v", data.Jobs, err)
+	}
+	record := data.Jobs[0]
+	for _, missing := range []string{"cpus", "command", "het_job_id", "submit_time"} {
+		if _, ok := record[missing]; ok {
+			t.Errorf("unexpected %s: %s", missing, record[missing])
+		}
+	}
+	if string(record["requeue"]) != "false" {
+		t.Errorf("requeue = %s", record["requeue"])
+	}
+	var billing struct {
+		Set    bool
+		Number float64
+	}
+	if err := json.Unmarshal(record["billable_tres"], &billing); err != nil || !billing.Set || billing.Number != 0.5 {
+		t.Errorf("billable_tres = %s, err %v", record["billable_tres"], err)
 	}
 }

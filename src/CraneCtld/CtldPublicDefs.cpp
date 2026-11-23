@@ -1937,18 +1937,20 @@ std::string_view JobInCtld::HoldReason() const {
   return runtime_attr.held_by_admin() ? "JobHeldAdmin" : "JobHeldUser";
 }
 
-bool JobInCtld::ShouldRequeue() const {
-  if (type != crane::grpc::Batch) return false;
-  if (job_to_ctld.no_requeue()) return false;
+bool JobInCtld::RequeueEligible() const {
+  return type == crane::grpc::Batch && !job_to_ctld.no_requeue() &&
+         (g_config.CtldConf.JobRequeue || requeue_if_failed);
+}
 
-  bool requeue_allowed = g_config.CtldConf.JobRequeue || requeue_if_failed;
-  if (requeue_requested) return requeue_allowed;
+bool JobInCtld::ShouldRequeue() const {
+  if (!RequeueEligible()) return false;
+  if (requeue_requested) return true;
 
   // System-level failures trigger requeue if the cluster default allows
   // requeue or the job explicitly requested it.
   if (exit_code == ExitCode::EC_CRANED_DOWN ||
       exit_code == ExitCode::EC_RPC_ERR)
-    return requeue_allowed;
+    return true;
 
   return requeue_if_failed && status != crane::grpc::Completed &&
          status != crane::grpc::Cancelled;
@@ -2304,7 +2306,11 @@ void JobInCtld::SetFieldsOfJobInfo(crane::grpc::JobInfo* job_info) const {
   if (job_to_ctld.has_io_meta())
     *job_info->mutable_io_meta() = job_to_ctld.io_meta();
   job_info->set_max_nodes(node_num_max);
-  job_info->set_tasks_per_node(job_to_ctld.ntasks_per_node());
+  if (job_to_ctld.has_requested_tasks_per_node())
+    job_info->set_tasks_per_node(job_to_ctld.requested_tasks_per_node());
+  if (job_to_ctld.batch_meta().has_script_path())
+    job_info->set_script_path(job_to_ctld.batch_meta().script_path());
+  job_info->set_requeue_eligible(RequeueEligible());
   if (job_to_ctld.has_mem_per_cpu())
     job_info->set_memory_per_cpu(job_to_ctld.mem_per_cpu());
   if (job_to_ctld.has_gres_per_node())

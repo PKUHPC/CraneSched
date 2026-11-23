@@ -337,7 +337,7 @@ func validateCapabilities(o *plan) error {
 		return unsupported("--future", "future node registration")
 	}
 	for _, item := range o.Fields {
-		if item.Field != nil && item.Field.Capability != "" {
+		if o.Serialization == "" && item.Field != nil && item.Field.Capability != "" {
 			return unsupported("field "+item.Field.Name, item.Field.Capability)
 		}
 	}

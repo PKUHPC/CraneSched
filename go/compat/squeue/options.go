@@ -82,7 +82,7 @@ func list(s string) []string                      { return strings.FieldsFunc(s,
 func parse(args []string, env map[string]string, diag io.Writer) (*options, error) {
 	o := &options{env: env, sort: env["SQUEUE_SORT"], customSort: assigned(env, "SQUEUE_SORT"), all: assigned(env, "SQUEUE_ALL"), array: assigned(env, "SQUEUE_ARRAY"), priority: assigned(env, "SQUEUE_PRIORITY"),
 		clusters: env["SLURM_CLUSTERS"], local: assigned(env, "SQUEUE_LOCAL"), federation: assigned(env, "SQUEUE_FEDERATION"), sibling: assigned(env, "SQUEUE_SIB") || assigned(env, "SQUEUE_SIBLING"),
-		req: &pb.QueryJobsInfoRequest{Mode: pb.QueryJobsInfoMode_QUERY_JOBS_INFO_QUEUE, NumLimit: math.MaxUint32}}
+		req: &pb.QueryJobsInfoRequest{IncludePublicQueueDetails: true, Mode: pb.QueryJobsInfoMode_QUERY_JOBS_INFO_QUEUE, NumLimit: math.MaxUint32}}
 	s := utils.NewOptionScanner(args, vocabulary, assigned(env, "POSIXLY_CORRECT"))
 	values := map[string]string{}
 	o.raw = values

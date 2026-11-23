@@ -456,8 +456,8 @@ func TestStructuredV45Report(t *testing.T) {
 			if _, ok := row["reason"].(map[string]any)["user"]; ok {
 				t.Fatal("legacy reason.user emitted")
 			}
-			if row["reason_set_by_user"] != "" {
-				t.Fatal("empty reason user must stay a string")
+			if _, present := row["reason_set_by_user"]; present {
+				t.Fatal("missing reason UID must be omitted")
 			}
 			partition := row["partition"].(map[string]any)
 			defaults, maximums := partition["defaults"].(map[string]any), partition["maximums"].(map[string]any)
@@ -500,13 +500,10 @@ func checkReportSchema(t *testing.T, schema map[string]any, value any, path stri
 			t.Fatalf("%s: expected object, got %T", path, value)
 		}
 		props := schema["properties"].(map[string]any)
-		if len(obj) != len(props) {
-			t.Fatalf("%s: property count %d != %d", path, len(obj), len(props))
-		}
-		for k, v := range props {
-			child, ok := obj[k]
+		for k, child := range obj {
+			v, ok := props[k]
 			if !ok {
-				t.Fatalf("%s.%s missing", path, k)
+				t.Fatalf("%s.%s absent from v45 schema", path, k)
 			}
 			checkReportSchema(t, v.(map[string]any), child, path+"."+k)
 		}
@@ -563,5 +560,19 @@ func TestReportNumericModes(t *testing.T) {
 				}
 			}
 		})
+	}
+}
+
+func TestEmptyPartitionReport(t *testing.T) {
+	r := &row{Partition: &partition{Name: "empty", PreemptMode: "OFF"}}
+	record := structuredRow(r, &plan{}, nil)
+	if record.Nodes.Total != 0 || record.CPUs.Idle == nil || *record.CPUs.Idle != 0 {
+		t.Fatalf("empty partition counts: %+v %+v", record.Nodes, record.CPUs)
+	}
+	if record.Port != nil || record.Node != nil || record.CPUs.Minimum != nil || record.Memory != nil || record.Reason != nil {
+		t.Fatal("node observations present in an empty partition")
+	}
+	if !reflect.DeepEqual(record.Partition.PreemptMode, []string{"DISABLED"}) {
+		t.Fatalf("preempt mode = %v", record.Partition.PreemptMode)
 	}
 }

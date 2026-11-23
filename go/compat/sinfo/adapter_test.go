@@ -7,8 +7,10 @@ package sinfo
 import (
 	"bytes"
 	"context"
+	"encoding/json"
 	"fmt"
 	"github.com/PKUHPC/CraneSched/go/generated/protos"
+	"gopkg.in/yaml.v3"
 	"net"
 	"os"
 	"path/filepath"
@@ -293,9 +295,29 @@ func TestStructuredImplicitCapabilitiesDoNotBecomeZeroValues(t *testing.T) {
 		}
 		var out, diagnostics bytes.Buffer
 		err = renderStructured(&out, &diagnostics, []string{"sinfo"}, buildRows(s, o), s, o, newTextRenderer().UserName)
-		if err == nil || !strings.Contains(err.Error(), "field Disk") || out.Len() != 0 {
-			t.Fatalf("%s out=%q err=%v", kind, &out, err)
+		if err != nil {
+			t.Fatal(err)
 		}
+		var doc struct{ Sinfo []map[string]any }
+		if kind == "json" {
+			err = json.Unmarshal(out.Bytes(), &doc)
+		} else {
+			err = yaml.Unmarshal(out.Bytes(), &doc)
+		}
+		if err != nil || len(doc.Sinfo) != 1 {
+			t.Fatalf("%s: invalid report: %v", kind, err)
+		}
+		item := doc.Sinfo[0]
+		for _, key := range []string{"disk", "weight", "features", "comment", "extra", "resource_spec"} {
+			if _, ok := item[key]; ok {
+				t.Errorf("%s: emitted unsupported field %s", kind, key)
+			}
+		}
+		cpus := item["cpus"].(map[string]any)
+		if fmt.Sprint(cpus["total"]) != "4" || fmt.Sprint(cpus["other"]) != "0" || cpus["load"] != nil {
+			t.Fatalf("missing load or known counts misreported: %v", cpus)
+		}
+		out.Reset()
 		o.DataParser, o.HasDataParser = "v0.0.45+spec_only", true
 		if err := renderStructured(&out, &diagnostics, []string{"sinfo"}, nil, s, o, newTextRenderer().UserName); err != nil || out.Len() == 0 {
 			t.Fatalf("schema-only output: %v", err)

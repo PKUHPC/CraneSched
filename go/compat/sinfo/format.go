@@ -314,18 +314,3 @@ func validateProjection(rows []*row, o *plan) error {
 	}
 	return nil
 }
-
-func validateStructuredProjection(rows []*row, snap *snapshot, o *plan) error {
-	// The v45 schema implicitly requests these fields,
-	// even when -o selects a smaller text/grouping vocabulary. An absent
-	// Crane feature must not turn into a plausible zero or empty JSON value.
-	for _, field := range []string{"Disk", "Weight", "Features", "features_act", "Comment", "Extra", "MaxCPUsPerNode", "AllocNodes", "Groups", "DefaultTime", "OverSubscribe", "Root", "Size", "PriorityTier"} {
-		if capability := snap.UnsupportedFields[field]; capability != "" {
-			return unsupported("--"+o.Serialization+" field "+field, capability)
-		}
-	}
-	if err := validateProjection(rows, o); err != nil {
-		return err
-	}
-	return nil
-}

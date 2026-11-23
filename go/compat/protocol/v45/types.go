@@ -65,14 +65,14 @@ type SinfoCPUsPerNode struct {
 }
 
 type SinfoCPUs struct {
-	Allocated Int32            `json:"allocated" description:"Number of allocated CPUs"`
-	Idle      Int32            `json:"idle" description:"Number of idle CPUs"`
-	Other     Int32            `json:"other" description:"Number of CPUs that are not allocated or idle"`
+	Allocated *Int32           `json:"allocated" description:"Number of allocated CPUs"`
+	Idle      *Int32           `json:"idle" description:"Number of idle CPUs"`
+	Other     *Int32           `json:"other" description:"Number of CPUs that are not allocated or idle"`
 	Total     Int32            `json:"total" description:"Total number of CPUs"`
-	Minimum   Int32            `json:"minimum" description:"Minimum number of CPUs on any single node"`
-	Maximum   Int32            `json:"maximum" description:"Maximum number of CPUs on any single node"`
-	Load      SinfoCPUsLoad    `json:"load"`
-	PerNode   SinfoCPUsPerNode `json:"per_node"`
+	Minimum   *Int32           `json:"minimum" description:"Minimum number of CPUs on any single node"`
+	Maximum   *Int32           `json:"maximum" description:"Maximum number of CPUs on any single node"`
+	Load      *SinfoCPUsLoad   `json:"load"`
+	PerNode   SinfoCPUsPerNode `json:"per_node" report:"-"`
 }
 
 type SinfoSockets struct {
@@ -101,10 +101,10 @@ type SinfoMemoryFree struct {
 }
 
 type SinfoMemory struct {
-	Minimum   uint64          `json:"minimum" description:"Minimum memory in megabytes on any single node"`
-	Maximum   uint64          `json:"maximum" description:"Maximum memory in megabytes on any single node"`
-	Free      SinfoMemoryFree `json:"free"`
-	Allocated uint64          `json:"allocated" description:"AllocMem - Total memory in megabytes allocated to jobs"`
+	Minimum   uint64           `json:"minimum" description:"Minimum memory in megabytes on any single node"`
+	Maximum   uint64           `json:"maximum" description:"Maximum memory in megabytes on any single node"`
+	Free      *SinfoMemoryFree `json:"free"`
+	Allocated uint64           `json:"allocated" description:"AllocMem - Total memory in megabytes allocated to jobs"`
 }
 
 type SinfoWeight struct {
@@ -124,7 +124,7 @@ type SinfoGRES struct {
 
 type SinfoReason struct {
 	Description string `json:"description" description:"Why a node is unavailable"`
-	Time        int64  `json:"time" description:"When the reason was set (UNIX timestamp)"`
+	Time        *int64 `json:"time" description:"When the reason was set (UNIX timestamp)"`
 }
 
 type SinfoResourceSpec struct {
@@ -133,7 +133,7 @@ type SinfoResourceSpec struct {
 }
 
 type PartitionNodes struct {
-	AllowedAllocation string `json:"allowed_allocation" description:"AllocNodes - Comma-separated list of nodes from which users can submit jobs in the partition"`
+	AllowedAllocation string `json:"allowed_allocation" description:"AllocNodes - Comma-separated list of nodes from which users can submit jobs in the partition" report:"-"`
 	Configured        string `json:"configured" description:"Nodes - Comma-separated list of nodes which are associated with this partition"`
 	Total             Int32  `json:"total" description:"TotalNodes - Number of nodes available in this partition (read-only)"`
 }
@@ -154,36 +154,36 @@ type PartitionQoS struct {
 }
 
 type PartitionTRES struct {
-	BillingWeights string `json:"billing_weights" description:"TRESBillingWeights - Billing weights of each tracked TRES type that will be used in calculating the usage of a job"`
+	BillingWeights string `json:"billing_weights" description:"TRESBillingWeights - Billing weights of each tracked TRES type that will be used in calculating the usage of a job" report:"-"`
 	Configured     string `json:"configured" description:"TRES - Number of each applicable TRES type available in this partition (read-only)"`
 }
 
 type PartitionCPUs struct {
-	TaskBinding []string `json:"task_binding" description:"CpuBind - Default method controlling how tasks are bound to allocated resources" enum:"CPU_BIND_TO_THREADS|CPU_BIND_TO_CORES|CPU_BIND_TO_SOCKETS|CPU_BIND_TO_LDOMS|CPU_BIND_NONE|CPU_BIND_OFF|VERBOSE"`
+	TaskBinding []string `json:"task_binding" description:"CpuBind - Default method controlling how tasks are bound to allocated resources" enum:"CPU_BIND_TO_THREADS|CPU_BIND_TO_CORES|CPU_BIND_TO_SOCKETS|CPU_BIND_TO_LDOMS|CPU_BIND_NONE|CPU_BIND_OFF|VERBOSE" report:"-"`
 	Total       Int32    `json:"total" description:"TotalCPUs - Number of CPUs available in this partition (read-only)"`
 }
 
 type PartitionDefaults struct {
 	PartitionMemoryPerCPU  Number[uint64] `json:"partition_memory_per_cpu" description:"DefMemPerCPU - Default real memory size available per allocated CPU in megabytes (64 bit integer number with flags)"`
 	PartitionMemoryPerNode Number[uint64] `json:"partition_memory_per_node" description:"DefMemPerNode - Default real memory size available per allocated node in megabytes (64 bit integer number with flags)"`
-	Time                   Number[Int32]  `json:"time" description:"DefaultTime - Run time limit in minutes used for jobs that don't specify a value (32 bit integer number with flags)"`
-	Job                    string         `json:"job" description:"JobDefaults - Comma-separated list of job default values (this field is only used to set new defaults)"`
+	Time                   Number[Int32]  `json:"time" description:"DefaultTime - Run time limit in minutes used for jobs that don't specify a value (32 bit integer number with flags)" report:"-"`
+	Job                    string         `json:"job" description:"JobDefaults - Comma-separated list of job default values (this field is only used to set new defaults)" report:"-"`
 }
 
 type PartitionState struct {
-	Exclusive     string   `json:"exclusive" description:"Exclusive= string (same as scontrol show partition)"`
-	Oversubscribe string   `json:"oversubscribe" description:"OverSubscribe display: FORCE:n, NO, or YES:n (same as show partition and sinfo) (Partition oversubscribe value)"`
+	Exclusive     string   `json:"exclusive" description:"Exclusive= string (same as scontrol show partition)" report:"-"`
+	Oversubscribe string   `json:"oversubscribe" description:"OverSubscribe display: FORCE:n, NO, or YES:n (same as show partition and sinfo) (Partition oversubscribe value)" report:"-"`
 	State         []string `json:"state" description:"Current state(s)" enum:"INACTIVE|UNKNOWN|UP|DOWN|DRAIN"`
 }
 
 type PartitionMaximums struct {
-	CPUsPerNode            Number[Int32]  `json:"cpus_per_node" description:"MaxCPUsPerNode - Maximum number of CPUs on any node available to all jobs from this partition (32 bit integer number with flags)"`
-	CPUsPerSocket          Number[Int32]  `json:"cpus_per_socket" description:"MaxCPUsPerSocket - Maximum number of CPUs on any node available on the all jobs from this partition (32 bit integer number with flags)"`
+	CPUsPerNode            Number[Int32]  `json:"cpus_per_node" description:"MaxCPUsPerNode - Maximum number of CPUs on any node available to all jobs from this partition (32 bit integer number with flags)" report:"-"`
+	CPUsPerSocket          Number[Int32]  `json:"cpus_per_socket" description:"MaxCPUsPerSocket - Maximum number of CPUs on any node available on the all jobs from this partition (32 bit integer number with flags)" report:"-"`
 	PartitionMemoryPerCPU  Number[uint64] `json:"partition_memory_per_cpu" description:"MaxMemPerCPU - Maximum real memory size available per allocated CPU in megabytes (64 bit integer number with flags)"`
 	PartitionMemoryPerNode Number[uint64] `json:"partition_memory_per_node" description:"MaxMemPerNode - Maximum real memory size available per allocated node in a job allocation in megabytes (64 bit integer number with flags)"`
-	Nodes                  Number[Int32]  `json:"nodes" description:"MaxNodes - Maximum count of nodes which may be allocated to any single job (32 bit integer number with flags)"`
+	Nodes                  Number[Int32]  `json:"nodes" description:"MaxNodes - Maximum count of nodes which may be allocated to any single job (32 bit integer number with flags)" report:"-"`
 	Time                   Number[Int32]  `json:"time" description:"MaxTime - Maximum run time limit for jobs in minutes (32 bit integer number with flags)"`
-	OverTimeLimit          Number[Int32]  `json:"over_time_limit" description:"OverTimeLimit - Number of minutes by which a job can exceed its time limit before being canceled (16 bit integer number with flags)"`
+	OverTimeLimit          Number[Int32]  `json:"over_time_limit" description:"OverTimeLimit - Number of minutes by which a job can exceed its time limit before being canceled (16 bit integer number with flags)" report:"-"`
 }
 
 type PartitionMinimums struct {
@@ -192,7 +192,7 @@ type PartitionMinimums struct {
 
 type PartitionPriority struct {
 	JobFactor Int32 `json:"job_factor" description:"PriorityJobFactor - Partition factor used by priority/multifactor plugin in calculating job priority"`
-	Tier      Int32 `json:"tier" description:"PriorityTier - Controls the order in which the scheduler evaluates jobs from different partitions"`
+	Tier      Int32 `json:"tier" description:"PriorityTier - Controls the order in which the scheduler evaluates jobs from different partitions" report:"-"`
 }
 
 type PartitionTimeouts struct {
@@ -203,60 +203,60 @@ type PartitionTimeouts struct {
 type PartitionInfo struct {
 	Nodes       PartitionNodes    `json:"nodes"`
 	Accounts    PartitionAccounts `json:"accounts"`
-	Groups      PartitionGroups   `json:"groups"`
-	QoS         PartitionQoS      `json:"qos"`
-	Alternate   string            `json:"alternate" description:"Alternate - Partition name of alternate partition to be used if the state of this partition is DRAIN or INACTIVE"`
+	Groups      PartitionGroups   `json:"groups" report:"-"`
+	QoS         PartitionQoS      `json:"qos" report:"-"`
+	Alternate   string            `json:"alternate" description:"Alternate - Partition name of alternate partition to be used if the state of this partition is DRAIN or INACTIVE" report:"-"`
 	TRES        PartitionTRES     `json:"tres"`
-	Cluster     string            `json:"cluster" description:"Cluster name (read-only)"`
-	SelectType  []string          `json:"select_type" description:"Scheduler consumable resource selection type (read-only)" enum:"NONE|CR_CPU_MEMORY|CR_CPU|CR_CORE_MEMORY|CR_CORE|CR_SOCKET_MEMORY|CR_SOCKET|CR_MEMORY|CR_ONE_TASK_PER_CORE|CR_CORE_DEFAULT_DIST_BLOCK|CR_NO_DIST_TOPO_BLOCK|CR_LLN|CR_PACK_NODES|LL_SHARED_GRES|MULTIPLE_SHARING_GRES_PJ|ENFORCE_BINDING_GRES|ONE_TASK_PER_SHARING_GRES"`
+	Cluster     string            `json:"cluster" description:"Cluster name (read-only)" report:"-"`
+	SelectType  []string          `json:"select_type" description:"Scheduler consumable resource selection type (read-only)" enum:"NONE|CR_CPU_MEMORY|CR_CPU|CR_CORE_MEMORY|CR_CORE|CR_SOCKET_MEMORY|CR_SOCKET|CR_MEMORY|CR_ONE_TASK_PER_CORE|CR_CORE_DEFAULT_DIST_BLOCK|CR_NO_DIST_TOPO_BLOCK|CR_LLN|CR_PACK_NODES|LL_SHARED_GRES|MULTIPLE_SHARING_GRES_PJ|ENFORCE_BINDING_GRES|ONE_TASK_PER_SHARING_GRES" report:"-"`
 	CPUs        PartitionCPUs     `json:"cpus"`
 	Defaults    PartitionDefaults `json:"defaults"`
 	Flags       []string          `json:"flags" description:"Partition flag options" enum:"DEFAULT|HIDDEN|NO_ROOT|ROOT_ONLY|REQ_RESV|LLN|PDOI|DEFAULT_CLEAR|HIDDEN_CLEAR|NO_ROOT_CLEAR|ROOT_ONLY_CLEAR|REQ_RESV_CLEAR|LLN_CLEAR|PDOI_CLEAR"`
 	Partition   PartitionState    `json:"partition"`
-	GraceTime   Int32             `json:"grace_time" description:"GraceTime - Grace time in seconds to be extended to a job which has been selected for preemption"`
+	GraceTime   Int32             `json:"grace_time" description:"GraceTime - Grace time in seconds to be extended to a job which has been selected for preemption" report:"-"`
 	Maximums    PartitionMaximums `json:"maximums"`
-	Minimums    PartitionMinimums `json:"minimums"`
+	Minimums    PartitionMinimums `json:"minimums" report:"-"`
 	Name        string            `json:"name" description:"PartitionName - Name by which the partition may be referenced"`
-	NodeSets    string            `json:"node_sets" description:"NodeSets - Comma-separated list of nodesets which are associated with this partition"`
+	NodeSets    string            `json:"node_sets" description:"NodeSets - Comma-separated list of nodesets which are associated with this partition" report:"-"`
 	PreemptMode []string          `json:"preempt_mode" description:"PreemptMode - Mechanism used to preempt jobs for this partition when PreemptType=preempt/partition_prio is configured (the \"CLUSTER_GLOBAL\" flag will be ignored when updating a partition)." enum:"CLUSTER_GLOBAL|DISABLED|SUSPEND|REQUEUE|CANCEL|PRIORITY"`
 	Priority    PartitionPriority `json:"priority"`
-	Timeouts    PartitionTimeouts `json:"timeouts"`
-	Topology    string            `json:"topology" description:"Topology - Name of the topology, defined in topology.yaml, used by jobs in this partition"`
-	SuspendTime Number[Int32]     `json:"suspend_time" description:"SuspendTime - Nodes which remain idle or down for this number of seconds will be placed into power save mode (read-only; GLOBAL if both set and infinite are false). (32 bit integer number with flags)"`
+	Timeouts    PartitionTimeouts `json:"timeouts" report:"-"`
+	Topology    string            `json:"topology" description:"Topology - Name of the topology, defined in topology.yaml, used by jobs in this partition" report:"-"`
+	SuspendTime Number[Int32]     `json:"suspend_time" description:"SuspendTime - Nodes which remain idle or down for this number of seconds will be placed into power save mode (read-only; GLOBAL if both set and infinite are false). (32 bit integer number with flags)" report:"-"`
 }
 
 type SinfoRecord struct {
-	Port            Int32             `json:"port" description:"Node TCP port"`
-	Node            SinfoNode         `json:"node"`
+	Port            *Int32            `json:"port" description:"Node TCP port"`
+	Node            *SinfoNode        `json:"node"`
 	Nodes           SinfoNodes        `json:"nodes"`
 	CPUs            SinfoCPUs         `json:"cpus"`
-	Sockets         SinfoSockets      `json:"sockets"`
-	Cores           SinfoCores        `json:"cores"`
-	Threads         SinfoThreads      `json:"threads"`
-	Disk            SinfoDisk         `json:"disk"`
-	Memory          SinfoMemory       `json:"memory"`
-	Weight          SinfoWeight       `json:"weight"`
-	Features        SinfoFeatures     `json:"features"`
-	GRES            SinfoGRES         `json:"gres"`
+	Sockets         *SinfoSockets     `json:"sockets"`
+	Cores           *SinfoCores       `json:"cores"`
+	Threads         *SinfoThreads     `json:"threads"`
+	Disk            SinfoDisk         `json:"disk" report:"-"`
+	Memory          *SinfoMemory      `json:"memory"`
+	Weight          SinfoWeight       `json:"weight" report:"-"`
+	Features        SinfoFeatures     `json:"features" report:"-"`
+	GRES            *SinfoGRES        `json:"gres"`
 	Cluster         string            `json:"cluster" description:"Cluster name if running in a federation"`
-	Comment         string            `json:"comment" description:"Arbitrary descriptive string"`
-	Extra           string            `json:"extra" description:"Arbitrary string used for node filtering if SchedulerParameters=extra_constraints is enabled"`
-	Reason          SinfoReason       `json:"reason"`
-	Reservation     string            `json:"reservation" description:"Name of advanced reservation"`
-	ReasonSetByUser string            `json:"reason_set_by_user" description:"User who set the reason" complex:"keep_empty"`
-	ResourceSpec    SinfoResourceSpec `json:"resource_spec"`
+	Comment         string            `json:"comment" description:"Arbitrary descriptive string" report:"-"`
+	Extra           string            `json:"extra" description:"Arbitrary string used for node filtering if SchedulerParameters=extra_constraints is enabled" report:"-"`
+	Reason          *SinfoReason      `json:"reason"`
+	Reservation     *string           `json:"reservation" description:"Name of advanced reservation"`
+	ReasonSetByUser *string           `json:"reason_set_by_user" description:"User who set the reason" complex:"keep_empty"`
+	ResourceSpec    SinfoResourceSpec `json:"resource_spec" report:"-"`
 	Partition       PartitionInfo     `json:"partition" description:"Partition name; default partition is followed by \"*\""`
 }
 
 type MetaPlugin struct {
-	Type              string `json:"type" description:"Slurm plugin type (if applicable)"`
-	Name              string `json:"name" description:"Slurm plugin name (if applicable)"`
+	Type              string `json:"type" description:"Slurm plugin type (if applicable)" report:"-"`
+	Name              string `json:"name" description:"Slurm plugin name (if applicable)" report:"-"`
 	DataParser        string `json:"data_parser" description:"Slurm data_parser plugin"`
-	AccountingStorage string `json:"accounting_storage" description:"Slurm accounting plugin"`
+	AccountingStorage string `json:"accounting_storage" description:"Slurm accounting plugin" report:"-"`
 }
 
 type MetaClient struct {
-	Source string `json:"source" description:"Client source description"`
+	Source string `json:"source" description:"Client source description" report:"-"`
 	User   string `json:"user" description:"Client user (if known)"`
 	Group  string `json:"group" description:"Client group (if known)"`
 }

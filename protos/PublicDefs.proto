@@ -263,6 +263,8 @@ message JobToCtld {
 
   // Array submission spec for this job. Child identity is runtime-only.
   ArraySpec array_spec = 58;
+  // Before task layout normalization. Zero denotes an unspecified bound.
+  optional uint32 requested_tasks_per_node = 59;
 }
 
 message JobInEmbeddedDb {
@@ -521,6 +523,8 @@ message IoMeta {
 
 message BatchJobAdditionalMeta {
   string interpreter = 1;
+  // Empty for --wrap; absent on submissions predating this field.
+  optional string script_path = 2;
 }
 
 message X11Meta {
@@ -719,6 +723,8 @@ message JobInfo {
   GresMap gres_per_node = 57;
   repeated string scheduled_nodes = 58;
   map<string, uint32> allocated_licenses = 59;
+  optional bool requeue_eligible = 60;
+  optional string script_path = 61;
 }
 
 message StepInfo {

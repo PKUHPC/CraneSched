@@ -7,25 +7,22 @@ package sinfo
 import (
 	"cmp"
 	"fmt"
-	"github.com/PKUHPC/CraneSched/go/compat/utils"
 	"sort"
 	"strconv"
 	"strings"
 	"time"
+
+	"github.com/PKUHPC/CraneSched/go/compat/utils"
 )
 
 // The adapter supplies scheduler facts, in controller declaration order.
 // This model has no RPC or presentation types. In particular, administrative
 // availability and time limits belong to a partition, not its live nodes or QoS.
 type snapshot struct {
-	Cluster           string
-	AccountingStorage string // empty when no Slurm accounting-storage plugin is in use.
-	Nodes             []node
-	Partitions        []partition
-	Reservations      []reservation
-	// Product features absent from the source, distinct from a configured empty
-	// value. Complete structured schemas must validate their implicit fields.
-	UnsupportedFields map[string]string
+	Cluster      string
+	Nodes        []node
+	Partitions   []partition
+	Reservations []reservation
 }
 
 type node struct {

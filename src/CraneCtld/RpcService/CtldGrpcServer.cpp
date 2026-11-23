@@ -1678,15 +1678,22 @@ crane::grpc::StepInfo ProjectStep(const crane::grpc::StepInfo& source,
   return result;
 }
 
+void CopyQueuePaths(const crane::grpc::IoMeta& src, crane::grpc::IoMeta* dst) {
+  dst->set_input_file_pattern(src.input_file_pattern());
+  dst->set_output_file_pattern(src.output_file_pattern());
+  dst->set_error_file_pattern(src.error_file_pattern());
+}
+
 // Creates a query view without changing scheduler or persisted data.
 // Only pass a UID after authenticating the caller.
 crane::grpc::JobInfo ProjectJobForQuery(
     const crane::grpc::JobInfo& source,
-    std::optional<uint32_t> authenticated_uid, bool is_admin) {
+    std::optional<uint32_t> authenticated_uid, bool is_admin,
+    bool public_queue = false) {
   const bool details = authenticated_uid.has_value() &&
                        (is_admin || *authenticated_uid == source.uid());
   crane::grpc::JobInfo result;
-  if (details) {
+  if (details && !public_queue) {
     result = source;
     result.clear_step_info_list();
     result.DiscardUnknownFields();
@@ -1720,6 +1727,8 @@ crane::grpc::JobInfo ProjectJobForQuery(
     result.set_priority(source.priority());
     result.set_requeue_count(source.requeue_count());
     result.set_requeue_if_failed(source.requeue_if_failed());
+    if (source.has_requeue_eligible())
+      result.set_requeue_eligible(source.requeue_eligible());
     result.set_node_num(source.node_num());
     if (source.has_ntasks()) result.set_ntasks(source.ntasks());
     if (source.has_req_total_res_view())
@@ -1780,20 +1789,40 @@ crane::grpc::JobInfo ProjectJobForQuery(
     }
   }
 
+  if (public_queue) {
+    result.set_cwd(source.cwd());
+    result.set_cmd_line(source.cmd_line());
+    if (source.has_script_path()) result.set_script_path(source.script_path());
+    if (source.has_io_meta())
+      CopyQueuePaths(source.io_meta(), result.mutable_io_meta());
+    auto attrs = nlohmann::json::parse(source.extra_attr(), nullptr, false);
+    if (attrs.is_object() && attrs.contains("comment") &&
+        attrs["comment"].is_string())
+      result.set_extra_attr(
+          nlohmann::json{{"comment", attrs["comment"]}}.dump());
+  }
   for (const auto& step : source.step_info_list()) {
     const bool step_details =
         details && (is_admin || *authenticated_uid == step.uid());
-    *result.add_step_info_list() = ProjectStep(step, step_details);
+    auto* target = result.add_step_info_list();
+    *target = ProjectStep(step, step_details && !public_queue);
+    if (public_queue) {
+      target->set_cwd(step.cwd());
+      target->set_cmd_line(step.cmd_line());
+      if (step.has_io_meta())
+        CopyQueuePaths(step.io_meta(), target->mutable_io_meta());
+    }
   }
-  result.set_query_visibility(details ? crane::grpc::QUERY_VISIBILITY_DETAILS
-                                      : crane::grpc::QUERY_VISIBILITY_PUBLIC);
+  result.set_query_visibility(details && !public_queue
+                                  ? crane::grpc::QUERY_VISIBILITY_DETAILS
+                                  : crane::grpc::QUERY_VISIBILITY_PUBLIC);
   return result;
 }
 
 crane::grpc::QueryJobsInfoReply BuildJobQueryReply(
     std::unordered_map<job_id_t, crane::grpc::JobInfo> job_info_map,
-    size_t num_limit, std::optional<uint32_t> authenticated_uid,
-    bool is_admin) {
+    size_t num_limit, std::optional<uint32_t> authenticated_uid, bool is_admin,
+    bool public_queue = false) {
   crane::grpc::QueryJobsInfoReply response;
   auto* jobs = response.mutable_job_info_list();
   jobs->Reserve(job_info_map.size());
@@ -1803,7 +1832,7 @@ crane::grpc::QueryJobsInfoReply BuildJobQueryReply(
   response.set_has_more(has_more);
   if (has_more) jobs->DeleteSubrange(num_limit, jobs->size() - num_limit);
   for (auto& job : *jobs)
-    job = ProjectJobForQuery(job, authenticated_uid, is_admin);
+    job = ProjectJobForQuery(job, authenticated_uid, is_admin, public_queue);
   response.set_ok(true);
   return response;
 }
@@ -1819,17 +1848,24 @@ grpc::Status CraneCtldServiceImpl::QueryJobsInfo(
   if (!request->has_uid())
     return {grpc::StatusCode::INVALID_ARGUMENT, "Caller UID is required"};
 
+  const bool public_queue = request->include_public_queue_details();
+  if (public_queue && (request->mode() != crane::grpc::QUERY_JOBS_INFO_QUEUE ||
+                       request->option_include_completed_jobs()))
+    return {grpc::StatusCode::INVALID_ARGUMENT,
+            "Public queue details require a live queue query"};
   std::optional<uint32_t> authenticated_uid;
   bool is_admin = false;
   // A non-TLS UID is only a claim, including an explicit claim to be root.
   if (g_config.ListenConf.TlsConfig.Enabled) {
     if (auto error = CheckCertAndUIDAllowed_(context, request->uid()); error)
       return {grpc::StatusCode::UNAUTHENTICATED, *error};
-    const auto admin = g_account_manager->CheckUidIsAdmin(request->uid());
-    if (!admin && admin.error() != CraneErrCode::ERR_USER_NO_PRIVILEGE)
-      return {grpc::StatusCode::PERMISSION_DENIED,
-              "Unable to resolve query user permissions"};
-    is_admin = admin.has_value();
+    if (!public_queue) {
+      const auto admin = g_account_manager->CheckUidIsAdmin(request->uid());
+      if (!admin && admin.error() != CraneErrCode::ERR_USER_NO_PRIVILEGE)
+        return {grpc::StatusCode::PERMISSION_DENIED,
+                "Unable to resolve query user permissions"};
+      is_admin = admin.has_value();
+    }
     authenticated_uid = request->uid();
   }
 
@@ -1891,7 +1927,7 @@ grpc::Status CraneCtldServiceImpl::QueryJobsInfo(
   }
 
   *response = BuildJobQueryReply(std::move(job_info_map), num_limit,
-                                 authenticated_uid, is_admin);
+                                 authenticated_uid, is_admin, public_queue);
   return grpc::Status::OK;
 }
 

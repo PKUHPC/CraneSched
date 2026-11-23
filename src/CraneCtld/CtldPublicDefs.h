@@ -1245,6 +1245,7 @@ struct JobInCtld {
 
   int32_t RequeueCount() const { return requeue_count; }
 
+  bool RequeueEligible() const;
   bool ShouldRequeue() const;
   void ResetForRequeue();
 

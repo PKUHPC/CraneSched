@@ -113,7 +113,7 @@ func run(ctx context.Context, config string, argv []string, env map[string]strin
 			// Slurm loads a single job by its allocation ID, then applies array
 			// and display filters. A missing task in an existing array is empty.
 			if !o.steps && len(req.FilterJobIds) == 1 {
-				req = &pb.QueryJobsInfoRequest{Mode: req.Mode, NumLimit: req.NumLimit, FilterJobIds: []*pb.JobIdSelector{{JobId: req.FilterJobIds[0].JobId}}}
+				req = &pb.QueryJobsInfoRequest{IncludePublicQueueDetails: req.IncludePublicQueueDetails, Mode: req.Mode, NumLimit: req.NumLimit, FilterJobIds: []*pb.JobIdSelector{{JobId: req.FilterJobIds[0].JobId}}}
 			}
 			var e error
 			reply, e = util.QueryJobsInfo(ctx, client, req)
@@ -128,7 +128,7 @@ func run(ctx context.Context, config string, argv []string, env map[string]strin
 		if !o.onlyState && len(list(o.jobIDs)) == 1 && len(reply.JobInfoList) == 0 && !o.steps {
 			return fmt.Errorf("slurm_load_jobs error: Invalid job id specified")
 		}
-		if o.verbose > 0 && !o.onlyState {
+		if o.verbose > 0 && !o.onlyState && o.serializer == "" {
 			n := len(reply.JobInfoList)
 			if o.steps {
 				n = 0
@@ -302,6 +302,9 @@ func (o *options) rows(reply *pb.QueryJobsInfoReply) ([]row, error) {
 			continue
 		}
 		result = append(result, row{job: j})
+	}
+	if o.serializer != "" {
+		return result, nil
 	}
 	return result, o.sortRows(result)
 }

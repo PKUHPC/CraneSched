@@ -66,6 +66,9 @@ func stringsArray(values []string) array {
 // declaration order, inline types and explicit empty required arrays used by
 // the CLI's spec_only response. The same types also carry the actual data.
 func reportSchema(t reflect.Type, description, enum string) object {
+	if t.Kind() == reflect.Pointer {
+		t = t.Elem()
+	}
 	var kind, format string
 	switch t.Kind() {
 	case reflect.Struct:
@@ -118,6 +121,9 @@ func reportSchema(t reflect.Type, description, enum string) object {
 // optional scalar values, but leaves string array elements (including argv)
 // intact. Numeric wrappers own their unset/infinite representation.
 func reportValue(v reflect.Value, complex, keepEmpty bool) any {
+	if v.Kind() == reflect.Pointer {
+		v = v.Elem()
+	}
 	if complex {
 		if number, ok := v.Interface().(interface{ ComplexValue() any }); ok {
 			return number.ComplexValue()
@@ -128,6 +134,10 @@ func reportValue(v reflect.Value, complex, keepEmpty bool) any {
 		result := object{}
 		for i := 0; i < v.NumField(); i++ {
 			field := v.Type().Field(i)
+			// Schema-only fields and absent observations have no data value.
+			if field.Tag.Get("report") == "-" || v.Field(i).Kind() == reflect.Pointer && v.Field(i).IsNil() {
+				continue
+			}
 			result = append(result, member{field.Tag.Get("json"), reportValue(v.Field(i), complex, field.Tag.Get("complex") == "keep_empty")})
 		}
 		return result

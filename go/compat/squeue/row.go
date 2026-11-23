@@ -235,11 +235,17 @@ func (r row) value(f string, o *options) (string, error) {
 	case "WCKey":
 		return cmp.Or(strings.TrimPrefix(j.Wckey, "*"), "(null)"), nil
 	case "Comment":
-		return util.PrivateJobField(cmp.Or(gjson.Get(j.ExtraAttr, "comment").String(), "(null)"), j.QueryVisibility), nil
+		return cmp.Or(gjson.Get(j.ExtraAttr, "comment").String(), "(null)"), nil
 	case "Command":
-		return util.PrivateJobField(cmp.Or(j.CmdLine, "(null)"), j.QueryVisibility), nil
+		if j.Type == pb.JobType_Batch {
+			if j.ScriptPath == nil {
+				return "", fmt.Errorf("squeue: error: submitted script path is unavailable for job %d", j.JobId)
+			}
+			return cmp.Or(j.GetScriptPath(), "(null)"), nil
+		}
+		return cmp.Or(j.CmdLine, "(null)"), nil
 	case "WorkDir":
-		return util.PrivateJobField(j.Cwd, j.QueryVisibility), nil
+		return j.Cwd, nil
 	case "State", "StepState", "StateCompact":
 		if int(status) >= len(jobStates) || status < 0 {
 			return "?", nil
@@ -260,7 +266,11 @@ func (r row) value(f string, o *options) (string, error) {
 	case "SchedNodes":
 		return cmp.Or(utils.CompressHosts(j.ScheduledNodes), "(null)"), nil
 	case "StdIn", "StdOut", "StdErr":
-		return r.ioPath(f, o.expand), nil
+		path := r.ioPath(f, o.expand)
+		if r.step == nil {
+			return cmp.Or(path, "(null)"), nil
+		}
+		return path, nil
 	case "tres-per-node":
 		gres := j.GresPerNode
 		if r.step != nil {
@@ -270,7 +280,7 @@ func (r row) value(f string, o *options) (string, error) {
 	case "MaxNodes":
 		return num(j.GetMaxNodes()), nil
 	case "NTPerNode":
-		if j.GetTasksPerNode() == 0 {
+		if j.TasksPerNode == nil {
 			return "N/A", nil
 		}
 		return num(j.GetTasksPerNode()), nil
@@ -278,12 +288,10 @@ func (r row) value(f string, o *options) (string, error) {
 		if status == pb.JobStatus_Pending {
 			allocated = requested
 		}
-		if math.Trunc(allocated.GetCpuCount()) != allocated.GetCpuCount() {
-			return "", fmt.Errorf("squeue: error: fractional CPU allocation")
+		if allocated == nil {
+			return "N/A", nil
 		}
-		parts := []string{fmt.Sprintf("cpu=%.0f", allocated.GetCpuCount()), "mem=" + memory(allocated.GetMemoryBytes(), false), fmt.Sprintf("node=%d", nodes)}
-		parts = append(parts, gresParts(allocated.GetGresMap(), "=")...)
-		return strings.Join(parts, ","), nil
+		return resourceTRES(allocated, nodes, true), nil
 	case "ReqNodes":
 		return utils.CompressHosts(j.ReqNodes), nil
 	case "ExcNodes":
@@ -393,7 +401,10 @@ func (r row) value(f string, o *options) (string, error) {
 		}
 		return cmp.Or(strings.Join(parts, sep), "(null)"), nil
 	case "Requeue":
-		if j.RequeueIfFailed {
+		if j.RequeueEligible == nil {
+			return "", fmt.Errorf("squeue: error: requeue eligibility is unavailable for job %d", j.JobId)
+		}
+		if j.GetRequeueEligible() {
 			return "1", nil
 		}
 		return "0", nil
@@ -445,13 +456,11 @@ func gresParts(g *pb.GresMap, sep string) []string {
 }
 func (r row) ioPath(field string, expand bool) string {
 	j := r.job
-	meta, cwd, visibility := j.IoMeta, j.Cwd, j.QueryVisibility
+	meta, cwd := j.IoMeta, j.Cwd
 	if s := r.step; s != nil {
-		meta, cwd, visibility = s.IoMeta, s.Cwd, s.QueryVisibility
+		meta, cwd = s.IoMeta, s.Cwd
 	}
-	if visibility != pb.QueryVisibility_QUERY_VISIBILITY_DETAILS {
-		return util.RestrictedJobField
-	}
+
 	if r.step != nil && r.step.StepType != pb.StepType_COMMON && j.Type == pb.JobType_Batch {
 		return ""
 	}
@@ -469,10 +478,7 @@ func (r row) ioPath(field string, expand bool) string {
 		pattern = meta.GetErrorFilePattern()
 	}
 	if pattern == "" {
-		if r.step != nil {
-			return ""
-		}
-		return "(null)"
+		return ""
 	}
 	if r.step != nil && (pattern == "all" || meta == nil) {
 		return ""
@@ -540,4 +546,13 @@ func arrayLimit(s *pb.ArraySpec) string {
 		return "%" + num(n)
 	}
 	return ""
+}
+
+func resourceTRES(rv *pb.ResourceView, nodes uint32, billing bool) string {
+	cpu := strconv.FormatFloat(rv.GetCpuCount(), 'f', -1, 64)
+	parts := []string{"cpu=" + cpu, "mem=" + memory(rv.GetMemoryBytes(), false), "node=" + num(nodes)}
+	if billing {
+		parts = append(parts, "billing="+cpu)
+	}
+	return strings.Join(append(parts, gresParts(rv.GetGresMap(), "=")...), ",")
 }
