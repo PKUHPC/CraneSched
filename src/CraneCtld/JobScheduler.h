@@ -1495,7 +1495,10 @@ class JobScheduler {
   std::expected<void, std::string> CreateResv_(
       const crane::grpc::CreateReservationRequest& request);
 
-  std::expected<void, std::string> DeleteResvMeta_(const ResvId& resv_id);
+  enum class ResvDeleteMode { Explicit, OnExpiry };
+  // A positive result defers automatic deletion until the reservation ends.
+  std::expected<std::chrono::milliseconds, std::string> DeleteResvMeta_(
+      const ResvId& resv_id, ResvDeleteMode mode = ResvDeleteMode::Explicit);
 
   std::unique_ptr<SchedulerAlgo> m_node_selection_algo_;
 
@@ -1700,8 +1703,7 @@ class JobScheduler {
   std::unordered_map<ResvId, std::shared_ptr<uvw::timer_handle>>
       m_resv_timer_handles_;
 
-  using ResvTimerQueueElem = std::pair<ResvId, absl::Time>;
-  ConcurrentQueue<ResvTimerQueueElem> m_resv_timer_queue_;
+  ConcurrentQueue<ResvId> m_resv_timer_queue_;
   std::atomic<uint64_t> m_reservation_creation_order_{0};
 
   std::shared_ptr<uvw::async_handle> m_clean_resv_timer_queue_handle_;

@@ -17,6 +17,18 @@ constexpr uint64_t kMemPerCpu = 3872ULL * 1024 * 1024;
 constexpr uint64_t kJobMemPerNode = 4 * kMemPerCpu;
 constexpr char kPartition[] = "step-memory-test";
 
+TEST(ReservationExpiryTest, RoundsUpRemainingTimeUntilDeadline) {
+  using namespace std::chrono_literals;
+  const absl::Time end = absl::FromUnixSeconds(100);
+  const Ctld::ResvMeta reservation{.end_time = end};
+  EXPECT_EQ(reservation.TimeUntilExpiry(end - absl::Microseconds(3800001)),
+            3801ms);
+  EXPECT_EQ(reservation.TimeUntilExpiry(end - absl::Milliseconds(5)), 5ms);
+  EXPECT_EQ(reservation.TimeUntilExpiry(end - absl::Nanoseconds(1)), 1ms);
+  EXPECT_EQ(reservation.TimeUntilExpiry(end), 0ms);
+  EXPECT_EQ(reservation.TimeUntilExpiry(end + absl::Seconds(1)), 0ms);
+}
+
 class JobSchedulerTest : public ::testing::Test {
  protected:
   void SetUp() override {

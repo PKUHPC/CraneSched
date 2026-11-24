@@ -5071,7 +5071,7 @@ std::expected<void, std::string> JobScheduler::CreateResv_(
     if (!ok) CRANE_ERROR("Failed to commit txn for reservation {}.", resv_name);
   }
 
-  m_resv_timer_queue_.enqueue(std::make_pair(resv_name, end_time));
+  m_resv_timer_queue_.enqueue(resv_name);
   m_clean_resv_timer_queue_handle_->send();
 
   return {};
@@ -5094,8 +5094,8 @@ crane::grpc::DeleteReservationReply JobScheduler::DeleteResv(
   return reply;
 }
 
-std::expected<void, std::string> JobScheduler::DeleteResvMeta_(
-    const ResvId& resv_id) {
+std::expected<std::chrono::milliseconds, std::string>
+JobScheduler::DeleteResvMeta_(const ResvId& resv_id, ResvDeleteMode mode) {
   g_meta_container->LockResReduceEvents();
   absl::flat_hash_set<CranedId> craned_ids;
   {
@@ -5103,10 +5103,20 @@ std::expected<void, std::string> JobScheduler::DeleteResvMeta_(
     CRANE_TRACE("Deleting reservation {}", resv_id);
     if (!resv_meta_map->contains(resv_id)) {
       g_meta_container->UnlockResReduceEvents();
+      if (mode == ResvDeleteMode::OnExpiry) return 0ms;
       return std::unexpected(fmt::format("Reservation {} not found", resv_id));
     }
 
-    const auto& resv_meta = resv_meta_map->at(resv_id).GetExclusivePtr();
+    // The exclusive map lock protects the entry through erasure.
+    auto* resv_meta = resv_meta_map->at(resv_id).RawPtr();
+    if (mode == ResvDeleteMode::OnExpiry) {
+      // A queued timer may refer to a previous reservation with this name.
+      auto remaining = resv_meta->TimeUntilExpiry(absl::Now());
+      if (remaining > 0ms) {
+        g_meta_container->UnlockResReduceEvents();
+        return remaining;
+      }
+    }
 
     if (!resv_meta->rn_job_res_map.empty()) {
       g_meta_container->UnlockResReduceEvents();
@@ -5153,7 +5163,7 @@ std::expected<void, std::string> JobScheduler::DeleteResvMeta_(
     if (!ok)
       CRANE_ERROR("Failed to commit transaction for reservation {}.", resv_id);
   }
-  return {};
+  return 0ms;
 }
 
 crane::grpc::DeleteReservationReply JobScheduler::PurgeAllReservations() {
@@ -5257,7 +5267,7 @@ void JobScheduler::CleanResvTimerQueueCb_(
   // It's ok to use an approximate size.
   size_t approximate_size = m_resv_timer_queue_.size_approx();
 
-  std::vector<ResvTimerQueueElem> timer_to_create;
+  std::vector<ResvId> timer_to_create;
   timer_to_create.resize(approximate_size);
 
   size_t actual_size = m_resv_timer_queue_.try_dequeue_bulk(
@@ -5265,8 +5275,7 @@ void JobScheduler::CleanResvTimerQueueCb_(
 
   timer_to_create.resize(actual_size);
 
-  absl::Time now = absl::Now();
-  for (const auto& [reservation_id, end_time] : timer_to_create) {
+  for (const auto& reservation_id : timer_to_create) {
     // If any timer for the reservation exists, remove it.
     auto timer_it = m_resv_timer_handles_.find(reservation_id);
     if (timer_it != m_resv_timer_handles_.end()) {
@@ -5274,22 +5283,26 @@ void JobScheduler::CleanResvTimerQueueCb_(
       m_resv_timer_handles_.erase(timer_it);
     }
 
-    int64_t secs = absl::ToInt64Seconds(end_time - now);
+    auto resv = g_meta_container->GetResvMetaPtr(reservation_id);
+    if (!resv) continue;
+    auto delay = resv->TimeUntilExpiry(absl::Now());
     auto on_timer_cb = [this, reservation_id](const uvw::timer_event&,
                                               uvw::timer_handle& handle) {
-      auto err = DeleteResvMeta_(reservation_id);
+      auto result = DeleteResvMeta_(reservation_id, ResvDeleteMode::OnExpiry);
 
-      if (err.has_value()) {
+      if (!result) {
+        CRANE_WARN("Failed to clean up reservation {}: {}", reservation_id,
+                   result.error());
+      } else if (*result > 0ms) {
+        handle.start(*result, std::chrono::seconds(kEraseResvIntervalSec));
+      } else {
         handle.close();
         m_resv_timer_handles_.erase(reservation_id);
-      } else {
-        CRANE_WARN("Failed to clean up reservation {}: {}", reservation_id,
-                   err.error());
       }
     };
     auto resv_timer_handle_ = uvw_loop->resource<uvw::timer_handle>();
     resv_timer_handle_->on<uvw::timer_event>(std::move(on_timer_cb));
-    resv_timer_handle_->start(std::chrono::seconds(secs),
+    resv_timer_handle_->start(delay,
                               std::chrono::seconds(kEraseResvIntervalSec));
     m_resv_timer_handles_[reservation_id] = std::move(resv_timer_handle_);
   }
