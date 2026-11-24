@@ -124,7 +124,6 @@ func jobReport(r row, o *options) v45.QueueJob {
 		JobState:                []string{state},
 		Name:                    j.Name,
 		Nodes:                   j.GetCranedList(),
-		TasksPerNode:            optional32(j.TasksPerNode),
 		NodeCount:               number32(j.NodeNum),
 		Tasks:                   optional32(j.Ntasks),
 		Partition:               j.Partition,
@@ -152,6 +151,9 @@ func jobReport(r row, o *options) v45.QueueJob {
 		result.TRESPerTask = new(tres)
 	}
 	result.MaxCPUs = number32(0) // No separate CPU ceiling in Crane.
+	if size := j.SubmittedSize; size != nil {
+		result.TasksPerNode = new(number32(size.TasksPerNode))
+	}
 	result.MaxNodes = optional32(r.maxNodes())
 	if deadline := timestamp(j.DeadlineTime); deadline != nil {
 		result.Deadline = *deadline

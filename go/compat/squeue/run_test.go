@@ -322,27 +322,41 @@ func TestJobAndStepQueueFields(t *testing.T) {
 	}
 }
 
-func TestPendingNodeCeilingUsesSubmittedCounts(t *testing.T) {
+func TestSubmittedTaskLayout(t *testing.T) {
 	job := &pb.JobInfo{Status: pb.JobStatus_Pending, MaxNodes: new(uint32(1)), CpusPerTask: new(2.0)}
 	r := row{job: job}
-	if got := r.maxNodes(); got != nil {
-		t.Fatalf("missing submission reported as %d", *got)
-	}
+	o := &options{}
 	for _, tc := range []struct {
-		size         *pb.SubmittedJobSize
-		tasksPerNode uint32
-		want         uint32
+		name      string
+		size      *pb.SubmittedJobSize
+		maxNodes  uint32
+		ntPerNode string
 	}{
-		{&pb.SubmittedJobSize{}, 0, 0},
-		{&pb.SubmittedJobSize{MaxNodes: 1}, 0, 1},
-		{&pb.SubmittedJobSize{Tasks: 1}, 0, 1},
-		{&pb.SubmittedJobSize{}, 2, 2},
+		{"unknown submission", nil, 0, "N/A"},
+		{"unspecified counts", &pb.SubmittedJobSize{}, 0, "0"},
+		{"explicit node limit", &pb.SubmittedJobSize{MaxNodes: 4}, 1, "0"},
+		{"explicit task count", &pb.SubmittedJobSize{Tasks: 1}, 1, "0"},
+		{"tasks per node", &pb.SubmittedJobSize{TasksPerNode: 2}, 2, "2"},
 	} {
-		job.SubmittedSize = tc.size
-		job.TasksPerNode = new(tc.tasksPerNode)
-		if got := r.maxNodes(); got == nil || *got != tc.want {
-			t.Errorf("submitted nodes %d, tasks %d, tasks per node %d: got %v, want %d", tc.size.MaxNodes, tc.size.Tasks, tc.tasksPerNode, got, tc.want)
-		}
+		t.Run(tc.name, func(t *testing.T) {
+			job.SubmittedSize = tc.size
+			if got, err := r.value("NTPerNode", o); err != nil || got != tc.ntPerNode {
+				t.Errorf("NTPerNode = %q, %v; want %q", got, err, tc.ntPerNode)
+			}
+			report := jobReport(r, o)
+			if tc.size == nil {
+				if report.TasksPerNode != nil || report.MaxNodes != nil {
+					t.Error("unknown submission produced task or node counts")
+				}
+				return
+			}
+			if n := report.TasksPerNode; n == nil || !n.Set || uint32(n.Number) != tc.size.TasksPerNode {
+				t.Errorf("tasks_per_node = %v, want %d", n, tc.size.TasksPerNode)
+			}
+			if n := report.MaxNodes; n == nil || !n.Set || uint32(n.Number) != tc.maxNodes {
+				t.Errorf("maximum_nodes = %v, want %d", n, tc.maxNodes)
+			}
+		})
 	}
 }
 

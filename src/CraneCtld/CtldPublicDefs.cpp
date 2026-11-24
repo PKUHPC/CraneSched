@@ -2339,8 +2339,6 @@ void JobInCtld::SetFieldsOfJobInfo(crane::grpc::JobInfo* job_info) const {
   job_info->set_max_nodes(node_num_max);
   if (job_to_ctld.has_submitted_size())
     *job_info->mutable_submitted_size() = job_to_ctld.submitted_size();
-  if (job_to_ctld.has_requested_tasks_per_node())
-    job_info->set_tasks_per_node(job_to_ctld.requested_tasks_per_node());
   if (job_to_ctld.batch_meta().has_script_path())
     job_info->set_script_path(job_to_ctld.batch_meta().script_path());
   job_info->set_requeue_eligible(RequeueEligible());

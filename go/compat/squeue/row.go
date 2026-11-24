@@ -325,10 +325,10 @@ func (r row) value(f string, o *options) (string, error) {
 		}
 		return num(j.NodeNum), nil
 	case "NTPerNode":
-		if j.TasksPerNode == nil {
+		if j.SubmittedSize == nil {
 			return "N/A", nil
 		}
-		return num(j.GetTasksPerNode()), nil
+		return num(j.SubmittedSize.TasksPerNode), nil
 	case "tres-alloc":
 		if status == pb.JobStatus_Pending {
 			allocated = requested
@@ -497,7 +497,7 @@ func (r row) maxNodes() *uint32 {
 	if size.MaxNodes > 0 {
 		return j.MaxNodes // the effective bound after task-count validation
 	}
-	if n := cmp.Or(size.Tasks, j.GetTasksPerNode()); n > 0 {
+	if n := cmp.Or(size.Tasks, size.TasksPerNode); n > 0 {
 		return new(n)
 	}
 	if j.GetCpusPerTask() > 1 {

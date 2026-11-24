@@ -1752,14 +1752,13 @@ crane::grpc::JobInfo ProjectJobForQuery(
     result.set_exclusive(source.exclusive());
     result.set_submit_hostname(source.submit_hostname());
     if (source.has_submitted_size()) {
-      result.mutable_submitted_size()->set_max_nodes(
-          source.submitted_size().max_nodes());
-      result.mutable_submitted_size()->set_tasks(
-          source.submitted_size().tasks());
+      const auto& size = source.submitted_size();
+      auto* submitted = result.mutable_submitted_size();
+      submitted->set_max_nodes(size.max_nodes());
+      submitted->set_tasks(size.tasks());
+      submitted->set_tasks_per_node(size.tasks_per_node());
     }
     if (source.has_max_nodes()) result.set_max_nodes(source.max_nodes());
-    if (source.has_tasks_per_node())
-      result.set_tasks_per_node(source.tasks_per_node());
     if (source.has_memory_per_cpu())
       result.set_memory_per_cpu(source.memory_per_cpu());
     if (source.has_gres_per_node())
@@ -1820,7 +1819,6 @@ crane::grpc::JobInfo ProjectJobForQuery(
     *target = ProjectStep(step, step_details && !public_queue);
     if (public_queue) {
       target->set_cwd(step.cwd());
-      target->set_cmd_line(step.cmd_line());
       if (step.has_io_meta())
         CopyQueuePaths(step.io_meta(), target->mutable_io_meta());
     }

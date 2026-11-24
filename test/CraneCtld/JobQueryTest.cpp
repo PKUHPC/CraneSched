@@ -269,7 +269,7 @@ JobInfo MakeJob(uint32_t id = 71, uint32_t owner = 1001,
   condition->set_delay_seconds(60);
   job.mutable_io_meta()->set_output_file_pattern(kPrivate);
   job.set_max_nodes(4);
-  job.set_tasks_per_node(2);
+  job.mutable_submitted_size()->set_tasks_per_node(2);
   job.set_memory_per_cpu(128);
   job.add_scheduled_nodes("node2");
   *job.mutable_gres_per_node() = res->gres_map();
@@ -365,7 +365,12 @@ TEST(JobQuery, PublicQueueExposesOnlyQueueFields) {
     EXPECT_FALSE(result.requeue_eligible());
     EXPECT_TRUE(result.env().empty());
     EXPECT_FALSE(result.has_pod_meta());
-    EXPECT_FALSE(result.step_info_list(0).container_meta().has_image());
+    const auto& step = result.step_info_list(0);
+    EXPECT_TRUE(step.cmd_line().empty());
+    EXPECT_EQ(step.cwd(), source.step_info_list(0).cwd());
+    EXPECT_EQ(step.io_meta().output_file_pattern(),
+              source.step_info_list(0).io_meta().output_file_pattern());
+    EXPECT_FALSE(step.container_meta().has_image());
     auto native = ProjectJobForQuery(source, caller, false);
     EXPECT_FALSE(native.has_script_path());
     EXPECT_TRUE(native.cwd().empty());
@@ -434,6 +439,7 @@ TEST(JobQuery, UnknownNestedFieldsCannotLeakOrAlterSource) {
   AddUnknown(source.mutable_step_info_list(0)->mutable_gres_per_node());
   AddUnknown(source.mutable_array_spec());
   AddUnknown(source.mutable_array_task());
+  AddUnknown(source.mutable_submitted_size());
   AddUnknown(source.mutable_dependency_status()->mutable_pending(0));
   AddUnknown(source.mutable_dependency_status()->mutable_ready_time());
   AddUnknown(source.mutable_step_info_list(0));
@@ -665,7 +671,6 @@ TEST(JobQuery, QuerySchemaRequiresExplicitFieldClassification) {
                                        "array_task",
                                        "io_meta",
                                        "max_nodes",
-                                       "tasks_per_node",
                                        "memory_per_cpu",
                                        "gres_per_node",
                                        "scheduled_nodes",
@@ -710,6 +715,8 @@ TEST(JobQuery, QuerySchemaRequiresExplicitFieldClassification) {
                                                      "query_visibility"});
   ExpectFields(crane::grpc::ResourceView::descriptor(),
                {"cpu_count", "memory_bytes", "memory_sw_bytes", "gres_map"});
+  ExpectFields(crane::grpc::SubmittedJobSize::descriptor(),
+               {"max_nodes", "tasks", "tasks_per_node"});
   ExpectFields(crane::grpc::GresMap::descriptor(), {"name_gres_map"});
   ExpectFields(crane::grpc::GresCount::descriptor(), {"total", "specified"});
   ExpectFields(crane::grpc::ArraySpec::descriptor(),
