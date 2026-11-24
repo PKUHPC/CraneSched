@@ -7,15 +7,18 @@ package sinfo
 import (
 	"bytes"
 	"context"
+	"encoding/json"
 	"errors"
 	"io"
 	"os"
+	"slices"
 	"strings"
 	"testing"
 	"time"
 
 	"github.com/pkg/term/termios"
 	"golang.org/x/sys/unix"
+	"gopkg.in/yaml.v3"
 )
 
 type memorySource struct {
@@ -63,6 +66,83 @@ func TestRunRepeatedStateFilters(t *testing.T) {
 				t.Fatalf("code=%d stdout=%q stderr=%q closed=%t; want stdout=%q", code, out.String(), diagnostic.String(), source.closed, tc.want)
 			}
 		})
+	}
+}
+
+func TestRunSortWithMissingTelemetry(t *testing.T) {
+	s := testSnapshot()
+	for i := range s.Nodes {
+		s.Nodes[i].TelemetryExpected = true
+	}
+	s.Nodes[0].FreeMemory = new(uint64(48))
+	s.Nodes[1].CPULoad = new(uint64(50))
+	s.Nodes[1].FreeMemory = new(uint64(0))
+	s.Nodes[2].CPULoad = new(uint64(0))
+
+	for _, tc := range []struct {
+		key, column           string
+		wantNodes, wantValues []string
+	}{
+		{"O", "%O", []string{"n03", "n02", "n01"}, []string{"0.00", "0.50", "N/A"}},
+		{"-O", "%O", []string{"n01", "n02", "n03"}, []string{"N/A", "0.50", "0.00"}},
+		{"e", "%e", []string{"n02", "n01", "n03"}, []string{"0", "48", "N/A"}},
+		{"-e", "%e", []string{"n03", "n01", "n02"}, []string{"N/A", "48", "0"}},
+	} {
+		for _, format := range []string{"text", "json", "yaml"} {
+			t.Run(tc.key+"/"+format, func(t *testing.T) {
+				args := []string{"sinfo", "-N", "-h", "-p", "compute", "-S", tc.key}
+				if format == "text" {
+					args = append(args, "-o", "%N|"+tc.column)
+				} else {
+					args = append(args, "--"+format)
+				}
+				source := &memorySource{load: func(context.Context, query) (*snapshot, error) { return s, nil }}
+				var out, diag bytes.Buffer
+				if code := testRunner(source).run(t.Context(), args, nil, &out, &diag); code != 0 || diag.Len() != 0 {
+					t.Fatalf("exit %d, stderr %q", code, &diag)
+				}
+				if format == "text" {
+					var want []string
+					for i, name := range tc.wantNodes {
+						want = append(want, name+"|"+tc.wantValues[i])
+					}
+					if got := strings.Fields(out.String()); !slices.Equal(got, want) {
+						t.Fatalf("rows = %v, want %v", got, want)
+					}
+					return
+				}
+				var doc struct {
+					Sinfo []struct {
+						Nodes  struct{ Nodes []string }
+						CPUs   map[string]any
+						Memory map[string]any
+					}
+				}
+				decode := json.Unmarshal
+				if format == "yaml" {
+					decode = yaml.Unmarshal
+				}
+				if err := decode(out.Bytes(), &doc); err != nil {
+					t.Fatal(err)
+				}
+				var nodes []string
+				for _, row := range doc.Sinfo {
+					if len(row.Nodes.Nodes) != 1 {
+						t.Fatalf("expected one node per row, got %v", row.Nodes.Nodes)
+					}
+					name := row.Nodes.Nodes[0]
+					nodes = append(nodes, name)
+					_, hasLoad := row.CPUs["load"]
+					_, hasFree := row.Memory["free"]
+					if hasLoad != (name != "n01") || hasFree != (name != "n03") {
+						t.Errorf("node %s: load present %t, free memory present %t", name, hasLoad, hasFree)
+					}
+				}
+				if !slices.Equal(nodes, tc.wantNodes) {
+					t.Fatalf("nodes = %v, want %v", nodes, tc.wantNodes)
+				}
+			})
+		}
 	}
 }
 

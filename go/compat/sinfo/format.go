@@ -269,20 +269,18 @@ func column(text string, width int, right bool, cut bool) string {
 	return text + pad
 }
 
-// Validate facts only after querying, in the same order for each output mode.
+// Text columns require observations unless their sort key already orders missing samples.
 func validateProjection(rows []*row, o *plan) error {
-	var needsTopology, needsIntegralCPUs, needsGRES bool
-	needsLoad := strings.ContainsRune(o.Sort, 'O')
-	needsFreeMemory := strings.ContainsRune(o.Sort, 'e')
+	var needsTopology, needsIntegralCPUs, needsGRES, needsLoad, needsFreeMemory bool
 	for _, item := range o.Fields {
 		if item.Field == nil {
 			continue
 		}
 		switch item.Field.Name {
 		case "CPUsLoad":
-			needsLoad = true
+			needsLoad = !strings.ContainsRune(o.Sort, 'O')
 		case "FreeMem":
-			needsFreeMemory = true
+			needsFreeMemory = !strings.ContainsRune(o.Sort, 'e')
 		case "Gres", "GresUsed":
 			needsGRES = true
 		case "CPUsState":
