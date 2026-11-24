@@ -747,7 +747,6 @@ func GetElapsedTime(job *protos.JobInfo) string {
 }
 
 func formatJobTimes(job *protos.JobInfo) jobTimeInfo {
-	// formatTime for submit and start
 	formatTime := func(t time.Time) string {
 		if t.Before(time.Date(1980, 1, 1, 0, 0, 0, 0, time.UTC)) {
 			return "unknown"
@@ -762,7 +761,7 @@ func formatJobTimes(job *protos.JobInfo) jobTimeInfo {
 	endTime := "unknown"
 	timeEnd := job.EndTime.AsTime()
 	if !timeEnd.Before(job.StartTime.AsTime()) && timeEnd.Unix() < util.MaxJobTimeStamp {
-		endTime = timeEnd.In(time.Local).Format("2006-01-02 15:04:05")
+		endTime = formatTime(timeEnd)
 	}
 	// deadline
 	deadline := "unknown"
