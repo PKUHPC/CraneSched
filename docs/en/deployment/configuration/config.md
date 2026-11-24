@@ -398,6 +398,8 @@ Supervisor:
 ```
 
 
+Craned logs and rotated files belong to Craned's runtime user with mode `0600`, preventing ordinary job users from reading them. Existing log permissions are repaired at startup. The log directory must be administrator-managed and unwritable by ordinary users; its existing permissions are preserved because the default directory also contains job scripts and Unix sockets.
+
 ### Supervisor Configuration
 
 Supervisor is CraneSched's job execution management component, responsible for controlling job steps on compute nodes.

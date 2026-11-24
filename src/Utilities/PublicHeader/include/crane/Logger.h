@@ -157,13 +157,19 @@ struct LoggerSinks {
 std::optional<spdlog::level::level_enum> StrToLogLevel(
     const std::string& level);
 
+enum class LogFilePolicy {
+  DEFAULT,
+  PRIVATE_FILE,      // Service-owned files with mode 0600.
+  PRIVATE_DIRECTORY  // Also secure the dedicated parent directory with 0700.
+};
+
 void InitLogger(spdlog::level::level_enum level,
                 const std::string& log_file_path, bool enable_console,
                 uint64_t max_file_size, uint64_t max_file_num,
                 size_t async_queue_size = kDefaultAsyncLogQueueSize,
                 size_t async_thread_count = kDefaultAsyncLogThreadCount,
                 bool async_block_when_full = kDefaultAsyncLogBlockWhenFull,
-                bool private_file = false);
+                LogFilePolicy file_policy = LogFilePolicy::DEFAULT);
 
 std::shared_ptr<spdlog::async_logger> AddLogger(
     const std::string& name, spdlog::level::level_enum level,

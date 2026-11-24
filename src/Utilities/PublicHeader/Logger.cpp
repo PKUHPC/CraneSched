@@ -47,24 +47,48 @@ void SecureLogFile(const spdlog::filename_t& filename, bool create) {
 }
 
 spdlog::file_event_handlers PrivateLogFileHandlers(
-    const std::filesystem::path& path, uint64_t max_files) {
+    const std::filesystem::path& path, uint64_t max_files,
+    LogFilePolicy policy) {
   // Match the rotating sink's limit before inspecting retained files.
   if (max_files > 200000)
     throw spdlog::spdlog_ex("rotating sink: max_files cannot exceed 200000");
-  // Supervisor inherits Craned's identity. Keep its logs private to that
-  // identity, including when Craned uses a permissive umask in daemon mode.
-  auto result = util::os::EnsureServiceDirectory(path.parent_path(), 0700);
-  if (!result)
-    throw spdlog::spdlog_ex(
-        "Failed to secure log directory " + path.parent_path().string(),
-        result.error().value());
+  const bool private_directory = policy == LogFilePolicy::PRIVATE_DIRECTORY;
+  const auto directory = path.has_parent_path() ? path.parent_path() : ".";
+  // Craned's log directory also contains user scripts and sockets. Only
+  // Supervisor has a dedicated directory whose existing mode can be changed.
+  if (private_directory || !std::filesystem::exists(directory)) {
+    auto result = util::os::EnsureServiceDirectory(
+        directory, private_directory ? 0700 : 0755);
+    if (!result)
+      throw spdlog::spdlog_ex(
+          "Failed to secure log directory " + directory.string(),
+          result.error().value());
+  }
 
-  // Repair retained files from previous supervisor runs before rotation can
-  // rename them. Older files beyond the configured count remain protected by
-  // the private directory.
-  for (uint64_t i = 1; i <= max_files; ++i)
-    SecureLogFile(spdlog::sinks::rotating_file_sink_mt::calc_filename(path, i),
-                  false);
+  if (private_directory) {
+    // Older files beyond the configured count are protected by the directory.
+    for (uint64_t i = 1; i <= max_files; ++i)
+      SecureLogFile(
+          spdlog::sinks::rotating_file_sink_mt::calc_filename(path, i), false);
+  } else {
+    // Without a private directory, also repair older rotations left behind
+    // after MaxLogFileNum was reduced. Match spdlog's basename.index.extension.
+    auto [base, extension] =
+        spdlog::details::file_helper::split_by_extension(path.filename());
+    base += ".";
+    for (const auto& entry : std::filesystem::directory_iterator(directory)) {
+      const auto name = entry.path().filename().string();
+      if (!name.starts_with(base) || !name.ends_with(extension) ||
+          name.size() <= base.size() + extension.size())
+        continue;
+      const std::string_view index{
+          name.data() + base.size(),
+          name.size() - base.size() - extension.size()};
+      if (index.front() != '0' &&
+          index.find_first_not_of("0123456789") == std::string_view::npos)
+        SecureLogFile(entry.path(), false);
+    }
+  }
 
   spdlog::file_event_handlers handlers;
   handlers.before_open = [](const spdlog::filename_t& filename) {
@@ -99,11 +123,12 @@ void InitLogger(spdlog::level::level_enum level,
                 const std::string& log_file_path, bool enable_console,
                 uint64_t max_file_size, uint64_t max_file_num,
                 size_t async_queue_size, size_t async_thread_count,
-                bool async_block_when_full, bool private_file) {
+                bool async_block_when_full, LogFilePolicy file_policy) {
   std::vector<spdlog::sink_ptr> sinks;
-  auto handlers = private_file
-                      ? PrivateLogFileHandlers(log_file_path, max_file_num)
-                      : spdlog::file_event_handlers{};
+  auto handlers =
+      file_policy == LogFilePolicy::DEFAULT
+          ? spdlog::file_event_handlers{}
+          : PrivateLogFileHandlers(log_file_path, max_file_num, file_policy);
   auto file_sink = std::make_shared<spdlog::sinks::rotating_file_sink_mt>(
       log_file_path, max_file_size, max_file_num, false, handlers);
   file_sink->set_level(level);
