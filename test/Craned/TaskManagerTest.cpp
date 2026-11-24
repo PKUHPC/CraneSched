@@ -7,7 +7,6 @@
 
 #include <grp.h>
 #include <gtest/gtest.h>
-#include <spdlog/sinks/ostream_sink.h>
 #include <sys/eventfd.h>
 #include <sys/stat.h>
 #include <sys/wait.h>
@@ -18,6 +17,8 @@
 #include <utility>
 
 #include "crane/Logger.h"
+// Logger.h must configure the log level before other spdlog headers.
+#include <spdlog/sinks/ostream_sink.h>
 
 // Include the implementation to exercise the actual CRI configuration code
 // without exposing a production interface solely for tests.
@@ -634,6 +635,9 @@ TEST_F(OomTerminationTest, InitOomMonitorUsesCraneJobAncestor) {
   auto old_version = CgroupManager::GetCgroupVersion();
   auto old_job = g_config.JobCgStr;
   auto old_logger = spdlog::default_logger();
+  std::ostringstream messages;
+  auto sink = std::make_shared<spdlog::sinks::ostream_sink_mt>(messages);
+  auto logger = std::make_shared<spdlog::logger>("oom-init-test", sink);
   absl::Cleanup restore = [&] {
     CgroupManager::SetCgroupVersion(old_version);
     g_config.JobCgStr = old_job;
@@ -643,9 +647,6 @@ TEST_F(OomTerminationTest, InitOomMonitorUsesCraneJobAncestor) {
   g_config.JobCgStr = "job_" + root_.filename().string();
   Write(cg_ / "memory.oom_control", "oom_kill_disable 0\nunder_oom 0\n");
   Write(cg_ / "cgroup.event_control", "");
-  std::ostringstream messages;
-  auto sink = std::make_shared<spdlog::sinks::ostream_sink_mt>(messages);
-  auto logger = std::make_shared<spdlog::logger>("oom-init-test", sink);
   logger->set_level(spdlog::level::warn);
   spdlog::set_default_logger(logger);
 
