@@ -7,13 +7,17 @@
 
 #include <grp.h>
 #include <gtest/gtest.h>
+#include <spdlog/sinks/ostream_sink.h>
 #include <sys/eventfd.h>
 #include <sys/stat.h>
 #include <sys/wait.h>
 
 #include <array>
 #include <fstream>
+#include <sstream>
 #include <utility>
+
+#include "crane/Logger.h"
 
 // Include the implementation to exercise the actual CRI configuration code
 // without exposing a production interface solely for tests.
@@ -624,6 +628,41 @@ class OomTerminationTest : public ::testing::Test {
   std::filesystem::path root_, job_, cg_;
   StepToSupv spec_;
 };
+
+TEST_F(OomTerminationTest, InitOomMonitorUsesCraneJobAncestor) {
+  using Common::CgroupManager;
+  auto old_version = CgroupManager::GetCgroupVersion();
+  auto old_job = g_config.JobCgStr;
+  auto old_logger = spdlog::default_logger();
+  absl::Cleanup restore = [&] {
+    CgroupManager::SetCgroupVersion(old_version);
+    g_config.JobCgStr = old_job;
+    spdlog::set_default_logger(old_logger);
+  };
+  CgroupManager::SetCgroupVersion(Common::CgConstant::CgroupVersion::CGROUP_V1);
+  g_config.JobCgStr = "job_" + root_.filename().string();
+  Write(cg_ / "memory.oom_control", "oom_kill_disable 0\nunder_oom 0\n");
+  Write(cg_ / "cgroup.event_control", "");
+  std::ostringstream messages;
+  auto sink = std::make_shared<spdlog::sinks::ostream_sink_mt>(messages);
+  auto logger = std::make_shared<spdlog::logger>("oom-init-test", sink);
+  logger->set_level(spdlog::level::warn);
+  spdlog::set_default_logger(logger);
+
+  StepInstance step(spec_);
+  step.step_user_cg = std::make_unique<Common::CgroupV1>(cg_.string(), nullptr);
+  step.InitOomMonitor();
+
+  // The workload uses temporary files. The missing ancestor's diagnostic
+  // identifies the actual path requested by the production initialization.
+  EXPECT_NE(
+      messages.str().find("/sys/fs/cgroup/memory/crane/" + g_config.JobCgStr),
+      std::string::npos);
+  std::ifstream registration(cg_ / "cgroup.event_control");
+  int event_fd = -1;
+  ASSERT_TRUE(registration >> event_fd);
+  EXPECT_GE(event_fd, 0);
+}
 
 TEST_F(OomTerminationTest, OomWinsOverSuccessfulShellExitAndPreservesReason) {
   StepInstance step(spec_);

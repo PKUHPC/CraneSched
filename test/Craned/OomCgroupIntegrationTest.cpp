@@ -12,6 +12,7 @@
 #include <unistd.h>
 
 #include <fstream>
+#include <optional>
 
 #include "../../src/Craned/Supervisor/TaskManager.h"
 
@@ -25,6 +26,15 @@ class OomCgroupIntegrationTest : public ::testing::Test {
   void SetUp() override {
     const char* base = std::getenv("CRANE_TEST_MEMORY_CGROUP_ROOT");
     if (!base) GTEST_SKIP() << "No delegated memory cgroup supplied";
+    auto score = ReadValue("/proc/self/oom_score_adj");
+    ASSERT_TRUE(score.has_value());
+    if (*score != -1000) {
+      if (!Write("/proc/self/oom_score_adj", "-1000"))
+        GTEST_SKIP() << "Cannot protect the test shell from OOM: lowering "
+                        "oom_score_adj requires CAP_SYS_RESOURCE";
+      original_oom_score_adj_ = *score;
+    }
+    ASSERT_EQ(ReadValue("/proc/self/oom_score_adj"), -1000);
     struct statfs fs{};
     ASSERT_EQ(statfs(base, &fs), 0);
     constexpr long kCgroupV1Magic = 0x27e0eb;
@@ -41,7 +51,8 @@ class OomCgroupIntegrationTest : public ::testing::Test {
     else
       ASSERT_TRUE(Write(root_ / "memory.use_hierarchy", "1"));
     // Bound the whole test even if a lower-level limit is unexpectedly ignored.
-    ASSERT_TRUE(SetLimit(root_, 256 * 1024 * 1024));
+    SetLimit(root_, 256 * 1024 * 1024);
+    if (HasFatalFailure() || IsSkipped()) return;
     job_ = root_ / "job";
     step_ = job_ / "step_1/user";
     task_ = step_ / "task_0";
@@ -62,6 +73,9 @@ class OomCgroupIntegrationTest : public ::testing::Test {
       while (procs >> pid) kill(pid, SIGKILL);
       EXPECT_EQ(rmdir(it->c_str()), 0) << *it << ": " << strerror(errno);
     }
+    if (original_oom_score_adj_)
+      EXPECT_TRUE(Write("/proc/self/oom_score_adj",
+                        std::to_string(*original_oom_score_adj_)));
   }
 
   static bool Write(const std::filesystem::path& path, std::string_view value) {
@@ -71,19 +85,30 @@ class OomCgroupIntegrationTest : public ::testing::Test {
     return !file.fail();
   }
 
-  bool SetLimit(const std::filesystem::path& path, uint64_t bytes) {
-    if (!Write(path / (v2_ ? "memory.max" : "memory.limit_in_bytes"),
-               std::to_string(bytes)))
-      return false;
-    auto swap =
+  static std::optional<int64_t> ReadValue(const std::filesystem::path& path) {
+    std::ifstream input(path);
+    int64_t value;
+    if (!(input >> value)) return std::nullopt;
+    return value;
+  }
+
+  void SetLimit(const std::filesystem::path& path, int64_t bytes) {
+    const auto memory = path / (v2_ ? "memory.max" : "memory.limit_in_bytes");
+    ASSERT_TRUE(Write(memory, std::to_string(bytes))) << memory;
+    ASSERT_EQ(ReadValue(memory), bytes) << memory;
+    const auto swap =
         path / (v2_ ? "memory.swap.max" : "memory.memsw.limit_in_bytes");
-    if (std::filesystem::exists(swap))
-      return Write(swap, v2_ ? "0" : std::to_string(bytes));
-    return true;
+    const auto swap_limit = v2_ ? 0 : bytes;
+    if (!std::filesystem::exists(swap) ||
+        !Write(swap, std::to_string(swap_limit)))
+      GTEST_SKIP() << "Cannot bound memory plus swap in the delegated subtree: "
+                   << swap << " is unavailable or not writable";
+    ASSERT_EQ(ReadValue(swap), swap_limit) << swap;
   }
 
   void Run(const std::filesystem::path& limit_path, bool oom) {
-    ASSERT_TRUE(SetLimit(limit_path, 32 * 1024 * 1024));
+    SetLimit(limit_path, 32 * 1024 * 1024);
+    if (HasFatalFailure() || IsSkipped()) return;
     StepToSupv spec;
     spec.set_type(crane::grpc::Batch);
     spec.set_step_type(crane::grpc::PRIMARY);
@@ -109,9 +134,7 @@ class OomCgroupIntegrationTest : public ::testing::Test {
           dup2(output[1], STDERR_FILENO) == -1)
         _exit(120);
       close(output[1]);
-      if (!Write("/proc/self/oom_score_adj", "-1000") ||
-          !Write(task_ / "cgroup.procs", std::to_string(getpid())))
-        _exit(121);
+      if (!Write(task_ / "cgroup.procs", std::to_string(getpid()))) _exit(121);
       // Bound failure time without introducing timing-based OOM assertions.
       execlp("timeout", "timeout", "--signal=KILL", "20s", "/bin/bash", "-c",
              script.c_str(), nullptr);
@@ -151,6 +174,7 @@ class OomCgroupIntegrationTest : public ::testing::Test {
   }
 
   bool v2_{};
+  std::optional<int64_t> original_oom_score_adj_;
   std::filesystem::path root_, job_, step_, task_;
   std::vector<std::filesystem::path> paths_;
 };

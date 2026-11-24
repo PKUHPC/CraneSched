@@ -626,7 +626,8 @@ void StepInstance::InitOomMonitor() {
   if (!step_user_cg) return;
   if (!oom_monitor.Start(
           Common::CgroupManager::MemoryCgroupPath(step_user_cg->CgroupName()),
-          Common::CgroupManager::MemoryCgroupPath(g_config.JobCgStr),
+          Common::CgroupManager::MemoryCgroupPath(
+              Common::CgConstant::kRootCgNamePrefix + "/" + g_config.JobCgStr),
           Common::CgroupManager::IsCgV2())) {
     CRANE_WARN("[Step #{}.{}] OOM monitoring is incomplete", job_id, step_id);
   }
