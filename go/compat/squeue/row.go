@@ -172,6 +172,24 @@ func supported(f string) bool {
 		return false
 	}
 }
+func (r row) userName() string {
+	if r.step == nil || r.job.Uid == r.step.Uid {
+		return r.job.Username
+	}
+	uid := num(r.step.Uid)
+	if account, err := user.LookupId(uid); err == nil {
+		return account.Username
+	}
+	return uid
+}
+
+func (r row) minMemory() uint64 {
+	if r.job.MemoryPerCpu != nil {
+		return *r.job.MemoryPerCpu
+	}
+	return r.job.GetReqTotalResView().GetMemoryBytes() / uint64(max(1, r.job.NodeNum))
+}
+
 func (r row) value(f string, o *options) (string, error) {
 	j := r.job
 	status := j.Status
@@ -250,8 +268,11 @@ func (r row) value(f string, o *options) (string, error) {
 	case "Account":
 		return j.Account, nil
 	case "UserName":
-		return cmp.Or(j.Username, "(null)"), nil
+		return cmp.Or(r.userName(), "(null)"), nil
 	case "UserId":
+		if r.step != nil {
+			return num(r.step.Uid), nil
+		}
 		return num(j.Uid), nil
 	case "GroupId":
 		return num(j.Gid), nil
@@ -425,10 +446,7 @@ func (r row) value(f string, o *options) (string, error) {
 		}
 		return cmp.Or(value, "(null)"), nil
 	case "MinMemory":
-		if j.MemoryPerCpu != nil {
-			return memory(*j.MemoryPerCpu, o.noConvert), nil
-		}
-		return memory(requested.GetMemoryBytes()/uint64(max(1, nodes)), o.noConvert), nil
+		return memory(r.minMemory(), o.noConvert), nil
 	case "Licenses", "LicensesAlloc":
 		licenses := j.LicensesCount
 		if f == "LicensesAlloc" {

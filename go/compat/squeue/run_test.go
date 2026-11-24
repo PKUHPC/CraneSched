@@ -31,6 +31,9 @@ import (
 func TestQueuePresentation(t *testing.T) {
 	first := &pb.JobInfo{JobId: 7, Name: "RunLong", Partition: "cpu", Username: "alice", Status: pb.JobStatus_Running, ElapsedTime: &durationpb.Duration{Seconds: 600}}
 	second := &pb.JobInfo{JobId: 19, Name: "runlong", Partition: "cpu", Username: "bob", Status: pb.JobStatus_Running, ElapsedTime: &durationpb.Duration{Seconds: 120}}
+	first.MemoryPerCpu = new(uint64(1 << 30))
+	first.ReqTotalResView = &pb.ResourceView{MemoryBytes: 8 << 30, CpuCount: 8}
+	second.ReqTotalResView = &pb.ResourceView{MemoryBytes: 2 << 30, CpuCount: 1}
 	reply := &pb.QueryJobsInfoReply{Ok: true, JobInfoList: []*pb.JobInfo{first, second}}
 	for _, tc := range []struct {
 		name string
@@ -39,6 +42,7 @@ func TestQueuePresentation(t *testing.T) {
 	}{
 		{"case-insensitive filter and elapsed sort", []string{"-n", "RUNLONG", "-S", "M", "-h", "-o", "%i|%j|%M"}, "19|runlong|2:00\n7|RunLong|10:00\n"},
 		{"state-only records", []string{"--only-job-state", "-h", "-o", "%i|%t|%j|%P|%M"}, "7|R|(null)|(null)|0:00\n19|R|(null)|(null)|0:00\n"},
+		{"sort by memory request per CPU or per node", []string{"-S", "m", "-o", "%i|%m"}, "7|1G\n19|2G\n"},
 		{"inclusive running-over", []string{"--running-over=10", "-h", "-O", "JobId:0|,TimeUsed:0"}, "7|10:00\n"},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
@@ -75,7 +79,7 @@ type referenceQueue struct {
 func (s *referenceQueue) QueryClusterInfo(_ context.Context, req *pb.QueryClusterInfoRequest) (*pb.QueryClusterInfoReply, error) {
 	reply := &pb.QueryClusterInfoReply{Ok: true, ClusterName: "compute"}
 	if req.IncludeNodes {
-		reply.Nodes = []*pb.CranedInfo{{Hostname: "slurm03", NodeHostname: "host03"}}
+		reply.Nodes = []*pb.CranedInfo{{Hostname: "slurm03", NodeHostname: "host03"}, {Hostname: "slurm02"}, {Hostname: "slurm01"}}
 	}
 	return reply, nil
 }
@@ -120,13 +124,14 @@ func TestQueueTextOutput(t *testing.T) {
 		IoMeta: &pb.IoMeta{OutputFilePattern: "/tmp/build-%j.log"},
 	}
 	active := &pb.JobInfo{
-		JobId: 8, Type: pb.JobType_Batch, Status: pb.JobStatus_Running, Partition: "cpu", Username: "alice",
+		JobId: 8, Type: pb.JobType_Batch, Status: pb.JobStatus_Running, Partition: "cpu", Uid: 1001, Username: "alice",
+		PendingReasonOrCranedList: &pb.JobInfo_CranedList{CranedList: "slurm[02-03]"}, ExecutionNode: []string{"slurm02"},
 		QueryVisibility: visibility,
 		StepInfoList: []*pb.StepInfo{
 			{StepType: pb.StepType_DAEMON, StepId: 0, Status: pb.JobStatus_Running, QueryVisibility: visibility},
 			{StepType: pb.StepType_PRIMARY, StepId: 1, Status: pb.JobStatus_Running, QueryVisibility: visibility},
 			{StepType: pb.StepType_COMMON, StepId: 2, QueryVisibility: visibility, Name: "worker", Status: pb.JobStatus_Running,
-				Ntasks: new(uint32(3)), ExecutionNode: []string{"n1"}, TimeLimit: durationpb.New(time.Minute)},
+				Ntasks: new(uint32(3)), CranedList: "slurm[02-03]", ExecutionNode: []string{"slurm02"}, TimeLimit: durationpb.New(time.Minute)},
 		},
 	}
 	config := serveQueue(t, &referenceQueue{jobs: []*pb.JobInfo{held, active}})
@@ -145,8 +150,15 @@ func TestQueueTextOutput(t *testing.T) {
 		{"environment partition filter", []string{"-hj7", "-o", "%i"}, []string{"SQUEUE_PARTITION=other"}, "", ""},
 		{"pending job excluded by elapsed filter", []string{"-hj7", "--running-under=15", "-o", "%i"}, nil, "", ""},
 		{"invalid job field is echoed", []string{"-hj7", "-o", "%j/%@@"}, nil, "compile/%@@\n", "squeue: error: Invalid job format specification: @\n"},
+		{"job nodelist width", []string{"-j8", "-o", "%.4N|%4N"}, nil, "NODELIST|NODE\nslurm[02-03]|slur\n", ""},
+		{"step nodelist width", []string{"-s8.0", "-o", "%.4N|%4N"}, nil, "NODELIST|NODE\nslurm[02-03]|slur\n", ""},
+		{"job filter matches secondary node alias", []string{"-hj8", "-w", "host03", "-o", "%i"}, nil, "8\n", ""},
+		{"step filter matches secondary node alias", []string{"-hs8.0", "-w", "host03", "-o", "%i"}, nil, "8.0\n", ""},
+		{"job exists outside node filter", []string{"-hj8", "-w", "slurm01", "-o", "%i"}, nil, "", ""},
+		{"job numeric UID with leading zeros", []string{"-hj8", "-u", "01001", "-o", "%U"}, nil, "1001\n", ""},
+		{"step owner differs from job owner", []string{"-hs8.0", "-u", "0000", "-o", "%U|%u"}, nil, "0|root\n", ""},
 		{"empty format code", []string{"-hj7", "-o", "%%"}, nil, "\n", ""},
-		{"step uses its own short fields", []string{"-hs8.0", "-o", "%i|%j|%N|%A|%t"}, nil, "8.0|worker|n1|3|%t\n", "squeue: error: Invalid job step format specification: t\n"},
+		{"step uses its own short fields", []string{"-hs8.0", "-o", "%i|%j|%N|%A|%t"}, nil, "8.0|worker|slurm[02-03]|3|%t\n", "squeue: error: Invalid job step format specification: t\n"},
 		{"step stream and array defaults", []string{"-hs8.0", "-O", "ArrayJobId:0|,ArrayTaskId:0|,StdIn:0|,StdOut:0|,StdErr:0"}, nil, "0|N/A|||\n", ""},
 		{"batch selector uses numeric step zero", []string{"-hs8.batch", "-o", "%i"}, nil, "8.0\n", ""},
 		{"extern selector uses numeric step zero", []string{"-hs8.extern", "-o", "%i"}, nil, "8.0\n", ""},

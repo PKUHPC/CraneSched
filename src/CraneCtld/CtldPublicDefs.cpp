@@ -1951,7 +1951,8 @@ bool JobInCtld::RecordStepExitStatus(crane::grpc::JobStatus step_status,
 
   // Scheduler failures have no process wait status. Recovery of old jobs
   // likewise cannot reconstruct outcomes for previously removed steps.
-  if (step_status == crane::grpc::JobStatus::OutOfMemory ||
+  if ((step_status == crane::grpc::Failed && code == 0) ||
+      step_status == crane::grpc::JobStatus::OutOfMemory ||
       code == ExitCode::kTerminationSignalBase ||
       code >= ExitCode::kCraneExitCodeBase) {
     runtime_attr.clear_max_step_wait_status();
@@ -2149,6 +2150,14 @@ void JobInCtld::TriggerTerminalDependencyEvents(absl::Time end_time) {
                           exit_code != 0 ? end_time : absl::InfiniteFuture());
 }
 
+void JobInCtld::SetMemoryPerCpu(uint64_t bytes, uint64_t partition_max) {
+  if (partition_max != 0) bytes = std::min(bytes, partition_max);
+  effective_memory_per_cpu = bytes;
+  uint64_t per_task = req_task_res_view.CpuCountDouble() * bytes;
+  req_task_res_view.SetMemoryBytes(per_task);
+  req_task_res_view.SetMemorySwBytes(per_task);
+}
+
 void JobInCtld::SetFieldsByJobToCtld(crane::grpc::JobToCtld const& val) {
   job_to_ctld = val;
   runtime_attr.set_max_step_wait_status(0);
@@ -2193,13 +2202,8 @@ void JobInCtld::SetFieldsByJobToCtld(crane::grpc::JobToCtld const& val) {
     req_task_res_view.SetCpuCount(cpu_t(1));
   }
 
-  if (val.has_mem_per_cpu()) {
-    uint64_t mem_per_task =
-        static_cast<double>(req_task_res_view.GetCpuCount()) *
-        val.mem_per_cpu();
-    req_task_res_view.SetMemoryBytes(mem_per_task);
-    req_task_res_view.SetMemorySwBytes(mem_per_task);
-  }
+  effective_memory_per_cpu.reset();
+  if (val.has_mem_per_cpu()) SetMemoryPerCpu(val.mem_per_cpu());
 
   uid = val.uid();
   password_entry = std::make_unique<PasswordEntry>(uid);
@@ -2344,8 +2348,8 @@ void JobInCtld::SetFieldsOfJobInfo(crane::grpc::JobInfo* job_info) const {
   job_info->set_requeue_eligible(RequeueEligible());
   if (runtime_attr.has_max_step_wait_status())
     job_info->set_max_step_wait_status(runtime_attr.max_step_wait_status());
-  if (job_to_ctld.has_mem_per_cpu())
-    job_info->set_memory_per_cpu(job_to_ctld.mem_per_cpu());
+  if (effective_memory_per_cpu)
+    job_info->set_memory_per_cpu(*effective_memory_per_cpu);
   if (job_to_ctld.has_gres_per_node())
     *job_info->mutable_gres_per_node() = job_to_ctld.gres_per_node();
   if (Status() == crane::grpc::Pending)

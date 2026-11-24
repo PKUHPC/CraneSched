@@ -9,6 +9,8 @@ import (
 	"io"
 	"strconv"
 	"strings"
+
+	pb "github.com/PKUHPC/CraneSched/go/generated/protos"
 )
 
 type field struct {
@@ -332,6 +334,22 @@ func (o *options) columns(diag io.Writer) ([]column, error) {
 	return cols, nil
 }
 
+// Slurm treats a right-aligned host list's width as a minimum.
+func (c column) truncate(r *row) bool {
+	if !c.right {
+		return true
+	}
+	switch c.field.name {
+	case "NodeList", "Nodes", "SchedNodes":
+		return false
+	case "ReasonList":
+		return r != nil && r.job.Status == pb.JobStatus_Pending
+	case "ReqNodes", "ExcNodes":
+		return r == nil
+	}
+	return true
+}
+
 func printLine(w io.Writer, cols []column, r *row, o *options) error {
 	var b strings.Builder
 	for _, c := range cols {
@@ -344,10 +362,10 @@ func printLine(w io.Writer, cols []column, r *row, o *options) error {
 			}
 		}
 		if c.width > 0 {
-			if len(v) > c.width {
+			if len(v) > c.width && c.truncate(r) {
 				v = v[:c.width]
 			}
-			pad := strings.Repeat(" ", c.width-len(v))
+			pad := strings.Repeat(" ", max(0, c.width-len(v)))
 			if c.right {
 				b.WriteString(pad)
 				b.WriteString(v)

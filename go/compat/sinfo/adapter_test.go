@@ -314,7 +314,7 @@ func TestStructuredImplicitCapabilitiesDoNotBecomeZeroValues(t *testing.T) {
 			}
 		}
 		cpus := item["cpus"].(map[string]any)
-		if fmt.Sprint(cpus["total"]) != "4" || fmt.Sprint(cpus["other"]) != "0" || cpus["load"] != nil {
+		if _, hasLoad := cpus["load"]; fmt.Sprint(cpus["total"]) != "4" || fmt.Sprint(cpus["other"]) != "0" || hasLoad {
 			t.Fatalf("missing load or known counts misreported: %v", cpus)
 		}
 		out.Reset()

@@ -271,10 +271,28 @@ func matchesJob(j *pb.JobInfo, sel *pb.JobIdSelector) bool {
 	return j.JobId == sel.JobId || a != nil && a.ArrayJobId == sel.JobId
 }
 
+func (o *options) matchesNodes(allocated string, execution []string) (bool, error) {
+	if len(o.nodeNames) == 0 {
+		return true, nil
+	}
+	if allocated == "" {
+		return slices.ContainsFunc(execution, func(name string) bool { return o.nodeNames[name] }), nil
+	}
+	hosts, err := utils.ParseHostList(allocated)
+	if err != nil {
+		return false, fmt.Errorf("squeue: error: invalid allocation node list %q: %w", allocated, err)
+	}
+	for name := range o.nodeNames {
+		if hosts.Match(name) {
+			return true, nil
+		}
+	}
+	return false, nil
+}
+
 func (o *options) matchesStep(r row) bool {
 	s := r.step
 	if s.Status == pb.JobStatus_Pending || o.users != nil && !slices.Contains(o.users, num(s.Uid)) ||
-		o.nodeNames != nil && !slices.ContainsFunc(s.ExecutionNode, func(name string) bool { return o.nodeNames[name] }) ||
 		len(o.req.FilterPartitions) > 0 && !slices.Contains(o.req.FilterPartitions, r.job.Partition) {
 		return false
 	}
@@ -337,9 +355,19 @@ func (o *options) rows(reply *pb.QueryJobsInfoReply) ([]row, error) {
 		if o.steps {
 			for _, step := range j.StepInfoList {
 				r := row{job: j, step: step}
-				if o.serializer != "" || o.matchesStep(r) {
-					result = append(result, r)
+				if o.serializer == "" {
+					if !o.matchesStep(r) {
+						continue
+					}
+					match, err := o.matchesNodes(step.CranedList, step.ExecutionNode)
+					if err != nil {
+						return nil, err
+					}
+					if !match {
+						continue
+					}
 				}
+				result = append(result, r)
 			}
 			continue
 		}
@@ -365,7 +393,11 @@ func (o *options) rows(reply *pb.QueryJobsInfoReply) ([]row, error) {
 		if len(o.states) > 0 && !slices.Contains(o.states, j.Status) {
 			continue
 		}
-		if o.nodeNames != nil && !slices.ContainsFunc(j.ExecutionNode, func(name string) bool { return o.nodeNames[name] }) {
+		match, err := o.matchesNodes(j.GetCranedList(), j.ExecutionNode)
+		if err != nil {
+			return nil, err
+		}
+		if !match {
 			continue
 		}
 		if o.over > 0 || o.under > 0 {
@@ -639,7 +671,7 @@ func (r row) sortNumber(field string) int64 {
 	case "SubmitTime":
 		return j.SubmitTime.GetSeconds()
 	default:
-		return int64(j.GetReqTotalResView().GetMemoryBytes() / uint64(max(1, j.NodeNum)))
+		return int64(r.minMemory() >> 20)
 	}
 }
 

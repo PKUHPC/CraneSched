@@ -1250,6 +1250,35 @@ TEST(StepExitStatusTest, RetainsHighestProcessStatusAcrossRecovery) {
   EXPECT_FALSE(recovered.RecordStepExitStatus(crane::grpc::Completed, 0));
 }
 
+TEST(JobInfoTest, MemoryPerCpuReflectsEffectiveTaskRequest) {
+  constexpr uint64_t gib = 1ULL << 30;
+  Ctld::JobInCtld job{};
+  crane::grpc::JobToCtld request;
+  request.add_gids(0);
+  request.set_cpus_per_task(2);
+  request.set_mem_per_cpu(8 * gib);
+  job.SetFieldsByJobToCtld(request);
+  job.SetMemoryPerCpu(request.mem_per_cpu(), 4 * gib);
+  crane::grpc::JobInfo info;
+  job.SetFieldsOfJobInfo(&info);
+  ASSERT_TRUE(info.has_memory_per_cpu());
+  EXPECT_EQ(info.memory_per_cpu(), 4 * gib);
+  EXPECT_EQ(job.req_task_res_view.GetMemoryBytes(), 8 * gib);
+  EXPECT_EQ(job.JobToCtld().mem_per_cpu(), 8 * gib);
+}
+
+TEST(StepExitStatusTest, SyntheticFailureHasNoProcessExitStatus) {
+  Ctld::JobInCtld job;
+  crane::grpc::JobToCtld request;
+  request.add_gids(0);
+  job.SetFieldsByJobToCtld(request);
+  EXPECT_FALSE(job.RecordStepExitStatus(crane::grpc::Completed, 0));
+  ASSERT_TRUE(job.RuntimeAttr().has_max_step_wait_status());
+  EXPECT_EQ(job.RuntimeAttr().max_step_wait_status(), 0U);
+  EXPECT_TRUE(job.RecordStepExitStatus(crane::grpc::Failed, 0));
+  EXPECT_FALSE(job.RuntimeAttr().has_max_step_wait_status());
+}
+
 TEST(ShouldRequeueTest, EligibilityUsesClusterDefaultAndSubmissionFlags) {
   const bool old_default = g_config.CtldConf.JobRequeue;
   Ctld::JobInCtld job;

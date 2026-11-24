@@ -8695,16 +8695,9 @@ CraneExpectedRich<void> JobScheduler::AcquireJobAttributes(JobInCtld* job) {
       CRANE_TRACE("default_mem_per_node for job #{} is set to {}", job->JobId(),
                   part_meta.default_mem_per_node);
     } else if (part_meta.default_mem_per_cpu != 0) {
-      auto job_mem_per_cpu = part_meta.default_mem_per_cpu;
-      job->req_task_res_view.SetMemoryBytes(
-          static_cast<double>(job->req_task_res_view.GetCpuCount()) *
-          job_mem_per_cpu);
-      job->req_task_res_view.SetMemorySwBytes(
-          static_cast<double>(job->req_task_res_view.GetCpuCount()) *
-          job_mem_per_cpu);
       user_set_mem_per_cpu = true;
       CRANE_TRACE("default_mem_per_cpu for job #{} is set to {}", job->JobId(),
-                  job_mem_per_cpu);
+                  part_meta.default_mem_per_cpu);
     } else {
       CRANE_ERROR(
           "Neither mem_per_cpu nor mem_per_node is set for job #{} and "
@@ -8718,27 +8711,23 @@ CraneExpectedRich<void> JobScheduler::AcquireJobAttributes(JobInCtld* job) {
     }
   }
 
-  if (part_meta.max_mem_per_cpu != 0) {
-    if (user_set_mem_per_cpu) {
-      auto max_job_mem =
-          static_cast<double>(job->req_task_res_view.CpuCountDouble()) *
-          part_meta.max_mem_per_cpu;
-      if (job->req_task_res_view.GetMemoryBytes() > max_job_mem) {
-        job->req_task_res_view.SetMemoryBytes(max_job_mem);
-        job->req_task_res_view.SetMemorySwBytes(max_job_mem);
-      }
-    } else {
-      // mem_per_node / (ntasks_per_node * cpus_per_task) <= max_mem_per_cpu
-      // ntasks_per_node >= ceil(mem_per_node / (max_mem_per_cpu *
-      // cpus_per_task))
-      double cpus_per_task = job->req_task_res_view.CpuCountDouble();
-      if (cpus_per_task > 0) {
-        auto required_min = static_cast<uint32_t>(std::ceil(
-            static_cast<double>(job->req_node_res_view.GetMemoryBytes()) /
-            (part_meta.max_mem_per_cpu * cpus_per_task)));
-        job->ntasks_per_node_min =
-            std::max(job->ntasks_per_node_min, required_min);
-      }
+  if (user_set_mem_per_cpu) {
+    const auto& request = job->JobToCtld();
+    job->SetMemoryPerCpu(request.has_mem_per_cpu()
+                             ? request.mem_per_cpu()
+                             : part_meta.default_mem_per_cpu,
+                         part_meta.max_mem_per_cpu);
+  } else if (part_meta.max_mem_per_cpu != 0) {
+    // mem_per_node / (ntasks_per_node * cpus_per_task) <= max_mem_per_cpu
+    // ntasks_per_node >= ceil(mem_per_node / (max_mem_per_cpu *
+    // cpus_per_task))
+    double cpus_per_task = job->req_task_res_view.CpuCountDouble();
+    if (cpus_per_task > 0) {
+      auto required_min = static_cast<uint32_t>(std::ceil(
+          static_cast<double>(job->req_node_res_view.GetMemoryBytes()) /
+          (part_meta.max_mem_per_cpu * cpus_per_task)));
+      job->ntasks_per_node_min =
+          std::max(job->ntasks_per_node_min, required_min);
     }
   }
 

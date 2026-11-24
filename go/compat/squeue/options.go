@@ -265,11 +265,12 @@ func parse(args []string, env map[string]string, diag io.Writer) (*options, erro
 	for _, v := range list(values["users"]) {
 		u, err := user.Lookup(v)
 		if err != nil {
-			if _, e := strconv.ParseUint(v, 10, 32); e != nil {
+			uid, e := strconv.ParseUint(v, 10, 32)
+			if e != nil {
 				fmt.Fprintf(diag, "squeue: error: Invalid user: %s\n\n", v)
 				continue
 			}
-			o.users = append(o.users, v)
+			o.users = append(o.users, strconv.FormatUint(uid, 10))
 		} else {
 			o.users = append(o.users, u.Uid)
 		}

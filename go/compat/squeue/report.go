@@ -265,13 +265,7 @@ func stepReport(r row, o *options) v45.QueueStep {
 		Partition: j.Partition,
 		State:     []string{state},
 		ID:        r.stepID(),
-		User:      j.Username,
-	}
-	if s.Uid != j.Uid {
-		result.User = strconv.FormatUint(uint64(s.Uid), 10)
-		if account, err := user.LookupId(result.User); err == nil {
-			result.User = account.Username
-		}
+		User:      r.userName(),
 	}
 	if a := j.ArrayTask; a != nil {
 		result.Array = v45.QueueStepArray{JobID: v45.Int32(a.ArrayJobId), TaskID: new(v45.Int32(a.TaskId))}
