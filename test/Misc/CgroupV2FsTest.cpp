@@ -1,4 +1,5 @@
-#include "CgroupV2Fs.h"
+#include "cri/api.pb.h"
+// CRI signal enums must be included before system signal macros.
 
 #include <gtest/gtest.h>
 #include <sys/stat.h>
@@ -9,6 +10,8 @@
 #include <filesystem>
 #include <format>
 #include <fstream>
+
+#include "CgroupV2Fs.h"
 
 namespace {
 
@@ -121,9 +124,8 @@ TEST(CgroupV2FsBackendTest, DirectResourceWriteAndMigrationUseCgroupFiles) {
   WriteText(fs.Root() / "crane/job_1/cpu.max", "");
 
   CgroupV2FsBackend backend(CgroupV2CleanupMode::SYNC_RMDIR, fs.Root());
-  ASSERT_TRUE(backend.WriteControllerFile("crane/job_1",
-                                          ControllerFile::CPU_MAX_V2,
-                                          "1000 65536"));
+  ASSERT_TRUE(backend.WriteControllerFile(
+      "crane/job_1", ControllerFile::CPU_MAX_V2, "1000 65536"));
   EXPECT_EQ("1000 65536", ReadText(fs.Root() / "crane/job_1/cpu.max"));
 
   ASSERT_TRUE(backend.MigrateProcIn("crane/job_1", 12345));

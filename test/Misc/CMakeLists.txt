@@ -31,7 +31,7 @@ target_link_libraries(misc_pam_util_test
 gtest_discover_tests(misc_pam_util_test)
 
 if (CRANE_ENABLE_BPF)
-    add_executable(misc_bpf_device_test bpf_device_test.cpp)
+    add_executable(misc_bpf_device_test BpfDeviceTest.cpp)
     target_link_libraries(misc_bpf_device_test
             GTest::gtest GTest::gtest_main craned_common)
     gtest_discover_tests(misc_bpf_device_test)
