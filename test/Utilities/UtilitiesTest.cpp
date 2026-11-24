@@ -258,9 +258,22 @@ TEST_P(PrivateLogFileTest, RejectsLinkedLogWithoutChangingTarget) {
   ASSERT_TRUE(std::filesystem::create_directory(directory_));
   auto other = root_ / "other";
   std::ofstream(other) << "unchanged";
-  std::filesystem::create_symlink(other, log_);
-  EXPECT_THROW(Init(), spdlog::spdlog_ex);
-  Check(other, 0666);
+  std::vector<std::filesystem::path> log_paths{log_, directory_ / "1.0.1.log"};
+  if (GetParam() == LogFilePolicy::PRIVATE_FILE)
+    log_paths.emplace_back(directory_ / "1.0.9.log");
+  for (const auto& path : log_paths) {
+    SCOPED_TRACE(path.string());
+    for (bool hard_link : {false, true}) {
+      SCOPED_TRACE(hard_link ? "hard link" : "symbolic link");
+      if (hard_link)
+        std::filesystem::create_hard_link(other, path);
+      else
+        std::filesystem::create_symlink(other, path);
+      EXPECT_THROW(Init(), spdlog::spdlog_ex);
+      Check(other, 0666);
+      EXPECT_TRUE(std::filesystem::remove(path));
+    }
+  }
 }
 
 TEST_F(FilePermissionsTest, RepairsExistingPrivateDirectoryOwnership) {

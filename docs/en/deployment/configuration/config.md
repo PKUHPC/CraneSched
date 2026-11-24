@@ -398,7 +398,9 @@ Supervisor:
 ```
 
 
-Craned logs and rotated files belong to Craned's runtime user with mode `0600`, preventing ordinary job users from reading them. Existing log permissions are repaired at startup. The log directory must be administrator-managed and unwritable by ordinary users; its existing permissions are preserved because the default directory also contains job scripts and Unix sockets.
+Craned logs and rotated files belong to Craned's runtime user and group with mode `0600`. Startup repairs existing log permissions, including rotations left behind after reducing `Craned.MaxLogFileNum`. The log directory and its ancestors must be administrator-managed and unwritable by ordinary users. Existing directory permissions are preserved because the default directory also contains job scripts and Unix sockets.
+
+When upgrading, log readers and collection agents that relied on group or other read permissions must run as Craned's runtime user or a privileged administrator. Group membership alone no longer grants access. The active log and retained rotations must be regular files with a single hard link; symbolic links and files with multiple hard links cause log initialization to fail. Replace a symbolic-link log configuration with the actual file path before upgrading. These restrictions also apply to `--log-file`.
 
 ### Supervisor Configuration
 
