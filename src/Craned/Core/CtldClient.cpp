@@ -734,14 +734,12 @@ void CtldClient::Init() {
           }
         }
 
-        g_thread_pool->detach_task([token, lost_jobs = std::move(lost_jobs),
-                                    lost_steps = std::move(lost_steps),
-                                    invalid_steps = std::move(invalid_steps),
-                                    invalid_jobs = std::move(invalid_jobs),
-                                    completing_steps =
-                                        std::move(completing_steps),
-                                    steps_to_sync =
-                                        std::move(steps_to_sync)]() mutable {
+        std::thread([token, lost_jobs = std::move(lost_jobs),
+                     lost_steps = std::move(lost_steps),
+                     invalid_steps = std::move(invalid_steps),
+                     invalid_jobs = std::move(invalid_jobs),
+                     completing_steps = std::move(completing_steps),
+                     steps_to_sync = std::move(steps_to_sync)]() mutable {
           util::SetCurrentThreadName("CfgCleanupThr");
 
           auto wait_step_futures =
@@ -874,7 +872,7 @@ void CtldClient::Init() {
                        util::JobStepsToString(completing_steps));
             g_job_mgr->FreeSteps(std::move(completing_steps));
           }
-        });
+        }).detach();
       },
       CallbackInvokeMode::ASYNC, false);
 
