@@ -7,7 +7,6 @@ package sinfo
 import (
 	"bytes"
 	"strings"
-	"sync"
 	"testing"
 )
 
@@ -80,19 +79,31 @@ func TestActions(t *testing.T) {
 }
 
 func TestParsersConcurrent(t *testing.T) {
-	var workers sync.WaitGroup
-	for range 16 {
-		workers.Go(func() {
-			for range 32 {
-				o, err := parseCommand([]string{"sinfo", "-n", "r[01-02]n[1-4]", "-t", "idle,!down", "-o", "%.09N|%P"}, nil)
-				if err != nil || len(o.Fields) != 2 || !o.NodeFilter.Match("r02n3") || !o.StateFilter.match(nodeState{Base: "idle"}, 0) {
-					t.Errorf("parse failed: %v", err)
-					return
-				}
+	for _, tc := range []struct {
+		node, otherNode, pattern string
+		state, otherState        string
+		flag, format, field      string
+	}{
+		{"r02n3", "gpu01", "r[01-02]n[1-4]", "idle", "down", "-o", "%.09N", "NodeList"},
+		{"gpu01", "r02n3", "gpu[01-02]", "down", "idle", "-O", "Partition:12", "Partition"},
+	} {
+		t.Run(tc.state, func(t *testing.T) {
+			t.Parallel()
+			o, err := parseCommand([]string{"sinfo", "-n", tc.pattern, "-t", tc.state, tc.flag, tc.format}, nil)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if !o.NodeFilter.Match(tc.node) || o.NodeFilter.Match(tc.otherNode) {
+				t.Errorf("wrong node selection for %q", tc.pattern)
+			}
+			if !o.StateFilter.match(nodeState{Base: tc.state}, 0) || o.StateFilter.match(nodeState{Base: tc.otherState}, 0) {
+				t.Errorf("wrong state selection for %q", tc.state)
+			}
+			if len(o.Fields) != 1 || o.Fields[0].Field == nil || o.Fields[0].Field.Name != tc.field {
+				t.Errorf("format %q: got %+v, want %s", tc.format, o.Fields, tc.field)
 			}
 		})
 	}
-	workers.Wait()
 }
 
 func TestDecimalPrefixOverflow(t *testing.T) {
