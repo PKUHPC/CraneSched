@@ -7,12 +7,18 @@
 
 #include <grp.h>
 #include <gtest/gtest.h>
+#include <sys/eventfd.h>
 #include <sys/stat.h>
 #include <sys/wait.h>
 
 #include <array>
 #include <fstream>
+#include <sstream>
 #include <utility>
+
+#include "crane/Logger.h"
+// Logger.h must configure the log level before other spdlog headers.
+#include <spdlog/sinks/ostream_sink.h>
 
 // Include the implementation to exercise the actual CRI configuration code
 // without exposing a production interface solely for tests.
@@ -578,6 +584,298 @@ TEST(CrunResidualCleanup, FallsBackWhenCgroupV2BackendIsNotRecursive) {
   EXPECT_EQ(parent.subtree_kill_calls, 1);
   EXPECT_EQ(parent.parent_kill_calls, 0);
   EXPECT_EQ(process.signals, std::vector<int>{SIGKILL});
+}
+
+}  // namespace
+
+namespace {
+
+class OomTerminationTest : public ::testing::Test {
+ protected:
+  void SetUp() override {
+    std::string pattern =
+        (std::filesystem::temp_directory_path() / "crane-oom-result-XXXXXX")
+            .string();
+    ASSERT_NE(mkdtemp(pattern.data()), nullptr);
+    root_ = pattern;
+    job_ = root_ / "job";
+    cg_ = job_ / "step_1/user";
+    std::filesystem::create_directories(cg_);
+    spec_.set_type(crane::grpc::Batch);
+    spec_.set_step_type(crane::grpc::PRIMARY);
+  }
+
+  void TearDown() override { std::filesystem::remove_all(root_); }
+
+  static void Write(const std::filesystem::path& path, std::string_view text) {
+    std::ofstream file(path, std::ios::trunc);
+    ASSERT_TRUE(file.is_open());
+    file << text;
+    ASSERT_TRUE(file.good());
+  }
+
+  void InitCounter(StepInstance& step) {
+    Write(cg_ / "memory.events", "oom 0\noom_kill 0\n");
+    ASSERT_TRUE(step.oom_monitor.Start(cg_, job_, true));
+  }
+
+  void Oom() { Write(cg_ / "memory.events", "oom 1\noom_kill 1\n"); }
+
+  static TaskFinalInfo Exit(int value = 0, bool signaled = false) {
+    return {.raw_exit = TaskExitInfo{.is_terminated_by_signal = signaled,
+                                     .value = value}};
+  }
+
+  std::filesystem::path root_, job_, cg_;
+  StepToSupv spec_;
+};
+
+TEST_F(OomTerminationTest, InitOomMonitorUsesCraneJobAncestor) {
+  using Common::CgroupManager;
+  auto old_version = CgroupManager::GetCgroupVersion();
+  auto old_job = g_config.JobCgStr;
+  auto old_logger = spdlog::default_logger();
+  std::ostringstream messages;
+  auto sink = std::make_shared<spdlog::sinks::ostream_sink_mt>(messages);
+  auto logger = std::make_shared<spdlog::logger>("oom-init-test", sink);
+  absl::Cleanup restore = [&] {
+    CgroupManager::SetCgroupVersion(old_version);
+    g_config.JobCgStr = old_job;
+    spdlog::set_default_logger(old_logger);
+  };
+  CgroupManager::SetCgroupVersion(Common::CgConstant::CgroupVersion::CGROUP_V1);
+  g_config.JobCgStr = "job_" + root_.filename().string();
+  Write(cg_ / "memory.oom_control", "oom_kill_disable 0\nunder_oom 0\n");
+  Write(cg_ / "cgroup.event_control", "");
+  logger->set_level(spdlog::level::warn);
+  spdlog::set_default_logger(logger);
+
+  StepInstance step(spec_);
+  step.step_user_cg = std::make_unique<Common::CgroupV1>(cg_.string(), nullptr);
+  step.InitOomMonitor();
+
+  // The workload uses temporary files. The missing ancestor's diagnostic
+  // identifies the actual path requested by the production initialization.
+  EXPECT_NE(
+      messages.str().find("/sys/fs/cgroup/memory/crane/" + g_config.JobCgStr),
+      std::string::npos);
+  std::ifstream registration(cg_ / "cgroup.event_control");
+  int event_fd = -1;
+  ASSERT_TRUE(registration >> event_fd);
+  EXPECT_GE(event_fd, 0);
+}
+
+TEST_F(OomTerminationTest, OomWinsOverSuccessfulShellExitAndPreservesReason) {
+  StepInstance step(spec_);
+  InitCounter(step);
+  Oom();
+  // Exactly the result of a shell which prints its OOM-killed child's status
+  // and then exits successfully. No synthetic signal/exit code is introduced.
+  step.RecordTaskResult(StepStatus::Completed, 0, std::nullopt, Exit());
+  step.FinalizeOomStatus();
+  const auto& result = step.final_termination_status;
+  EXPECT_EQ(result.final_status_on_termination, StepStatus::OutOfMemory);
+  EXPECT_EQ(result.max_exit_code, 0);
+  EXPECT_NE(result.final_reason_on_termination.find("oom_kill"),
+            std::string::npos);
+}
+
+TEST_F(OomTerminationTest, OomPreservesNonzeroAndSignalExitCodes) {
+  for (bool signal : {false, true}) {
+    StepInstance step(spec_);
+    InitCounter(step);
+    Oom();
+    auto info = Exit(signal ? SIGKILL : 137, signal);
+    uint32_t code = signal ? ExitCode::kTerminationSignalBase + SIGKILL : 137;
+    step.RecordTaskResult(StepStatus::Failed, code, std::nullopt, info);
+    step.FinalizeOomStatus();
+    EXPECT_EQ(step.final_termination_status.final_status_on_termination,
+              StepStatus::OutOfMemory);
+    EXPECT_EQ(step.final_termination_status.max_exit_code, code);
+  }
+}
+
+TEST_F(OomTerminationTest, OrdinaryExitAndSigkillAreNotEvidenceOfOom) {
+  for (auto code :
+       {0U, 137U, uint32_t(ExitCode::kTerminationSignalBase + SIGKILL)}) {
+    StepInstance step(spec_);
+    InitCounter(step);
+    auto status = code == 0 ? StepStatus::Completed : StepStatus::Failed;
+    step.RecordTaskResult(status, code, std::nullopt, Exit());
+    step.FinalizeOomStatus();
+    EXPECT_EQ(step.final_termination_status.final_status_on_termination,
+              status);
+    EXPECT_EQ(step.final_termination_status.max_exit_code, code);
+  }
+}
+
+TEST_F(OomTerminationTest, MonitoringFailureDoesNotInventOom) {
+  StepInstance step(spec_);
+  InitCounter(step);
+  std::filesystem::remove(cg_ / "memory.events");
+  step.RecordTaskResult(StepStatus::Completed, 0, std::nullopt, Exit());
+  step.FinalizeOomStatus();
+  EXPECT_EQ(step.final_termination_status.final_status_on_termination,
+            StepStatus::Completed);
+}
+
+TEST_F(OomTerminationTest, OomIsAppliedAfterAllTaskResultsInEitherOrder) {
+  for (bool oom_first : {false, true}) {
+    StepInstance step(spec_);
+    InitCounter(step);
+    auto failure = [&] {
+      TaskFinalInfo info{.cause = TaskFinalizeCause::TASK_SPAWN_FAILED};
+      step.RecordTaskResult(StepStatus::Failed, ExitCode::EC_SPAWN_FAILED,
+                            "spawn failure", info);
+    };
+    if (!oom_first) failure();
+    Oom();
+    step.RecordTaskResult(StepStatus::Completed, 0, std::nullopt, Exit());
+    if (oom_first) failure();
+    EXPECT_EQ(step.final_termination_status.final_status_on_termination,
+              StepStatus::Failed);
+    step.FinalizeOomStatus();
+    EXPECT_EQ(step.final_termination_status.final_status_on_termination,
+              StepStatus::OutOfMemory);
+    EXPECT_EQ(step.final_termination_status.max_exit_code,
+              ExitCode::EC_SPAWN_FAILED);
+    EXPECT_NE(step.final_termination_status.final_reason_on_termination.find(
+                  "oom_kill"),
+              std::string::npos);
+  }
+}
+
+TEST_F(OomTerminationTest, ExplicitTerminationSkipsOomClassification) {
+  for (const auto& [cause, status] :
+       {std::pair{TaskFinalizeCause::CANCELLED_BY_USER, StepStatus::Cancelled},
+        std::pair{TaskFinalizeCause::TIMEOUT, StepStatus::ExceedTimeLimit},
+        std::pair{TaskFinalizeCause::DEADLINE, StepStatus::Deadline},
+        std::pair{TaskFinalizeCause::CFORED_DISCONNECTED,
+                  StepStatus::Failed}}) {
+    for (bool oom_first : {false, true}) {
+      StepInstance step(spec_);
+      InitCounter(step);
+      Oom();
+      auto normal = [&] {
+        step.RecordTaskResult(StepStatus::Completed, 0, std::nullopt, Exit());
+      };
+      if (oom_first) normal();
+      auto info = Exit(9, true);
+      info.cause = cause;
+      step.RecordTaskResult(status, 265, "explicit termination", info);
+      if (!oom_first) normal();
+      step.FinalizeOomStatus();
+      EXPECT_EQ(step.final_termination_status.final_status_on_termination,
+                status);
+      EXPECT_EQ(step.final_termination_status.final_reason_on_termination,
+                "explicit termination");
+    }
+  }
+}
+
+TEST_F(OomTerminationTest, OomFinalizationPreservesExistingTaskAggregation) {
+  for (bool with_oom : {false, true}) {
+    for (bool timeout_first : {false, true}) {
+      StepInstance step(spec_);
+      InitCounter(step);
+      if (with_oom) Oom();
+      auto timeout = [&] {
+        TaskFinalInfo info{.cause = TaskFinalizeCause::TIMEOUT};
+        step.RecordTaskResult(StepStatus::ExceedTimeLimit,
+                              ExitCode::EC_EXCEED_TIME_LIMIT, "time limit",
+                              info);
+      };
+      if (timeout_first) timeout();
+      TaskFinalInfo info{.cause = TaskFinalizeCause::TASK_SPAWN_FAILED};
+      step.RecordTaskResult(StepStatus::Failed, ExitCode::EC_SPAWN_FAILED,
+                            "spawn failure", info);
+      if (!timeout_first) timeout();
+      step.RecordTaskResult(StepStatus::Completed, 0, std::nullopt, Exit());
+      step.FinalizeOomStatus();
+      // Keep the pre-OOM aggregation: last non-success status and the reason
+      // accompanying the largest exit code. OOM must not rank these failures.
+      EXPECT_EQ(
+          step.final_termination_status.final_status_on_termination,
+          timeout_first ? StepStatus::Failed : StepStatus::ExceedTimeLimit);
+      EXPECT_EQ(step.final_termination_status.max_exit_code,
+                ExitCode::EC_EXCEED_TIME_LIMIT);
+      EXPECT_EQ(step.final_termination_status.final_reason_on_termination,
+                "time limit");
+    }
+  }
+}
+
+TEST_F(OomTerminationTest, StartupFailureWithoutNaturalExitIsNotOom) {
+  StepInstance step(spec_);
+  InitCounter(step);
+  Oom();
+  TaskFinalInfo info{.cause = TaskFinalizeCause::TASK_SPAWN_FAILED};
+  step.RecordTaskResult(StepStatus::Failed, ExitCode::EC_SPAWN_FAILED,
+                        "spawn failure", info);
+  step.FinalizeOomStatus();
+  EXPECT_EQ(step.final_termination_status.final_status_on_termination,
+            StepStatus::Failed);
+  EXPECT_EQ(step.final_termination_status.max_exit_code,
+            ExitCode::EC_SPAWN_FAILED);
+  EXPECT_EQ(step.final_termination_status.final_reason_on_termination,
+            "spawn failure");
+}
+
+TEST_F(OomTerminationTest, CallocKeepsExistingCompletionSemantics) {
+  spec_.set_type(crane::grpc::Interactive);
+  spec_.mutable_interactive_meta()->set_interactive_type(crane::grpc::Calloc);
+  StepInstance step(spec_);
+  InitCounter(step);
+  Oom();
+  step.RecordTaskResult(StepStatus::Completed, 0, std::nullopt, Exit());
+  step.FinalizeOomStatus();
+  EXPECT_EQ(step.final_termination_status.final_status_on_termination,
+            StepStatus::Completed);
+}
+
+TEST_F(OomTerminationTest, OldKernelNotificationHandlesShellExitZero) {
+  for (const auto& [ancestor, later_local_oom] :
+       {std::pair{false, false}, std::pair{true, false},
+        std::pair{true, true}}) {
+    for (bool primary : {false, true}) {
+      spec_.set_step_type(primary ? crane::grpc::PRIMARY : crane::grpc::COMMON);
+      spec_.set_type(primary ? crane::grpc::Batch : crane::grpc::Interactive);
+      spec_.mutable_interactive_meta()->set_interactive_type(crane::grpc::Crun);
+      StepInstance step(spec_);
+      for (const auto& path : {job_, cg_}) {
+        Write(path / "memory.oom_control", "oom_kill_disable 0\nunder_oom 0\n");
+        Write(path / "cgroup.event_control", "");
+      }
+      ASSERT_TRUE(step.oom_monitor.Start(cg_, job_, false));
+      auto notify = [&](const auto& path) {
+        std::ifstream input(path / "cgroup.event_control");
+        int fd = -1;
+        input >> fd;
+        ASSERT_GE(fd, 0);
+        ASSERT_EQ(eventfd_write(fd, 1), 0);
+      };
+      notify(cg_);
+      if (ancestor) notify(job_);
+      if (later_local_oom) {
+        EXPECT_TRUE(step.oom_monitor.Sample().workload.empty());
+        notify(cg_);
+      }
+      step.RecordTaskResult(StepStatus::Completed, 0, std::nullopt, Exit());
+      step.FinalizeOomStatus();
+      EXPECT_EQ(step.final_termination_status.final_status_on_termination,
+                !ancestor || later_local_oom || primary
+                    ? StepStatus::OutOfMemory
+                    : StepStatus::Completed);
+      EXPECT_EQ(step.final_termination_status.max_exit_code, 0);
+      EXPECT_FALSE(
+          step.final_termination_status.final_reason_on_termination.empty());
+      if (ancestor && !later_local_oom)
+        EXPECT_NE(
+            step.final_termination_status.final_reason_on_termination.find(
+                "victim step is unknown"),
+            std::string::npos);
+    }
+  }
 }
 
 }  // namespace

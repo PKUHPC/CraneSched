@@ -24,6 +24,7 @@
 // Precompiled header comes first.
 
 #include "CforedClient.h"
+#include "OomMonitor.h"
 #include "Pmix.h"
 #include "Supervisor.grpc.pb.h"
 #include "crane/BindFs.h"
@@ -53,6 +54,7 @@ enum class TaskFinalizeCause : uint8_t {
 };
 
 class ITaskInstance;
+struct TaskFinalInfo;
 
 class StepInstance {
  public:
@@ -95,9 +97,7 @@ class StepInstance {
   };
 
   TerminationStatus final_termination_status;
-  bool oom_baseline_inited{false};
-  uint64_t baseline_oom_kill_count{0};  // v1 & v2
-  uint64_t baseline_oom_count{0};       // v2 only
+  Common::OomMonitor oom_monitor;
 
   crane::ManualSpan execute_span_;
   crane::ManualSpan& ExecuteSpan() { return execute_span_; }
@@ -246,11 +246,17 @@ class StepInstance {
   void GotNewStatus(StepStatus new_status);
 
   // OOM monitoring methods
-  void InitOomBaseline();
-  bool EvaluateOomOnExit();
+  void InitOomMonitor();
+  void RecordTaskResult(StepStatus new_status, uint32_t exit_code,
+                        std::optional<std::string> reason,
+                        const TaskFinalInfo& final_info);
+  // Called once after all task cleanup, before reporting the step result.
+  void FinalizeOomStatus();
 
  private:
   bool m_residual_processes_cleaned_{false};
+  bool m_has_natural_task_exit_{false};
+  bool m_has_explicit_termination_{false};
   std::atomic<StepStatus> m_status_{StepStatus::Configuring};
   crane::grpc::StepToD m_step_to_supv_;
   std::unique_ptr<cri::CriClient> m_cri_client_;

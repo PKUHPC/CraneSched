@@ -11,6 +11,7 @@ set(CRANE_UNIT_TEST_TARGETS
     execution_groups_test
     task_manager_test
     job_manager_test
+    oom_monitor_test
     embedded_db_client_test
     ctld_public_defs_test
     dedicated_resource_test
