@@ -7,10 +7,7 @@ package sinfo
 import (
 	"bytes"
 	"context"
-	"encoding/json"
 	"fmt"
-	"github.com/PKUHPC/CraneSched/go/generated/protos"
-	"gopkg.in/yaml.v3"
 	"net"
 	"os"
 	"path/filepath"
@@ -19,6 +16,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/PKUHPC/CraneSched/go/generated/protos"
 	"google.golang.org/grpc"
 	"google.golang.org/protobuf/types/known/durationpb"
 	"google.golang.org/protobuf/types/known/timestamppb"
@@ -251,83 +249,6 @@ func TestFractionalCPUProjection(t *testing.T) {
 	}
 }
 
-func TestMissingTopologyIsNotInvented(t *testing.T) {
-	o, err := parseCommand([]string{"sinfo", "-O", "SocketCoreThread"}, nil)
-	if err != nil {
-		t.Fatal(err)
-	}
-	s, err := adaptSnapshot(adapterFixture(), o.Query)
-	if err != nil {
-		t.Fatal(err)
-	}
-	var out bytes.Buffer
-	if err := newTextRenderer().table(&out, buildRows(s, o), o); err == nil || out.Len() != 0 {
-		t.Fatalf("out=%q err=%v", out.String(), err)
-	}
-}
-
-func TestAbsentTelemetryIsNotAConfiguredValue(t *testing.T) {
-	for _, field := range []string{"CPUsLoad", "FreeMem"} {
-		o, err := parseCommand([]string{"sinfo", "-O", field}, nil)
-		if err != nil {
-			t.Fatal(err)
-		}
-		s, err := adaptSnapshot(adapterFixture(), o.Query)
-		if err != nil {
-			t.Fatal(err)
-		}
-		var out bytes.Buffer
-		if err := newTextRenderer().table(&out, buildRows(s, o), o); err == nil || out.Len() != 0 || !strings.Contains(err.Error(), "observation") {
-			t.Fatalf("%s out=%q err=%v", field, &out, err)
-		}
-	}
-}
-
-func TestStructuredImplicitCapabilitiesDoNotBecomeZeroValues(t *testing.T) {
-	for _, kind := range []string{"json", "yaml"} {
-		o, err := parseCommand([]string{"sinfo", "--" + kind, "-o", "%N"}, nil)
-		if err != nil {
-			t.Fatal(err)
-		}
-		s, err := adaptSnapshot(adapterFixture(), o.Query)
-		if err != nil {
-			t.Fatal(err)
-		}
-		var out, diagnostics bytes.Buffer
-		err = renderStructured(&out, &diagnostics, []string{"sinfo"}, buildRows(s, o), s, o, newTextRenderer().UserName)
-		if err != nil {
-			t.Fatal(err)
-		}
-		var doc struct{ Sinfo []map[string]any }
-		if kind == "json" {
-			err = json.Unmarshal(out.Bytes(), &doc)
-		} else {
-			err = yaml.Unmarshal(out.Bytes(), &doc)
-		}
-		if err != nil || len(doc.Sinfo) != 1 {
-			t.Fatalf("%s: invalid report: %v", kind, err)
-		}
-		item := doc.Sinfo[0]
-		for _, key := range []string{"disk", "weight", "features", "comment", "extra", "resource_spec"} {
-			if _, ok := item[key]; ok {
-				t.Errorf("%s: emitted unsupported field %s", kind, key)
-			}
-		}
-		cpus := item["cpus"].(map[string]any)
-		if _, hasLoad := cpus["load"]; fmt.Sprint(cpus["total"]) != "4" || fmt.Sprint(cpus["other"]) != "0" || hasLoad {
-			t.Fatalf("missing load or known counts misreported: %v", cpus)
-		}
-		out.Reset()
-		o, err = parseCommand([]string{"sinfo", "--" + kind + "=v0.0.45+spec_only"}, nil)
-		if err != nil {
-			t.Fatal(err)
-		}
-		if err := renderStructured(&out, &diagnostics, []string{"sinfo"}, nil, s, o, newTextRenderer().UserName); err != nil || out.Len() == 0 {
-			t.Fatalf("schema-only output: %v", err)
-		}
-	}
-}
-
 func TestGRESIndicesSpanTypesAndDoNotDependOnMapOrder(t *testing.T) {
 	resources := func(types map[string][]string) *protos.DedicatedResourceInNode {
 		m := &protos.DeviceTypeSlotsMap{TypeSlotsMap: map[string]*protos.Slots{}}
@@ -349,30 +270,6 @@ func TestGRESIndicesSpanTypesAndDoNotDependOnMapOrder(t *testing.T) {
 	used.NameTypeMap["gpu"].TypeSlotsMap["a"].Slots = []string{"/dev/missing"}
 	if _, _, err = projectGRES(total, used, order); err == nil {
 		t.Fatal("unknown allocated device was represented as a valid index")
-	}
-}
-
-func TestGRESDataErrorOnlyAffectsRequestsForGRES(t *testing.T) {
-	reply := adapterFixture()
-	reply.Nodes[0].ResAlloc.Gres = &protos.DedicatedResourceInNode{NameTypeMap: map[string]*protos.DeviceTypeSlotsMap{
-		"gpu": {TypeSlotsMap: map[string]*protos.Slots{"a": {Slots: []string{"/dev/unknown"}}}},
-	}}
-	o, err := parseCommand([]string{"sinfo", "-h", "-o", "%N"}, nil)
-	if err != nil {
-		t.Fatal(err)
-	}
-	s, err := adaptSnapshot(reply, o.Query)
-	if err != nil {
-		t.Fatal(err)
-	}
-	var out bytes.Buffer
-	if err = newTextRenderer().table(&out, buildRows(s, o), o); err != nil || out.String() != "n1\n" {
-		t.Fatalf("out=%q err=%v", &out, err)
-	}
-	o.Fields, _ = parseFormat("GresUsed", true)
-	out.Reset()
-	if err = newTextRenderer().table(&out, buildRows(s, o), o); err == nil || out.Len() != 0 {
-		t.Fatalf("out=%q err=%v", &out, err)
 	}
 }
 

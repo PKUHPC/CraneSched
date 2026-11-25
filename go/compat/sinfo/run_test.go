@@ -209,6 +209,37 @@ func TestRunNodeSelection(t *testing.T) {
 	}
 }
 
+func TestRunUsesTZForHeadingAndReason(t *testing.T) {
+	s := testSnapshot()
+	s.Nodes[0].ReasonTime = time.Date(2026, 6, 4, 12, 0, 0, 0, time.UTC)
+	source := &memorySource{load: func(context.Context, query) (*snapshot, error) { return s, nil }}
+	r := testRunner(source)
+	var out, diagnostic bytes.Buffer
+	code := r.run(t.Context(), []string{"sinfo", "-v", "-n", "n01", "-o", "%H"}, map[string]string{"TZ": "UTC-8"}, &out, &diagnostic)
+	if code != 0 || !strings.Contains(out.String(), "Thu Jun 04 20:34:56 2026\n") || !strings.Contains(out.String(), "2026-06-04T20:00:00") {
+		t.Fatalf("code=%d out=%q err=%q", code, &out, &diagnostic)
+	}
+}
+
+func TestStructuredParserScope(t *testing.T) {
+	for _, kind := range []string{"json", "yaml"} {
+		for _, parser := range []string{"list", "v0.0.41", "v0.0.42+spec_only", "data_parser/v0.0.43", "v0.0.44", "v0.0.46", "", "notreal"} {
+			t.Run(kind+"/"+parser, func(t *testing.T) {
+				source := &memorySource{load: func(context.Context, query) (*snapshot, error) { return testSnapshot(), nil }}
+				var out, diagnostic bytes.Buffer
+				code := testRunner(source).run(t.Context(), []string{"sinfo", "--" + kind + "=" + parser}, nil, &out, &diagnostic)
+				if parser == "list" {
+					if code != 0 || out.String() != "data_parser/v0.0.45\n" || diagnostic.String() != "Possible data_parser plugins:\n" {
+						t.Fatalf("%d %q %q", code, &out, &diagnostic)
+					}
+				} else if code != 1 || out.Len() != 0 || !strings.Contains(diagnostic.String(), "supported: v0.0.45") {
+					t.Fatalf("unsupported parser fell back: %d %q %q", code, &out, &diagnostic)
+				}
+			})
+		}
+	}
+}
+
 func TestRunActionsAndCapabilityPrecedence(t *testing.T) {
 	cases := []struct {
 		args     []string
