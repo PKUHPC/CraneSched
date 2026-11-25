@@ -1922,9 +1922,15 @@ void JobInCtld::SetActualLicenses(
   licenses_count = std::move(actual_licenses);
 }
 
-void JobInCtld::SetHeld(bool val) {
+void JobInCtld::SetHeld(bool val, bool by_admin) {
   held = val;
-  runtime_attr.set_held(val);
+  runtime_attr.set_held(held);
+  runtime_attr.set_held_by_admin(val && by_admin);
+}
+
+std::string_view JobInCtld::HoldReason() const {
+  if (!held) return {};
+  return runtime_attr.held_by_admin() ? "JobHeldAdmin" : "JobHeldUser";
 }
 
 bool JobInCtld::ShouldRequeue() const {

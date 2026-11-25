@@ -1204,7 +1204,8 @@ class JobScheduler {
   std::future<CraneExpected<step_id_t>> SubmitStepAsync(
       std::unique_ptr<CommonStepInCtld> step);
 
-  std::future<CraneErrCode> HoldReleaseJobAsync(job_id_t job_id, int64_t secs);
+  std::future<CraneErrCode> HoldReleaseJobAsync(job_id_t job_id, int64_t secs,
+                                                bool by_admin);
 
   CraneErrCode ChangeJobTimeConstraint(
       job_id_t job_id, std::optional<int64_t> time_limit_seconds,
@@ -1490,7 +1491,8 @@ class JobScheduler {
       const std::unordered_map<job_id_t, std::set<step_id_t>>& steps);
   void RetryCompletingSteps_();
 
-  CraneErrCode SetHoldForJobInRamAndDb_(job_id_t job_id, bool hold);
+  CraneErrCode SetHoldForJobInRamAndDb_(job_id_t job_id, bool hold,
+                                        bool by_admin);
 
   std::expected<void, std::string> CreateResv_(
       const crane::grpc::CreateReservationRequest& request);
@@ -1585,8 +1587,8 @@ class JobScheduler {
 
   std::shared_ptr<uvw::async_handle> m_job_timeout_async_handle_;
 
-  using JobTimerQueueElem =
-      std::pair<std::pair<job_id_t, int64_t>, std::promise<CraneErrCode>>;
+  using JobTimerQueueElem = std::pair<std::tuple<job_id_t, int64_t, bool>,
+                                      std::promise<CraneErrCode>>;
   ConcurrentQueue<JobTimerQueueElem> m_job_timer_queue_;
 
   void JobTimerAsyncCb_();

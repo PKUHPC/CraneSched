@@ -421,6 +421,14 @@ ERRO[0000] command execution failed
 
 Hold specified job(s) to prevent them from starting.
 
+The pending reason is `JobHeldUser` for a user hold and `JobHeldAdmin` for
+an administrator hold. Jobs submitted with `cbatch --hold` use `JobHeldUser`.
+System-generated holds and older persisted holds without operator information
+show `JobHeldUser`. The hold source is retained across controller restarts.
+Administrators can release any held job. A job owner can release a user-held
+job, but cannot change or release an administrator-held job. An administrator
+hold replaces an existing user hold and its timer.
+
 ```bash
 ccontrol hold <job_id> [timelimit=<duration>]
 ```

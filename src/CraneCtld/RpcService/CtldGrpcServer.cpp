@@ -1227,8 +1227,8 @@ grpc::Status CraneCtldServiceImpl::ModifyJob(
     std::vector<std::pair<job_id_t, std::future<CraneErrCode>>> results;
     results.reserve(job_ids.size());
     for (auto job_id : job_ids) {
-      results.emplace_back(job_id,
-                           g_job_scheduler->HoldReleaseJobAsync(job_id, secs));
+      results.emplace_back(job_id, g_job_scheduler->HoldReleaseJobAsync(
+                                       job_id, secs, res.has_value()));
     }
     for (auto& [job_id, res] : results) {
       err = res.get();

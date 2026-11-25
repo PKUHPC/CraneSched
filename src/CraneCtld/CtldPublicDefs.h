@@ -1229,7 +1229,8 @@ struct JobInCtld {
   void SetActualLicenses(
       std::unordered_map<LicenseId, uint32_t>&& actual_licenses);
 
-  void SetHeld(bool val);
+  void SetHeld(bool val, bool by_admin = false);
+  std::string_view HoldReason() const;
   bool const& Held() const { return held; }
 
   void SetCancelRequested(bool val) { cancel_requested = val; }
