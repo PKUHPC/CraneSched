@@ -718,18 +718,30 @@ CraneExpectedRich<void> LicenseManager::CheckAndUpdateFields_(
       res_resource->description = value;
       break;
     case crane::grpc::LicenseResource::Flags: {
+      bool has_flag = false;
+      bool clear_flags = false;
       for (const auto& flag : absl::StrSplit(value, ',')) {
-        std::string lower_str =
-            absl::AsciiStrToLower(absl::StripAsciiWhitespace(flag));
-        if (lower_str == "absolute") {
-          res_resource->flags |= crane::grpc::LicenseResource::Absolute;
-        } else if (lower_str == "none") {
-          res_resource->flags = crane::grpc::LicenseResource::None;
-          break;
-        } else {
-          CRANE_DEBUG("Invalid flags parameter: {}", lower_str);
-        }
+        const auto trimmed = absl::StripAsciiWhitespace(flag);
+        if (trimmed.empty()) continue;
+
+        has_flag = true;
+        if (absl::EqualsIgnoreCase(trimmed, "none"))
+          clear_flags = true;
+        else if (!absl::EqualsIgnoreCase(trimmed, "absolute"))
+          return std::unexpected(FormatRichErr(
+              CraneErrCode::ERR_INVALID_PARAM,
+              "Invalid resource flag '{}'. Expected Absolute or None",
+              trimmed));
       }
+      if (!has_flag)
+        return std::unexpected(
+            FormatRichErr(CraneErrCode::ERR_INVALID_PARAM,
+                          "Resource Flags must contain Absolute or None"));
+
+      if (clear_flags)
+        res_resource->flags = crane::grpc::LicenseResource::None;
+      else
+        res_resource->flags |= crane::grpc::LicenseResource::Absolute;
       break;
     }
     case crane::grpc::LicenseResource::ResourceType: {

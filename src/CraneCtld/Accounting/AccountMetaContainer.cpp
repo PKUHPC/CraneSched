@@ -24,6 +24,13 @@
 #include "JobScheduler.h"
 
 namespace Ctld {
+namespace {
+
+std::unexpected<CraneRichError> SubmitError(CraneErrCode code) {
+  return std::unexpected(FormatRichErr(code, "{}", CraneErrStr(code)));
+}
+
+}  // namespace
 
 /* ---------------------------------------------------------------------------
  * MetaResource operators
@@ -72,46 +79,51 @@ std::string MetaResource::DebugString() const {
  * ---------------------------------------------------------------------------
  */
 
-CraneErrCode AccountMetaContainer::TryMallocMetaSubmitResource(JobInCtld& job,
-                                                               const User& user,
-                                                               uint32_t count) {
+CraneExpectedRich<void> AccountMetaContainer::TryMallocMetaSubmitResource(
+    JobInCtld& job, const User& user, uint32_t count) {
   CRANE_TRACE(
       "TryMallocMetaSubmitResource for job of user {} and account {}, "
       "count={}.",
       job.Username(), job.account, count);
 
-  if (count == 0) return CraneErrCode::SUCCESS;
+  if (count == 0) return {};
 
   auto account_map = g_account_manager->GetAllAccountInfo();
   if (!account_map) {
     CRANE_ERROR("No account found in AccountManager during submit check.");
-    return CraneErrCode::ERR_INVALID_ACCOUNT;
+    return SubmitError(CraneErrCode::ERR_INVALID_ACCOUNT);
   }
 
   auto qos = g_account_manager->GetExistedQosInfo(job.qos);
   if (!qos) {
     CRANE_ERROR("Unknown QOS '{}'", job.qos);
-    return CraneErrCode::ERR_INVALID_QOS;
+    return SubmitError(CraneErrCode::ERR_INVALID_QOS);
   }
 
   const ResourceView& resource_use = job.req_total_res_view * count;
 
   if (count > qos->max_submit_jobs_per_user)
-    return CraneErrCode::ERR_MAX_JOB_COUNT_PER_USER;
+    return std::unexpected(
+        FormatRichErr(CraneErrCode::ERR_MAX_JOB_COUNT_PER_USER,
+                      "QoS '{}' exceeds MaxSubmitJobsPerUser ({})", job.qos,
+                      qos->max_submit_jobs_per_user));
 
   if (count > qos->max_submit_jobs_per_account)
-    return CraneErrCode::ERR_MAX_JOB_COUNT_PER_ACCOUNT;
+    return SubmitError(CraneErrCode::ERR_MAX_JOB_COUNT_PER_ACCOUNT);
 
   if (count > qos->max_submit_jobs)
-    return CraneErrCode::ERR_QOS_JOB_COUNT_EXCEEDED;
+    return SubmitError(CraneErrCode::ERR_QOS_JOB_COUNT_EXCEEDED);
 
   if (resource_use.GetCpuCount() > qos->max_cpus_per_user)
-    return CraneErrCode::ERR_CPUS_PER_TASK_BEYOND;
+    return std::unexpected(FormatRichErr(
+        CraneErrCode::ERR_CPUS_PER_TASK_BEYOND,
+        "Total CPU count exceeds MaxCpusPerUser ({}) for QoS '{}'",
+        ConvertCpuCountForClient(qos->max_cpus_per_user), job.qos));
 
   if (!CheckTres_(resource_use, qos->max_tres_per_user) ||
       !CheckTres_(resource_use, qos->max_tres_per_account) ||
       !CheckTres_(resource_use, qos->max_tres))
-    return CraneErrCode::ERR_TRES_PER_JOB_BEYOND;
+    return SubmitError(CraneErrCode::ERR_TRES_PER_JOB_BEYOND);
 
   job.qos_priority = qos->priority;
 
@@ -119,7 +131,7 @@ CraneErrCode AccountMetaContainer::TryMallocMetaSubmitResource(JobInCtld& job,
     job.SetTimeLimit(qos->max_time_limit_per_job);
   } else if (job.time_limit > qos->max_time_limit_per_job) {
     CRANE_TRACE("time-limit beyond the user's limit");
-    return CraneErrCode::ERR_TIME_TIMIT_BEYOND;
+    return SubmitError(CraneErrCode::ERR_TIME_TIMIT_BEYOND);
   }
 
   // Lock the specified user/account/qos to minimize the impact on other users
@@ -128,12 +140,11 @@ CraneErrCode AccountMetaContainer::TryMallocMetaSubmitResource(JobInCtld& job,
   auto account_locks = LockAccountStripes_(job.account_chain);
   std::scoped_lock qos_lock(m_qos_stripes_[StripeForKey_(job.qos)]);
 
-  CraneErrCode result =
-      CheckSubmitLimits_(job, user, *account_map, *qos, count);
-  if (result != CraneErrCode::SUCCESS) return result;
+  auto result = CheckSubmitLimits_(job, user, *account_map, *qos, count);
+  if (!result) return result;
 
   MallocMetaSubmitResource(job, count);
-  return CraneErrCode::SUCCESS;
+  return {};
 }
 
 void AccountMetaContainer::MallocMetaSubmitResource(const JobInCtld& job,
@@ -382,7 +393,7 @@ bool AccountMetaContainer::IsUnlimitedTres_(const ResourceView& res) {
  * ---------------------------------------------------------------------------
  */
 
-CraneErrCode AccountMetaContainer::CheckQosSubmitLimitsForEntity_(
+CraneExpectedRich<void> AccountMetaContainer::CheckQosSubmitLimitsForEntity_(
     const MetaResourceStat& stat, const std::string& qos_name, const Qos& qos,
     bool is_user, const ResourceView& req_res, uint32_t count) const {
   auto it = stat.qos_to_resource_map.find(qos_name);
@@ -393,16 +404,22 @@ CraneErrCode AccountMetaContainer::CheckQosSubmitLimitsForEntity_(
   const uint32_t max_submit =
       is_user ? qos.max_submit_jobs_per_user : qos.max_submit_jobs_per_account;
   if (static_cast<uint64_t>(val.submit_jobs_count) + count > max_submit) {
-    return is_user ? CraneErrCode::ERR_MAX_JOB_COUNT_PER_USER
-                   : CraneErrCode::ERR_MAX_JOB_COUNT_PER_ACCOUNT;
+    if (!is_user)
+      return SubmitError(CraneErrCode::ERR_MAX_JOB_COUNT_PER_ACCOUNT);
+    return std::unexpected(FormatRichErr(
+        CraneErrCode::ERR_MAX_JOB_COUNT_PER_USER,
+        "QoS '{}' exceeds MaxSubmitJobsPerUser ({})", qos_name, max_submit));
   }
 
   if (qos.flags[QosFlags::DenyOnLimit]) {
     const uint32_t max_jobs =
         is_user ? qos.max_jobs_per_user : qos.max_jobs_per_account;
     if (val.jobs_count + 1 > max_jobs) {
-      return is_user ? CraneErrCode::ERR_MAX_JOB_COUNT_PER_USER
-                     : CraneErrCode::ERR_MAX_JOB_COUNT_PER_ACCOUNT;
+      if (!is_user)
+        return SubmitError(CraneErrCode::ERR_MAX_JOB_COUNT_PER_ACCOUNT);
+      return std::unexpected(FormatRichErr(
+          CraneErrCode::ERR_MAX_JOB_COUNT_PER_USER,
+          "QoS '{}' exceeds MaxJobsPerUser ({})", qos_name, max_jobs));
     }
 
     ResourceView resource_use{req_res};
@@ -410,16 +427,19 @@ CraneErrCode AccountMetaContainer::CheckQosSubmitLimitsForEntity_(
 
     if (is_user) {
       if (resource_use.GetCpuCount() > qos.max_cpus_per_user)
-        return CraneErrCode::ERR_CPUS_PER_TASK_BEYOND;
+        return std::unexpected(FormatRichErr(
+            CraneErrCode::ERR_CPUS_PER_TASK_BEYOND,
+            "Total CPU count exceeds MaxCpusPerUser ({}) for QoS '{}'",
+            ConvertCpuCountForClient(qos.max_cpus_per_user), qos_name));
       if (!CheckTres_(resource_use, qos.max_tres_per_user))
-        return CraneErrCode::ERR_MAX_TRES_PER_USER_BEYOND;
+        return SubmitError(CraneErrCode::ERR_MAX_TRES_PER_USER_BEYOND);
     } else {
       if (!CheckTres_(resource_use, qos.max_tres_per_account))
-        return CraneErrCode::ERR_MAX_TRES_PER_ACCOUNT_BEYOND;
+        return SubmitError(CraneErrCode::ERR_MAX_TRES_PER_ACCOUNT_BEYOND);
     }
   }
 
-  return CraneErrCode::SUCCESS;
+  return {};
 }
 
 CraneErrCode AccountMetaContainer::CheckPartitionSubmitLimitsForEntity_(
@@ -498,7 +518,7 @@ CraneErrCode AccountMetaContainer::CheckPartitionSubmitLimitsForEntity_(
   return CraneErrCode::SUCCESS;
 }
 
-CraneErrCode AccountMetaContainer::CheckEntitySubmitLimits_(
+CraneExpectedRich<void> AccountMetaContainer::CheckEntitySubmitLimits_(
     const MetaResourceStat& stat, const std::string& account,
     const std::string& qos_name, const Qos& qos,
     const std::string& partition_id,
@@ -506,14 +526,17 @@ CraneErrCode AccountMetaContainer::CheckEntitySubmitLimits_(
     const ResourceView& req_res, absl::Duration time_limit,
     uint32_t count) const {
   // QoS dimension (peer-level with Partition).
-  CraneErrCode result = CheckQosSubmitLimitsForEntity_(stat, qos_name, qos,
-                                                       is_user, req_res, count);
-  if (result != CraneErrCode::SUCCESS) return result;
+  auto result = CheckQosSubmitLimitsForEntity_(stat, qos_name, qos, is_user,
+                                               req_res, count);
+  if (!result) return result;
 
   // Partition dimension (peer-level with QoS).
-  return CheckPartitionSubmitLimitsForEntity_(stat, account, partition_id,
-                                              partition_limit, req_res,
-                                              time_limit, qos, is_user, count);
+  const auto partition_result = CheckPartitionSubmitLimitsForEntity_(
+      stat, account, partition_id, partition_limit, req_res, time_limit, qos,
+      is_user, count);
+  if (partition_result != CraneErrCode::SUCCESS)
+    return SubmitError(partition_result);
+  return {};
 }
 
 std::expected<void, std::string>
@@ -702,10 +725,10 @@ std::expected<void, std::string> AccountMetaContainer::CheckEntityRunLimits_(
  * ---------------------------------------------------------------------------
  */
 
-CraneErrCode AccountMetaContainer::CheckSubmitLimits_(
+CraneExpectedRich<void> AccountMetaContainer::CheckSubmitLimits_(
     const JobInCtld& job, const User& user, const AccountRawMap& account_map,
     const Qos& qos, uint32_t count) {
-  CraneErrCode result = CraneErrCode::SUCCESS;
+  CraneExpectedRich<void> result;
 
   // ---- User entity ----
   {
@@ -716,7 +739,7 @@ CraneErrCode AccountMetaContainer::CheckSubmitLimits_(
           "Account '{}' is not in user '{}' account list during "
           "submit check.",
           job.account, job.Username());
-      return CraneErrCode::ERR_USER_ACCOUNT_MISMATCH;
+      return SubmitError(CraneErrCode::ERR_USER_ACCOUNT_MISMATCH);
     }
     auto part_it =
         acct_it->second.partition_to_limit_map.find(job.partition_id);
@@ -733,7 +756,7 @@ CraneErrCode AccountMetaContainer::CheckSubmitLimits_(
             job.JobId(), job.Username(), job.account, job.partition_id,
             util::ReadableResourceView(job.req_total_res_view),
             util::ReadableResourceView(user_part_limit->max_tres_per_job));
-        return CraneErrCode::ERR_PARTITION_TRES_PER_JOB_BEYOND;
+        return SubmitError(CraneErrCode::ERR_PARTITION_TRES_PER_JOB_BEYOND);
       }
       if (qos.max_time_limit_per_job == absl::Seconds(kJobMaxTimeLimitSec)) {
         if (job.time_limit > user_part_limit->max_wall_duration_per_job) {
@@ -744,7 +767,7 @@ CraneErrCode AccountMetaContainer::CheckSubmitLimits_(
               job.JobId(), job.Username(), job.account, job.partition_id,
               absl::ToInt64Seconds(job.time_limit),
               absl::ToInt64Seconds(user_part_limit->max_wall_duration_per_job));
-          return CraneErrCode::ERR_PARTITION_TIME_BEYOND;
+          return SubmitError(CraneErrCode::ERR_PARTITION_TIME_BEYOND);
         }
       }
       if (qos.max_submit_jobs_per_user ==
@@ -754,7 +777,8 @@ CraneErrCode AccountMetaContainer::CheckSubmitLimits_(
               "[job #{}]: user partition max_submit_jobs is zero during "
               "submit check: user='{}', account='{}', partition='{}'.",
               job.JobId(), job.Username(), job.account, job.partition_id);
-          return CraneErrCode::ERR_PARTITION_MAX_SUBMIT_JOBS_PER_USER;
+          return SubmitError(
+              CraneErrCode::ERR_PARTITION_MAX_SUBMIT_JOBS_PER_USER);
         }
       }
     }
@@ -767,12 +791,12 @@ CraneErrCode AccountMetaContainer::CheckSubmitLimits_(
               user_part_limit, /*is_user=*/true, job.req_total_res_view,
               job.time_limit, count);
         });
-    if (result != CraneErrCode::SUCCESS) {
+    if (!result) {
       CRANE_TRACE(
           "[job #{}]: user submit limit check failed: user='{}', account='{}', "
           "partition='{}', qos='{}', count={}, error='{}'.",
           job.JobId(), job.Username(), job.account, job.partition_id, job.qos,
-          count, CraneErrStr(result));
+          count, result.error().description());
       return result;
     }
   }
@@ -785,7 +809,7 @@ CraneErrCode AccountMetaContainer::CheckSubmitLimits_(
       CRANE_ERROR(
           "Account '{}' not found in AccountManager during submit check.",
           account_name);
-      return CraneErrCode::ERR_INVALID_ACCOUNT;
+      return SubmitError(CraneErrCode::ERR_INVALID_ACCOUNT);
     }
     auto part_it =
         acct_it->second->partition_to_limit_map.find(job.partition_id);
@@ -802,7 +826,7 @@ CraneErrCode AccountMetaContainer::CheckSubmitLimits_(
             job.JobId(), account_name, job.partition_id,
             util::ReadableResourceView(job.req_total_res_view),
             util::ReadableResourceView(acct_part_limit->max_tres_per_job));
-        return CraneErrCode::ERR_PARTITION_TRES_PER_JOB_BEYOND;
+        return SubmitError(CraneErrCode::ERR_PARTITION_TRES_PER_JOB_BEYOND);
       }
       if (qos.max_time_limit_per_job == absl::Seconds(kJobMaxTimeLimitSec)) {
         if (job.time_limit > acct_part_limit->max_wall_duration_per_job) {
@@ -813,7 +837,7 @@ CraneErrCode AccountMetaContainer::CheckSubmitLimits_(
               job.JobId(), account_name, job.partition_id,
               absl::ToInt64Seconds(job.time_limit),
               absl::ToInt64Seconds(acct_part_limit->max_wall_duration_per_job));
-          return CraneErrCode::ERR_PARTITION_TIME_BEYOND;
+          return SubmitError(CraneErrCode::ERR_PARTITION_TIME_BEYOND);
         }
       }
       if (qos.max_submit_jobs_per_account ==
@@ -824,7 +848,8 @@ CraneErrCode AccountMetaContainer::CheckSubmitLimits_(
               "[job #{}]: account partition max_submit_jobs is zero during "
               "submit check: account='{}', partition='{}'.",
               job.JobId(), account_name, job.partition_id);
-          return CraneErrCode::ERR_PARTITION_MAX_SUBMIT_JOBS_PER_ACCOUNT;
+          return SubmitError(
+              CraneErrCode::ERR_PARTITION_MAX_SUBMIT_JOBS_PER_ACCOUNT);
         }
       }
     }
@@ -837,13 +862,13 @@ CraneErrCode AccountMetaContainer::CheckSubmitLimits_(
               acct_part_limit, /*is_user=*/false, job.req_total_res_view,
               job.time_limit, count);
         });
-    if (result != CraneErrCode::SUCCESS) {
+    if (!result) {
       CRANE_TRACE(
           "[job #{}]: account submit limit check failed: user='{}', "
           "job_account='{}', checked_account='{}', partition='{}', qos='{}', "
           "count={}, error='{}'.",
           job.JobId(), job.Username(), job.account, account_name,
-          job.partition_id, job.qos, count, CraneErrStr(result));
+          job.partition_id, job.qos, count, result.error().description());
       return result;
     }
   }
@@ -858,7 +883,7 @@ CraneErrCode AccountMetaContainer::CheckSubmitLimits_(
               "current_submit_jobs={}, request_count={}, limit={}.",
               job.JobId(), job.qos, val.submit_jobs_count, count,
               qos.max_submit_jobs);
-          result = CraneErrCode::ERR_QOS_JOB_COUNT_EXCEEDED;
+          result = SubmitError(CraneErrCode::ERR_QOS_JOB_COUNT_EXCEEDED);
           return;
         }
         if (qos.flags[QosFlags::DenyOnLimit]) {
@@ -868,7 +893,7 @@ CraneErrCode AccountMetaContainer::CheckSubmitLimits_(
                 "submit check: qos='{}', current_jobs={}, request_jobs=1, "
                 "limit={}.",
                 job.JobId(), job.qos, val.jobs_count, qos.max_jobs);
-            result = CraneErrCode::ERR_QOS_JOB_COUNT_EXCEEDED;
+            result = SubmitError(CraneErrCode::ERR_QOS_JOB_COUNT_EXCEEDED);
             return;
           }
           if (qos.max_wall > absl::ZeroDuration() &&
@@ -880,7 +905,7 @@ CraneErrCode AccountMetaContainer::CheckSubmitLimits_(
                 job.JobId(), job.qos, absl::ToInt64Seconds(val.wall_time),
                 absl::ToInt64Seconds(job.time_limit),
                 absl::ToInt64Seconds(qos.max_wall));
-            result = CraneErrCode::ERR_TIME_TIMIT_BEYOND;
+            result = SubmitError(CraneErrCode::ERR_TIME_TIMIT_BEYOND);
             return;
           }
           ResourceView resource_use{job.req_total_res_view};
@@ -891,7 +916,7 @@ CraneErrCode AccountMetaContainer::CheckSubmitLimits_(
                 "check: qos='{}', requested_plus_current='{}', limit='{}'.",
                 job.JobId(), job.qos, util::ReadableResourceView(resource_use),
                 util::ReadableResourceView(qos.max_tres));
-            result = CraneErrCode::ERR_TRES_PER_JOB_BEYOND;
+            result = SubmitError(CraneErrCode::ERR_TRES_PER_JOB_BEYOND);
           }
         }
       });

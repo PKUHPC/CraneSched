@@ -145,6 +145,7 @@ message SubmitBatchJobsRequest {
 message SubmitBatchJobsReply {
   repeated uint32 job_id_list = 1;
   repeated ErrCode code_list = 2;
+  repeated string reason_list = 3;  // Aligned with code_list, including empty reasons.
 }
 
 message SubmitContainerStepRequest {

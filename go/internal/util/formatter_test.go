@@ -2,9 +2,11 @@ package util
 
 import (
 	"encoding/json"
+	"strings"
+	"testing"
+
 	"github.com/PKUHPC/CraneSched/go/generated/protos"
 	"google.golang.org/protobuf/proto"
-	"testing"
 )
 
 func TestRequestPresenceInNativeAndSlurmJSON(t *testing.T) {
@@ -14,15 +16,15 @@ func TestRequestPresenceInNativeAndSlurmJSON(t *testing.T) {
 			job.ReqTotalResView.GresMap = &protos.GresMap{}
 		}
 		reply := &protos.QueryJobsInfoReply{Ok: true, JobInfoList: []*protos.JobInfo{job}}
-		native, err := MarshalProtoJSON(reply)
-		if err != nil {
-			t.Fatal(err)
+		native := FmtJson.FormatReply(reply)
+		if !strings.HasPrefix(native, "{\n  ") || !strings.Contains(native, "\n      \"req_total_res_view\":") {
+			t.Fatalf("expected two-space indentation, got %q", native)
 		}
 		slurm, err := FormatSlurmJobsJSON(reply)
 		if err != nil {
 			t.Fatal(err)
 		}
-		for _, data := range []string{string(native), slurm} {
+		for _, data := range []string{native, slurm} {
 			var result struct {
 				Jobs []struct {
 					Ntasks  *uint32 `json:"ntasks"`

@@ -3910,6 +3910,14 @@ JobScheduler::SubmitJobToScheduler(std::unique_ptr<JobInCtld> job) {
   }
   validate_span.AddEvent("account_validated");
 
+  if (!g_config.Partitions.contains(job->partition_id)) {
+    validate_span.SetStatus(crane::StatusCode::kError, "invalid_partition");
+    return std::unexpected(FormatRichErr(
+        CraneErrCode::ERR_INVALID_PARTITION,
+        "Invalid --partition value '{}': partition does not exist",
+        job->partition_id));
+  }
+
   if (!g_account_manager->CheckUserPermissionToPartition(
           job->Username(), job->account, job->partition_id)) {
     CRANE_DEBUG(
@@ -3975,9 +3983,9 @@ JobScheduler::SubmitJobToScheduler(std::unique_ptr<JobInCtld> job) {
 
       auto res = g_account_meta_container->TryMallocMetaSubmitResource(
           *job, *user_ptr, reserve_count);
-      if (res != CraneErrCode::SUCCESS) {
+      if (!res) {
         CRANE_DEBUG("The requested QoS resources have reached the limit.");
-        return std::unexpected(FormatRichErr(res, "{}", CraneErrStr(res)));
+        return std::unexpected(std::move(res).error());
       }
       g_account_meta_container->UserAddJob(user_ptr->name, reserve_count);
     }
@@ -8792,6 +8800,12 @@ CraneExpectedRich<void> JobScheduler::AcquireJobAttributes(JobInCtld* job) {
   auto check_qos_result =
       g_account_manager->CheckQosLimitOnJob(job->Username(), job->account, job);
   if (!check_qos_result) {
+    if (check_qos_result.error() ==
+        CraneErrCode::ERR_HAS_ALLOWED_QOS_IN_PARTITION)
+      return std::unexpected(FormatRichErr(
+          check_qos_result.error(),
+          "QoS '{}' is unavailable for account '{}' in partition '{}'",
+          job->qos, job->account, job->partition_id));
     CRANE_ERROR("Failed to call CheckQosLimitOnJob: {}",
                 CraneErrStr(check_qos_result.error()));
     return std::unexpected(FormatRichErr(

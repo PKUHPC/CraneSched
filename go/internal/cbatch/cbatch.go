@@ -651,8 +651,13 @@ func SendMultipleRequests(config *util.Config, job *protos.JobToCtld, count uint
 
 	if len(reply.GetCodeList()) > 0 {
 		reasons := make([]string, 0, len(reply.GetCodeList()))
-		for _, reason := range reply.GetCodeList() {
-			reasons = append(reasons, util.ErrMsg(reason))
+		details := reply.GetReasonList()
+		for i, code := range reply.GetCodeList() {
+			if len(details) == len(reply.GetCodeList()) && details[i] != "" {
+				reasons = append(reasons, details[i])
+			} else {
+				reasons = append(reasons, util.ErrMsg(code))
+			}
 		}
 
 		return util.NewCraneErr(util.ErrorBackend,
