@@ -48,6 +48,13 @@ using namespace std::chrono_literals;
 
 namespace {
 
+std::chrono::milliseconds ReservationTimerDelay(absl::Time end_time,
+                                                absl::Time now) {
+  if (now >= end_time) return 0ms;
+  return absl::ToChronoMilliseconds(
+      absl::Ceil(end_time - now, absl::Milliseconds(1)));
+}
+
 std::vector<std::string> FindNodesNotInPartition_(
     const std::unordered_set<std::string>& requested_nodes,
     const std::unordered_set<std::string>& partition_nodes) {
@@ -5083,7 +5090,7 @@ crane::grpc::DeleteReservationReply JobScheduler::DeleteResv(
 
   const ResvId& resv_name = request.reservation_name();
 
-  auto res = DeleteResvMeta_(resv_name);
+  auto res = DeleteResvMeta_(resv_name, ResvDeleteMode::Explicit);
   if (res.has_value()) {
     reply.set_ok(true);
   } else {
@@ -5111,7 +5118,7 @@ JobScheduler::DeleteResvMeta_(const ResvId& resv_id, ResvDeleteMode mode) {
     auto* resv_meta = resv_meta_map->at(resv_id).RawPtr();
     if (mode == ResvDeleteMode::OnExpiry) {
       // A queued timer may refer to a previous reservation with this name.
-      auto remaining = resv_meta->TimeUntilExpiry(absl::Now());
+      auto remaining = ReservationTimerDelay(resv_meta->end_time, absl::Now());
       if (remaining > 0ms) {
         g_meta_container->UnlockResReduceEvents();
         return remaining;
@@ -5180,7 +5187,7 @@ crane::grpc::DeleteReservationReply JobScheduler::PurgeAllReservations() {
 
   std::vector<std::string> failed_reasons;
   for (const auto& name : resv_names) {
-    auto res = DeleteResvMeta_(name);
+    auto res = DeleteResvMeta_(name, ResvDeleteMode::Explicit);
     if (!res) {
       failed_reasons.push_back(res.error());
     }
@@ -5285,7 +5292,7 @@ void JobScheduler::CleanResvTimerQueueCb_(
 
     auto resv = g_meta_container->GetResvMetaPtr(reservation_id);
     if (!resv) continue;
-    auto delay = resv->TimeUntilExpiry(absl::Now());
+    auto delay = ReservationTimerDelay(resv->end_time, absl::Now());
     auto on_timer_cb = [this, reservation_id](const uvw::timer_event&,
                                               uvw::timer_handle& handle) {
       auto result = DeleteResvMeta_(reservation_id, ResvDeleteMode::OnExpiry);

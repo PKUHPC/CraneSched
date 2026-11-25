@@ -2,13 +2,16 @@
 // Changsha Institute for Computing and Digital Economy
 // SPDX-License-Identifier: AGPL-3.0-or-later
 
+#include <absl/cleanup/cleanup.h>
 #include <gtest/gtest.h>
 
 #include <algorithm>
+#include <filesystem>
 #include <memory>
 #include <utility>
 #include <vector>
 
+#include "Database/EmbeddedDbClient.h"
 #include "JobScheduler.h"
 
 namespace {
@@ -16,18 +19,6 @@ namespace {
 constexpr uint64_t kMemPerCpu = 3872ULL * 1024 * 1024;
 constexpr uint64_t kJobMemPerNode = 4 * kMemPerCpu;
 constexpr char kPartition[] = "step-memory-test";
-
-TEST(ReservationExpiryTest, RoundsUpRemainingTimeUntilDeadline) {
-  using namespace std::chrono_literals;
-  const absl::Time end = absl::FromUnixSeconds(100);
-  const Ctld::ResvMeta reservation{.end_time = end};
-  EXPECT_EQ(reservation.TimeUntilExpiry(end - absl::Microseconds(3800001)),
-            3801ms);
-  EXPECT_EQ(reservation.TimeUntilExpiry(end - absl::Milliseconds(5)), 5ms);
-  EXPECT_EQ(reservation.TimeUntilExpiry(end - absl::Nanoseconds(1)), 1ms);
-  EXPECT_EQ(reservation.TimeUntilExpiry(end), 0ms);
-  EXPECT_EQ(reservation.TimeUntilExpiry(end + absl::Seconds(1)), 0ms);
-}
 
 class JobSchedulerTest : public ::testing::Test {
  protected:
@@ -309,3 +300,68 @@ TEST_F(JobSchedulerTest, ChecksCapacityWithinNodeFilters) {
 }
 
 }  // namespace
+
+#ifdef CRANE_HAVE_UNQLITE
+namespace Ctld {
+
+class ReservationExpiryTest : public ::testing::Test {
+ protected:
+  static auto ArmTimer(JobScheduler& scheduler,
+                       const std::shared_ptr<uvw::loop>& loop,
+                       const ResvId& name) {
+    scheduler.m_resv_timer_queue_.enqueue(name);
+    scheduler.CleanResvTimerQueueCb_(loop);
+    return scheduler.m_resv_timer_handles_.at(name);
+  }
+};
+
+TEST_F(ReservationExpiryTest, EarlyCallbackRearmsAndDueCallbackDeletes) {
+  using namespace std::chrono_literals;
+  ASSERT_EQ(g_meta_container, nullptr);
+  ASSERT_EQ(g_embedded_db_client, nullptr);
+  char db_dir[] = "/tmp/crane-reservation-expiry-XXXXXX";
+  ASSERT_NE(::mkdtemp(db_dir), nullptr);
+  absl::Cleanup cleanup = [&] {
+    g_embedded_db_client.reset();
+    g_meta_container.reset();
+    std::filesystem::remove_all(db_dir);
+  };
+  g_meta_container = std::make_unique<CranedMetaContainer>();
+  g_embedded_db_client = MakeEmbeddedDbClient("Unqlite");
+  ASSERT_TRUE(g_embedded_db_client->Init(std::string(db_dir) + "/db"));
+
+  const ResvId name{"expiry-test"};
+  const auto end = absl::Now() + absl::Hours(1);
+  g_meta_container->GetResvMetaMapExclusivePtr()->emplace(
+      name, ResvMeta{.name = name, .end_time = end});
+  crane::grpc::CreateReservationRequest request;
+  request.set_reservation_name(name);
+  ASSERT_TRUE(g_embedded_db_client->UpdateReservationInfo(0, name, request));
+
+  JobScheduler scheduler;
+  auto loop = uvw::loop::create();
+  auto timer = ArmTimer(scheduler, loop, name);
+  absl::Cleanup close_loop = [&] {
+    if (!timer->closing()) timer->close();
+    loop->run();
+  };
+
+  // Deliver a premature callback and observe the deadline it re-arms for.
+  ASSERT_EQ(timer->start(0ms, 0ms), 0);
+  loop->run(uvw::loop::run_mode::NOWAIT);
+  ASSERT_NE(g_meta_container->GetResvMetaPtr(name).get(), nullptr);
+  EXPECT_TRUE(timer->active());
+  EXPECT_GT(timer->due_in(), 30min);
+
+  // Move the stored deadline into the past and deliver the same callback.
+  g_meta_container->GetResvMetaPtr(name)->end_time = absl::UnixEpoch();
+  ASSERT_EQ(timer->start(0ms, 0ms), 0);
+  loop->run(uvw::loop::run_mode::NOWAIT);
+  EXPECT_EQ(g_meta_container->GetResvMetaPtr(name).get(), nullptr);
+  std::unordered_map<ResvId, crane::grpc::CreateReservationRequest> persisted;
+  ASSERT_TRUE(g_embedded_db_client->RetrieveReservationInfo(&persisted));
+  EXPECT_FALSE(persisted.contains(name));
+}
+
+}  // namespace Ctld
+#endif

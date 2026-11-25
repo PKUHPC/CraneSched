@@ -101,12 +101,6 @@ using AllocationCleanupMap =
     std::unordered_map<job_id_t, std::unordered_set<CranedId>>;
 
 struct ResvMeta {
-  std::chrono::milliseconds TimeUntilExpiry(absl::Time now) const {
-    if (now >= end_time) return std::chrono::milliseconds::zero();
-    return absl::ToChronoMilliseconds(
-        absl::Ceil(end_time - now, absl::Milliseconds(1)));
-  }
-
   ResvId name;
   uint64_t creation_order{0};
   PartitionId part_id;

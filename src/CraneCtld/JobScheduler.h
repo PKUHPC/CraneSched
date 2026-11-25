@@ -1495,10 +1495,11 @@ class JobScheduler {
   std::expected<void, std::string> CreateResv_(
       const crane::grpc::CreateReservationRequest& request);
 
+  friend class ReservationExpiryTest;
   enum class ResvDeleteMode { Explicit, OnExpiry };
   // A positive result defers automatic deletion until the reservation ends.
   std::expected<std::chrono::milliseconds, std::string> DeleteResvMeta_(
-      const ResvId& resv_id, ResvDeleteMode mode = ResvDeleteMode::Explicit);
+      const ResvId& resv_id, ResvDeleteMode mode);
 
   std::unique_ptr<SchedulerAlgo> m_node_selection_algo_;
 
