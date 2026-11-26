@@ -662,7 +662,7 @@ class CgroupManager {
 
  private:
   static CgroupStrParsedIds ParseIdsFromCgroupStr_(
-      const std::string& cgroup_str);
+      const std::string& cgroup_str, bool include_step_parent);
 
   static int InitializeController_(struct cgroup& cgroup,
                                    CgConstant::Controller controller,

@@ -10,6 +10,7 @@
 #include <filesystem>
 #include <format>
 #include <fstream>
+#include <set>
 
 #include "CgroupV2Fs.h"
 
@@ -65,6 +66,29 @@ class FakeCgroupFs {
  private:
   std::filesystem::path root_;
 };
+
+TEST(CgroupV2FsBackendTest, RecoveryEnumeratesOnlyExistingStepSubgroups) {
+  using Craned::Common::CgroupManager;
+  FakeCgroupFs fs;
+  std::filesystem::create_directories(fs.Root() / "job_1/step_0/system");
+  std::filesystem::create_directories(fs.Root() / "job_1/step_1");
+  std::filesystem::create_directories(fs.Root() /
+                                      "overflow/job_2/step_0/system");
+  std::filesystem::create_directories(fs.Root() /
+                                      "overflow/job_2/step_0/user/task_0");
+
+  std::set<std::string> paths;
+  for (const auto& ids : CgroupManager::GetIdsFromCgroupV2_(fs.Root())) {
+    paths.insert(CgroupManager::CgroupStrByParsedIds(ids));
+  }
+  const std::set<std::string> expected{"job_1",
+                                       "job_1/step_0/system",
+                                       "overflow/job_2",
+                                       "overflow/job_2/step_0/system",
+                                       "overflow/job_2/step_0/user",
+                                       "overflow/job_2/step_0/user/task_0"};
+  EXPECT_EQ(paths, expected);
+}
 
 TEST(CgroupV2FsBackendTest, CreateOrOpenMergesControllerEnableAndUsesCache) {
   FakeCgroupFs fs;

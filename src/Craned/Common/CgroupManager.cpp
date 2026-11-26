@@ -549,7 +549,7 @@ std::string CgroupManager::CgroupStrByParsedIds(const CgroupStrParsedIds& ids) {
 }
 
 CgroupStrParsedIds CgroupManager::ParseIdsFromCgroupStr_(
-    const std::string& cgroup_str) {
+    const std::string& cgroup_str, bool include_step_parent) {
   // Pattern now includes optional system/user suffix for step:
   // [overflow/]job_{job_id}[/step_{step_id}[/system|user[/task_{task_id}]]]
   static const auto cg_pattern_str = std::format(
@@ -564,6 +564,9 @@ CgroupStrParsedIds CgroupManager::ParseIdsFromCgroupStr_(
   CgroupStrParsedIds parsed_ids{};
   if (RE2::FullMatch(cgroup_str, *cg_pattern, &job_id, &step_id,
                      &system_or_user, &task_id)) {
+    // A bare step directory identifies its job for PID lookups. Recovery
+    // reopens only the system and user subgroups found during the walk.
+    if (!include_step_parent && step_id && !system_or_user) return {};
     std::get<CgConstant::kParsedJobIdIdx>(parsed_ids) = job_id;
     std::get<CgConstant::kParsedStepIdIdx>(parsed_ids) = step_id;
     std::get<CgConstant::kParsedSystemFlagIdx>(parsed_ids) =
@@ -984,7 +987,8 @@ std::set<CgroupStrParsedIds> CgroupManager::GetIdsFromCgroupV1_(
   while (ret == 0) {
     if (info.type == cgroup_file_type::CGROUP_FILE_TYPE_DIR) {
       // ParseIdsFromCgroupStr_ detects overflow from path automatically
-      auto parsed_ids = ParseIdsFromCgroupStr_(info.path);
+      auto parsed_ids =
+          ParseIdsFromCgroupStr_(info.path, /*include_step_parent=*/false);
       auto job_id_opt = std::get<CgConstant::kParsedJobIdIdx>(parsed_ids);
       if (job_id_opt.has_value()) ids.emplace(parsed_ids);
     }
@@ -1011,7 +1015,8 @@ std::set<CgroupStrParsedIds> CgroupManager::GetIdsFromCgroupV2_(
         // Use relative path so ParseIdsFromCgroupStr_ can detect overflow/
         auto rel_path =
             std::filesystem::relative(it.path(), root_cgroup_path).string();
-        auto parsed_ids = ParseIdsFromCgroupStr_(rel_path);
+        auto parsed_ids =
+            ParseIdsFromCgroupStr_(rel_path, /*include_step_parent=*/false);
         auto job_id_opt = std::get<CgConstant::kParsedJobIdIdx>(parsed_ids);
         if (job_id_opt.has_value()) ids.emplace(parsed_ids);
       }
@@ -1075,7 +1080,8 @@ CraneExpected<CgroupStrParsedIds> CgroupManager::GetIdsByPid(pid_t pid) {
     // TODO: Add examples in comments below.
     std::string line;
     while (std::getline(infile, line)) {
-      auto parsed_ids = ParseIdsFromCgroupStr_(line);
+      auto parsed_ids =
+          ParseIdsFromCgroupStr_(line, /*include_step_parent=*/true);
       auto job_id_opt = std::get<CgConstant::kParsedJobIdIdx>(parsed_ids);
 
       // if job_id found, entry is valid.
@@ -1089,7 +1095,8 @@ CraneExpected<CgroupStrParsedIds> CgroupManager::GetIdsByPid(pid_t pid) {
       return std::unexpected(CraneErrCode::ERR_SYSTEM_ERR);
     }
 
-    auto parsed_ids = ParseIdsFromCgroupStr_(line);
+    auto parsed_ids =
+        ParseIdsFromCgroupStr_(line, /*include_step_parent=*/true);
     auto job_id_opt = std::get<CgConstant::kParsedJobIdIdx>(parsed_ids);
 
     // If job_id found, entry is valid.
