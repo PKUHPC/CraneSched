@@ -32,43 +32,20 @@ using grpc::Channel;
 using grpc::ClientContext;
 using grpc::Status;
 
+class CtldClient;
+
+using ConfigureRequest = crane::grpc::ConfigureCranedRequest;
+
 class CtldClientStateMachine {
  public:
-  CtldClientStateMachine();
+  explicit CtldClientStateMachine(CtldClient& client);
   ~CtldClientStateMachine();
   void Shutdown();
   CtldClientStateMachine(CtldClientStateMachine const&) = delete;
   CtldClientStateMachine& operator=(CtldClientStateMachine const&) = delete;
   CtldClientStateMachine(CtldClientStateMachine&&) = delete;
   CtldClientStateMachine& operator=(CtldClientStateMachine&&) = delete;
-  void SetActionRequestConfigCb(std::function<void(RegToken const&)>&& cb);
-
-  struct ConfigureArg {
-    crane::grpc::ConfigureCranedRequest req;
-  };
-
-  template <typename ConfigureCb>
-    requires std::invocable<ConfigureCb, ConfigureArg const&>
-  void AddActionConfigureCb(ConfigureCb&& cb, CallbackInvokeMode invoke_mode,
-                            bool consume) {
-    using FuncType = std::function<void(ConfigureArg const&)>;
-
-    m_action_configure_cb_list_.emplace_back(
-        CallbackWrapper<FuncType, ConfigureArg const&>{
-            .cb = FuncType(std::forward<ConfigureCb>(cb)),
-            .mode = invoke_mode,
-            .consume = consume});
-  }
-
-  struct RegisterArg {
-    RegToken token;
-    std::set<job_id_t> lost_jobs;
-    std::unordered_map<job_id_t, std::set<step_id_t>> lost_steps;
-  };
-
-  void SetActionRegisterCb(std::function<void(RegisterArg const&)>&& cb);
-  void SetActionReadyCb(std::function<void()>&& cb);
-  void SetActionDisconnectedCb(std::function<void()>&& cb);
+  void SetInitialRestore(std::function<void(const ConfigureRequest&)> restore);
 
   // Grpc Application-level Events:
   bool EvRecvConfigFromCtld(const crane::grpc::ConfigureCranedRequest& request);
@@ -124,17 +101,11 @@ class CtldClientStateMachine {
   // Internal application-level events
   void EvTimeout_();
 
-  std::function<void(RegToken const&)> m_action_request_config_cb_;
-
-  std::list<CallbackWrapper<std::function<void(ConfigureArg const&)>,
-                            ConfigureArg const&>>
-      m_action_configure_cb_list_ ABSL_GUARDED_BY(m_cb_mutex_);
-
-  std::function<void(RegisterArg const&)> m_action_register_cb_;
-  std::function<void()> m_action_ready_cb_;
-  std::function<void()> m_action_disconnected_cb_;
-
-  absl::Mutex m_cb_mutex_;
+  // All dispatch and the closing transition run under m_mtx_.
+  void TrackAction_(std::future<void> action);
+  CtldClient& m_client_;
+  std::function<void(const ConfigureRequest&)> m_initial_restore_;
+  std::list<std::future<void>> m_actions_ ABSL_GUARDED_BY(m_mtx_);
 
   State m_state_ ABSL_GUARDED_BY(m_mtx_) = State::DISCONNECTED;
 
@@ -157,8 +128,12 @@ class CtldClientStateMachine {
 class CtldClient {
  public:
   CtldClient();
+  // Seal controller handshakes and join the recovery and RPC actions they
+  // started. JobManager and the status reporting channel are still live during
+  // this wait.
+  void Quiesce();
+  // Call after the producers of step status changes have drained.
   void Shutdown();
-  void Wait();
   ~CtldClient();
 
   CtldClient(CtldClient const&) = delete;
@@ -169,7 +144,10 @@ class CtldClient {
 
   void SetCranedId(CranedId const& craned_id) { m_craned_id_ = craned_id; }
 
-  void Init();
+  void Init(std::function<void(const ConfigureRequest&)> restore);
+  bool Configure(const ConfigureRequest& request) {
+    return m_state_machine_.EvRecvConfigFromCtld(request);
+  }
 
   /***
    * InitChannelAndStub the CtldClient to CraneCtld.
@@ -189,7 +167,7 @@ class CtldClient {
   void SetPingSuccessCb(std::function<void()>&& cb);
   void SetPingFailedCb(std::function<void()>&& cb);
 
-  void StartGrpcCtldConnection() { m_connection_start_notification_.Notify(); }
+  void StartGrpcCtldConnection();
 
   void StartPingCtld() { m_ping_ctld_ = true; }
   void StopPingCtld() { m_ping_ctld_ = false; }
@@ -218,6 +196,10 @@ class CtldClient {
   [[nodiscard]] CranedId GetCranedId() const { return m_craned_id_; };
 
  private:
+  friend class CtldClientStateMachine;
+  CtldClientStateMachine m_state_machine_;
+  void Reconcile_(const ConfigureRequest& request);
+  void Wait();
   bool RequestConfigFromCtld_(RegToken const& token);
 
   bool CranedRegister_(
@@ -254,8 +236,6 @@ class CtldClient {
   std::function<void()> m_ping_success_cb_;
   std::function<void()> m_ping_failed_cb_;
 
-  absl::Notification m_connection_start_notification_;
-
   std::thread m_uvw_thread_;
 
   std::shared_ptr<uvw::loop> m_uvw_loop_;
@@ -275,5 +255,4 @@ class CtldClient {
 
 }  // namespace Craned
 
-inline std::unique_ptr<Craned::CtldClientStateMachine> g_ctld_client_sm;
 inline std::unique_ptr<Craned::CtldClient> g_ctld_client;

@@ -41,16 +41,6 @@ using ::Craned::Common::EnvMap;
 using RegToken = google::protobuf::Timestamp;
 using StepStatus = crane::grpc::JobStatus;
 
-enum class CallbackInvokeMode : std::uint8_t { SYNC = 0, ASYNC };
-
-template <typename Cb, typename... Args>
-  requires std::invocable<Cb, Args...>
-struct CallbackWrapper {
-  Cb cb;
-  CallbackInvokeMode mode;
-  bool consume;
-};
-
 inline std::string GetStepIdStr(const crane::grpc::StepToD& step) {
   return fmt::format("{}.{}", step.job_id(), step.step_id());
 }

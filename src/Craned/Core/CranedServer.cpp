@@ -37,7 +37,7 @@ grpc::Status CranedServiceImpl::Configure(
     grpc::ServerContext *context,
     const crane::grpc::ConfigureCranedRequest *request,
     google::protobuf::Empty *response) {
-  bool ok = g_ctld_client_sm->EvRecvConfigFromCtld(*request);
+  bool ok = g_ctld_client->Configure(*request);
 
   CRANE_TRACE("Recv Configure RPC from Ctld. Configuration result: {}", ok);
   return Status::OK;

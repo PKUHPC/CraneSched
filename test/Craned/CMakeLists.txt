@@ -31,6 +31,7 @@ get_target_property(job_manager_libraries craned LINK_LIBRARIES)
 add_executable(job_manager_test
         JobManagerTest.cpp
         CranedConfigTest.cpp
+        CtldSessionTest.cpp
         ${job_manager_sources})
 target_link_libraries(job_manager_test PRIVATE
         GTest::gtest GTest::gtest_main ${job_manager_libraries})

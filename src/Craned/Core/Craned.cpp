@@ -1628,43 +1628,30 @@ void GlobalVariableInit() {
     }
   }
 
-  g_server = std::make_unique<Craned::CranedServer>(g_config.ListenConf);
-
   g_job_mgr = std::make_unique<Craned::JobManager>();
-  g_job_mgr->SetSigintCallback([] {
-    g_server->Shutdown();
-    g_craned_for_pam_server->Shutdown();
-    CRANE_INFO("Grpc Server Shutdown() was called.");
-  });
-
-  g_ctld_client_sm = std::make_unique<Craned::CtldClientStateMachine>();
   g_ctld_client = std::make_unique<Craned::CtldClient>();
-
-  g_ctld_client_sm->AddActionConfigureCb(
-      [](const Craned::CtldClientStateMachine::ConfigureArg& arg) {
-        if (arg.req.has_trace_config()) {
-          auto applied_config =
-              crane::ApplyRuntimeTraceConfig(arg.req.trace_config());
-          g_config.Tracing.Enabled = applied_config.enabled;
-          g_config.Tracing.Level = applied_config.runtime_level;
-          if (applied_config.clamped) {
-            CRANE_WARN(
-                "Tracing runtime level {} exceeds compiled max level {}; "
-                "effective level is {}.",
-                crane::TraceLevelToString(applied_config.runtime_level),
-                crane::TraceLevelToString(applied_config.compiled_max_level),
-                crane::TraceLevelToString(applied_config.effective_level));
-          }
-        }
-        // Recover jobs and steps
-        // Status synchronization is handled in CtldClient.cpp
-        Recover(arg.req);
-      },
-      Craned::CallbackInvokeMode::SYNC, true);
-
-  g_ctld_client->Init();
+  g_ctld_client->Init([](const Craned::ConfigureRequest& request) {
+    if (request.has_trace_config()) {
+      auto applied_config =
+          crane::ApplyRuntimeTraceConfig(request.trace_config());
+      g_config.Tracing.Enabled = applied_config.enabled;
+      g_config.Tracing.Level = applied_config.runtime_level;
+      if (applied_config.clamped) {
+        CRANE_WARN(
+            "Tracing runtime level {} exceeds compiled max level {}; "
+            "effective level is {}.",
+            crane::TraceLevelToString(applied_config.runtime_level),
+            crane::TraceLevelToString(applied_config.compiled_max_level),
+            crane::TraceLevelToString(applied_config.effective_level));
+      }
+    }
+    // Recover jobs and steps
+    // Status synchronization is handled in CtldClient.cpp
+    Recover(request);
+  });
   g_ctld_client->SetCranedId(g_config.CranedIdOfThisNode);
 
+  g_server = std::make_unique<Craned::CranedServer>(g_config.ListenConf);
   g_ctld_client->InitGrpcChannel(g_config.ControlMachineAddr,
                                  g_config.ControlMachine);
 
@@ -1706,29 +1693,17 @@ void GlobalVariableInit() {
 }
 
 void WaitForStopAndDoGvarFini() {
-  /*
-   * JobMgr is ending
-   * g_server and g_craned_for_pam_server Shutdown() called
-   */
+  g_job_mgr->WaitForStopRequest();
+  g_server->Shutdown();
+  g_craned_for_pam_server->Shutdown();
   g_server->Wait();
-
-  /*
-   * No more status change from supervisor, clean up CtldClient, stop register
-   * this craned
-   */
-  g_ctld_client->Shutdown();
   g_craned_for_pam_server->Wait();
-  g_ctld_client_sm->Shutdown();
-  g_ctld_client->Wait();
 
-  /* Called from
-   * PAM_SERVER, G_SERVER
-   * CtldClient: ActionConfigureCb
-   */
-  g_job_mgr->Wait();
-
-  // The controller client can still have callbacks queued on the thread pool.
+  // Recovery can wait on JobManager's event loop and submit terminal reports.
+  g_ctld_client->Quiesce();
+  g_job_mgr->DrainAndStop();
   g_thread_pool->wait();
+  g_ctld_client->Shutdown();
 
   g_server.reset();
   g_craned_for_pam_server.reset();
@@ -1736,8 +1711,6 @@ void WaitForStopAndDoGvarFini() {
   g_job_mgr.reset();
 
   g_ctld_client.reset();
-  // After ctld client destroyed, it is ok to destroy ctld client state machine
-  g_ctld_client_sm.reset();
 
   g_thread_pool.reset();
 

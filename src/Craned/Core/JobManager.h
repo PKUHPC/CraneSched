@@ -85,12 +85,6 @@ struct JobInD {
   EnvMap GetJobEnvMap();
 };
 
-/**
- * The class that manages all jobs and handles interrupts.
- * SIGINT and SIGCHLD are processed in JobManager.
- * Especially, outside caller can use SetSigintCallback() to
- * set the callback when SIGINT is triggered.
- */
 class JobManager {
  public:
   JobManager();
@@ -118,7 +112,10 @@ class JobManager {
   StepCleanupFutureMap FreeSteps(
       std::unordered_map<job_id_t, std::unordered_set<step_id_t>>&& steps);
 
-  JobCleanupFutureMap FreeInvalidJobs(std::set<job_id_t>&& job_ids);
+  // Configuration recovery owns these futures and joins them before
+  // DrainAndStop.
+  [[nodiscard]] JobCleanupFutureMap FreeInvalidJobs(
+      std::set<job_id_t>&& job_ids);
 
   CraneErrCode ExecuteStepAsync(
       std::unordered_map<job_id_t, std::unordered_set<step_id_t>>&& steps,
@@ -180,16 +177,9 @@ class JobManager {
                              std::optional<crane::grpc::JobStatus> final_status,
                              const google::protobuf::Timestamp& timestamp);
 
-  // Wait internal libuv base loop to exit...
-  void Wait();
-  bool IsEnding() { return m_is_ending_now_; }
-
-  /***
-   * Set the callback function will be called when SIGINT is triggered.
-   * This function is not thread-safe.
-   * @param cb the callback function.
-   */
-  void SetSigintCallback(std::function<void()> cb);
+  void WaitForStopRequest() const { m_stop_requested_.WaitForNotification(); }
+  // Called after RPC handlers and configuration work have returned.
+  void DrainAndStop();
 
  private:
   template <class T>
@@ -353,13 +343,11 @@ class JobManager {
   ConcurrentQueue<FreeStepElem> m_free_steps_queue_;
   void EvCleanFreeStepsQueueCb_();
 
-  // The function which will be called when SIGINT is triggered.
-  std::function<void()> m_sigint_cb_;
-
-  // When SIGINT is triggered or Shutdown() gets called, this variable is set to
-  // true. Then, AddJobAsyncMethod will not accept any more new jobs and
-  // ev_sigchld_cb_ will stop the event loop when there is no job running.
-  std::atomic_bool m_is_ending_now_{false};
+  absl::Notification m_stop_requested_;
+  bool m_cleanup_closed_ ABSL_GUARDED_BY(m_free_job_step_mtx_) = false;
+  std::atomic_bool m_stop_loop_{false};
+  bool FinishDrain_();
+  CraneErrCode CleanInvalidJob_(job_id_t job_id);
 
   util::mutex m_prolog_serial_mutex_;  // when prolog flags set Serial
 
