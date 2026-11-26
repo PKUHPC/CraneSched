@@ -1322,7 +1322,9 @@ func HostNameListToStr_(hostList []string) ([]string, bool) {
 			if first == -1 {
 				first, last = num, num
 				firstStr, lastStr = numStr, numStr
-			} else if num == last+1 {
+			} else if num == last+1 && (numStr[0] != '0' || len(numStr) == len(firstStr)) {
+				// A range is expanded with the width of its head, so a zero-padded
+				// number of a different width must not be merged into it.
 				last = num
 				lastStr = numStr
 			} else {

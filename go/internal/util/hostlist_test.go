@@ -21,6 +21,19 @@ func TestParseHostListExpandsNodeNameExpression(t *testing.T) {
 	}
 }
 
+func TestHostNameListToStrKeepsLeadingZeros(t *testing.T) {
+	cases := map[string][]string{
+		"ss[1,02]":  {"ss1", "ss02"},
+		"ss[9-10]":  {"ss9", "ss10"},
+		"ss[08-10]": {"ss08", "ss09", "ss10"},
+	}
+	for want, hosts := range cases {
+		if got := HostNameListToStr(hosts); got != want {
+			t.Errorf("HostNameListToStr(%v) = %q, want %q", hosts, got, want)
+		}
+	}
+}
+
 func TestBuildNodeAliasMapSupportsNodeNameAndHostname(t *testing.T) {
 	nodes := []ConfigNodesList{{
 		Name:         "crnd[1-2]",

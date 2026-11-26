@@ -152,6 +152,17 @@ TEST(String, HostNameListToStr) {
   }
 }
 
+TEST(String, HostNameListToStrKeepsLeadingZeros) {
+  using util::HostNameListToStr;
+
+  EXPECT_EQ(HostNameListToStr(std::list<std::string>{"ss1", "ss02"}),
+            "ss[1,02]");
+  EXPECT_EQ(HostNameListToStr(std::list<std::string>{"ss9", "ss10"}),
+            "ss[9-10]");
+  EXPECT_EQ(HostNameListToStr(std::list<std::string>{"ss08", "ss09", "ss10"}),
+            "ss[08-10]");
+}
+
 namespace {
 class FilePermissionsTest : public ::testing::Test {
  protected:
