@@ -1694,14 +1694,15 @@ void GlobalVariableInit() {
 
 void WaitForStopAndDoGvarFini() {
   g_job_mgr->WaitForStopRequest();
-  g_server->Shutdown();
+  g_server->CloseWorkAdmission();
   g_craned_for_pam_server->Shutdown();
-  g_server->Wait();
   g_craned_for_pam_server->Wait();
 
   // Recovery can wait on JobManager's event loop and submit terminal reports.
-  g_ctld_client->Quiesce();
+  g_ctld_client->StopHandshakes().wait();
   g_job_mgr->DrainAndStop();
+  g_server->Shutdown();
+  g_server->Wait();
   g_thread_pool->wait();
   g_ctld_client->Shutdown();
 

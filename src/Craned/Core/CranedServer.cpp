@@ -37,6 +37,9 @@ grpc::Status CranedServiceImpl::Configure(
     grpc::ServerContext *context,
     const crane::grpc::ConfigureCranedRequest *request,
     google::protobuf::Empty *response) {
+  auto work = g_server->AdmitWork();
+  if (!work) return {grpc::StatusCode::UNAVAILABLE, "Craned is draining"};
+
   bool ok = g_ctld_client->Configure(*request);
 
   CRANE_TRACE("Recv Configure RPC from Ctld. Configuration result: {}", ok);
@@ -47,7 +50,8 @@ grpc::Status CranedServiceImpl::UpdateTraceConfig(
     grpc::ServerContext *context,
     const crane::grpc::UpdateTraceConfigRequest *request,
     crane::grpc::UpdateTraceConfigReply *response) {
-  if (!g_server->ReadyFor(RequestSource::CTLD)) {
+  auto work = g_server->AdmitWork(RequestSource::CTLD);
+  if (!work) {
     CRANE_ERROR("CranedServer is not ready.");
     response->set_ok(false);
     response->set_reason("CranedServer is not ready");
@@ -76,7 +80,8 @@ grpc::Status CranedServiceImpl::ExecuteSteps(
     grpc::ServerContext *context,
     const crane::grpc::ExecuteStepsRequest *request,
     crane::grpc::ExecuteStepsReply *response) {
-  if (!g_server->ReadyFor(RequestSource::CTLD)) {
+  auto work = g_server->AdmitWork(RequestSource::CTLD);
+  if (!work) {
     CRANE_ERROR("CranedServer is not ready.");
     return Status{grpc::StatusCode::UNAVAILABLE, "CranedServer is not ready"};
   }
@@ -100,8 +105,11 @@ grpc::Status CranedServiceImpl::ExecuteSteps(
 
   CRANE_INFO("Receive ExecuteSteps for steps [{}]",
              util::JobStepsToString(job_steps_map));
-  g_job_mgr->ExecuteStepAsync(std::move(job_steps_map),
-                              std::move(traceparents));
+  auto err = g_job_mgr->ExecuteStepAsync(std::move(job_steps_map),
+                                         std::move(traceparents));
+  if (err != CraneErrCode::SUCCESS)
+    return {grpc::StatusCode::FAILED_PRECONDITION,
+            std::string(CraneErrStr(err))};
 
   return Status::OK;
 }
@@ -110,7 +118,8 @@ grpc::Status CranedServiceImpl::TerminateSteps(
     grpc::ServerContext *context,
     const crane::grpc::TerminateStepsRequest *request,
     crane::grpc::TerminateStepsReply *response) {
-  if (!g_server->ReadyFor(RequestSource::CTLD)) {
+  auto work = g_server->AdmitWork(RequestSource::CTLD);
+  if (!work) {
     CRANE_ERROR("CranedServer is not ready.");
     response->set_reason("CranedServer is not ready");
     return Status{grpc::StatusCode::UNAVAILABLE, "CranedServer is not ready"};
@@ -138,7 +147,8 @@ grpc::Status CranedServiceImpl::QueryStepFromPort(
     grpc::ServerContext *context,
     const crane::grpc::QueryStepFromPortRequest *request,
     crane::grpc::QueryStepFromPortReply *response) {
-  if (!g_server->ReadyFor(RequestSource::PAM)) {
+  auto work = g_server->AdmitWork(RequestSource::PAM);
+  if (!work) {
     CRANE_ERROR("CranedServer is not ready.");
     response->set_ok(false);
     return Status{grpc::StatusCode::UNAVAILABLE, "CranedServer is not ready"};
@@ -248,7 +258,8 @@ grpc::Status CranedServiceImpl::QueryStepFromPort(
 grpc::Status CranedServiceImpl::AllocJobs(
     grpc::ServerContext *context, const crane::grpc::AllocJobsRequest *request,
     crane::grpc::AllocJobsReply *response) {
-  if (!g_server->ReadyFor(RequestSource::CTLD)) {
+  auto work = g_server->AdmitWork(RequestSource::CTLD);
+  if (!work) {
     CRANE_ERROR("CranedServer is not ready.");
     return Status{grpc::StatusCode::UNAVAILABLE, "CranedServer is not ready"};
   }
@@ -316,7 +327,8 @@ grpc::Status CranedServiceImpl::AllocJobs(
 grpc::Status CranedServiceImpl::AllocSteps(
     grpc::ServerContext *context, const crane::grpc::AllocStepsRequest *request,
     crane::grpc::AllocStepsReply *response) {
-  if (!g_server->ReadyFor(RequestSource::CTLD)) {
+  auto work = g_server->AdmitWork(RequestSource::CTLD);
+  if (!work) {
     CRANE_ERROR("CranedServer is not ready.");
     return Status{grpc::StatusCode::UNAVAILABLE, "CranedServer is not ready"};
   }
@@ -337,7 +349,8 @@ grpc::Status CranedServiceImpl::AllocSteps(
 grpc::Status CranedServiceImpl::FreeSteps(
     grpc::ServerContext *context, const crane::grpc::FreeStepsRequest *request,
     crane::grpc::FreeStepsReply *response) {
-  if (!g_server->ReadyFor(RequestSource::CTLD)) {
+  auto work = g_server->AdmitWork(RequestSource::CTLD);
+  if (!work) {
     CRANE_ERROR("CranedServer is not ready.");
     return Status{grpc::StatusCode::UNAVAILABLE, "CranedServer is not ready"};
   }
@@ -361,7 +374,8 @@ grpc::Status CranedServiceImpl::FreeJobs(
       std::chrono::duration_cast<std::chrono::milliseconds>(
           context->deadline() - std::chrono::system_clock::now())
           .count();
-  if (!g_server->ReadyFor(RequestSource::CTLD)) {
+  auto work = g_server->AdmitWork(RequestSource::CTLD);
+  if (!work) {
     CRANE_ERROR("CranedServer is not ready.");
     return Status{grpc::StatusCode::UNAVAILABLE, "CranedServer is not ready"};
   }
@@ -370,8 +384,9 @@ grpc::Status CranedServiceImpl::FreeJobs(
               absl::StrJoin(request->job_id_list(), ","));
 
   auto enqueue_begin = std::chrono::steady_clock::now();
-  g_job_mgr->FreeJobs(
-      std::set(request->job_id_list().begin(), request->job_id_list().end()));
+  if (!g_job_mgr->FreeJobs(std::set(request->job_id_list().begin(),
+                                    request->job_id_list().end())))
+    return {grpc::StatusCode::UNAVAILABLE, "Craned is draining"};
   auto enqueue_elapsed_ms =
       std::chrono::duration_cast<std::chrono::milliseconds>(
           std::chrono::steady_clock::now() - enqueue_begin)
@@ -403,7 +418,8 @@ grpc::Status CranedServiceImpl::QuerySshStepEnvVariables(
     const ::crane::grpc::QuerySshStepEnvVariablesRequest *request,
     crane::grpc::QuerySshStepEnvVariablesReply *response) {
   response->set_ok(false);
-  if (!g_server->ReadyFor(RequestSource::PAM)) {
+  auto work = g_server->AdmitWork(RequestSource::PAM);
+  if (!work) {
     CRANE_ERROR("CranedServer is not ready.");
     return Status{grpc::StatusCode::UNAVAILABLE, "CranedServer is not ready"};
   }
@@ -426,7 +442,8 @@ grpc::Status CranedServiceImpl::ChangeJobTimeConstraint(
     const crane::grpc::ChangeJobTimeConstraintRequest *request,
     crane::grpc::ChangeJobTimeConstraintReply *response) {
   response->set_ok(false);
-  if (!g_server->ReadyFor(RequestSource::CTLD)) {
+  auto work = g_server->AdmitWork(RequestSource::CTLD);
+  if (!work) {
     CRANE_ERROR("CranedServer is not ready.");
     return Status{grpc::StatusCode::UNAVAILABLE, "CranedServer is not ready"};
   }
@@ -457,7 +474,8 @@ grpc::Status CranedServiceImpl::SuspendJobs(
     const crane::grpc::SuspendJobsRequest *request,
     crane::grpc::SuspendJobsReply *response) {
   response->set_ok(false);
-  if (!g_server->ReadyFor(RequestSource::CTLD)) {
+  auto work = g_server->AdmitWork(RequestSource::CTLD);
+  if (!work) {
     CRANE_ERROR("CranedServer is not ready.");
     return Status{grpc::StatusCode::UNAVAILABLE, "CranedServer is not ready"};
   }
@@ -486,7 +504,8 @@ grpc::Status CranedServiceImpl::ResumeJobs(
     grpc::ServerContext *context, const crane::grpc::ResumeJobsRequest *request,
     crane::grpc::ResumeJobsReply *response) {
   response->set_ok(false);
-  if (!g_server->ReadyFor(RequestSource::CTLD)) {
+  auto work = g_server->AdmitWork(RequestSource::CTLD);
+  if (!work) {
     CRANE_ERROR("CranedServer is not ready.");
     return Status{grpc::StatusCode::UNAVAILABLE, "CranedServer is not ready"};
   }
@@ -515,7 +534,8 @@ grpc::Status CranedServiceImpl::AttachContainerStep(
     grpc::ServerContext *context,
     const crane::grpc::AttachContainerStepRequest *request,
     crane::grpc::AttachContainerStepReply *response) {
-  if (!g_server->ReadyFor(RequestSource::CTLD)) {
+  auto work = g_server->AdmitWork(RequestSource::CTLD);
+  if (!work) {
     CRANE_DEBUG("CranedServer is not ready.");
     auto *err = response->mutable_status();
     err->set_code(CraneErrCode::ERR_RPC_FAILURE);
@@ -585,7 +605,8 @@ grpc::Status CranedServiceImpl::ExecInContainerStep(
     grpc::ServerContext *context,
     const crane::grpc::ExecInContainerStepRequest *request,
     crane::grpc::ExecInContainerStepReply *response) {
-  if (!g_server->ReadyFor(RequestSource::CTLD)) {
+  auto work = g_server->AdmitWork(RequestSource::CTLD);
+  if (!work) {
     CRANE_DEBUG("CranedServer is not ready.");
     auto *err = response->mutable_status();
     err->set_code(CraneErrCode::ERR_RPC_FAILURE);
@@ -685,17 +706,20 @@ grpc::Status CranedServiceImpl::StepStatusChange(
     recv_span.SetAttribute("final_status",
                            static_cast<int64_t>(request->final_status()));
   }
-  if (!g_server->ReadyFor(RequestSource::SUPERVISOR)) {
+  if (!g_server->AcceptsStepStatus()) {
     CRANE_DEBUG("CranedServer is not ready.");
     response->set_ok(false);
     return Status{grpc::StatusCode::UNAVAILABLE, "CranedServer is not ready"};
   }
   std::optional<crane::grpc::JobStatus> final_status;
   if (request->has_final_status()) final_status = request->final_status();
-  g_job_mgr->StepStatusChangeAsync(request->job_id(), request->step_id(),
-                                   request->new_status(), request->exit_code(),
-                                   request->reason(), final_status,
-                                   request->timestamp());
+  if (!g_job_mgr->StepStatusChangeAsync(request->job_id(), request->step_id(),
+                                        request->new_status(),
+                                        request->exit_code(), request->reason(),
+                                        final_status, request->timestamp())) {
+    response->set_ok(false);
+    return {grpc::StatusCode::UNAVAILABLE, "Craned status queue is closed"};
+  }
   response->set_ok(true);
   return Status::OK;
 }
@@ -704,7 +728,8 @@ grpc::Status CranedServiceImpl::BroadcastPmixPort(
     grpc::ServerContext *context,
     const crane::grpc::BroadcastPmixPortRequest *request,
     crane::grpc::BroadcastPmixPortReply *response) {
-  if (!g_server->ReadyFor(RequestSource::SUPERVISOR)) {
+  auto work = g_server->AdmitWork(RequestSource::SUPERVISOR);
+  if (!work) {
     CRANE_DEBUG("CranedServer is not ready.");
     response->set_ok(false);
     return Status(grpc::StatusCode::UNAVAILABLE, "CranedServer is not ready");
@@ -719,6 +744,9 @@ grpc::Status CranedServiceImpl::ReceivePmixPort(
     grpc::ServerContext *context,
     const crane::grpc::ReceivePmixPortRequest *request,
     crane::grpc::ReceivePmixPortReply *response) {
+  auto work = g_server->AdmitWork();
+  if (!work) return {grpc::StatusCode::UNAVAILABLE, "Craned is draining"};
+
   std::vector<std::pair<CranedId, std::string>> pmix_ports;
   for (const auto &pmix_port : request->pmix_ports()) {
     if (pmix_port.craned_id() == g_config.CranedIdOfThisNode) {

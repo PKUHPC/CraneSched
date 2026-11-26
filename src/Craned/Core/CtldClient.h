@@ -40,12 +40,22 @@ class CtldClientStateMachine {
  public:
   explicit CtldClientStateMachine(CtldClient& client);
   ~CtldClientStateMachine();
-  void Shutdown();
+  const BS::multi_future<void>& StopHandshakes();
   CtldClientStateMachine(CtldClientStateMachine const&) = delete;
   CtldClientStateMachine& operator=(CtldClientStateMachine const&) = delete;
   CtldClientStateMachine(CtldClientStateMachine&&) = delete;
   CtldClientStateMachine& operator=(CtldClientStateMachine&&) = delete;
   void SetInitialRestore(std::function<void(const ConfigureRequest&)> restore);
+
+  // Dispatch under the same lock that replaces the handshake token. Wait
+  // for dispatched cleanup futures after releasing this lock.
+  template <typename Action>
+  bool WithCurrentConfig(const RegToken& token, Action&& action) {
+    absl::MutexLock lock(&m_mtx_);
+    if (m_state_ == State::DISCONNECTED || m_reg_token_ != token) return false;
+    action();
+    return true;
+  }
 
   // Grpc Application-level Events:
   bool EvRecvConfigFromCtld(const crane::grpc::ConfigureCranedRequest& request);
@@ -105,7 +115,7 @@ class CtldClientStateMachine {
   void TrackAction_(std::future<void> action);
   CtldClient& m_client_;
   std::function<void(const ConfigureRequest&)> m_initial_restore_;
-  std::list<std::future<void>> m_actions_ ABSL_GUARDED_BY(m_mtx_);
+  BS::multi_future<void> m_actions_ ABSL_GUARDED_BY(m_mtx_);
 
   State m_state_ ABSL_GUARDED_BY(m_mtx_) = State::DISCONNECTED;
 
@@ -128,10 +138,9 @@ class CtldClientStateMachine {
 class CtldClient {
  public:
   CtldClient();
-  // Seal controller handshakes and join the recovery and RPC actions they
-  // started. JobManager and the status reporting channel are still live during
-  // this wait.
-  void Quiesce();
+  // Seal handshake dispatch. Wait on the returned actions while JobManager
+  // and the status reporting channel are still available.
+  [[nodiscard]] const BS::multi_future<void>& StopHandshakes();
   // Call after the producers of step status changes have drained.
   void Shutdown();
   ~CtldClient();
@@ -198,6 +207,7 @@ class CtldClient {
  private:
   friend class CtldClientStateMachine;
   CtldClientStateMachine m_state_machine_;
+  std::mutex m_reconcile_mutex_;
   void Reconcile_(const ConfigureRequest& request);
   void Wait();
   bool RequestConfigFromCtld_(RegToken const& token);

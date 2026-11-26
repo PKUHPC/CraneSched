@@ -21,6 +21,8 @@
 #include "CranedPublicDefs.h"
 // Precompiled header comes first.
 
+#include <shared_mutex>
+
 #include "CommonPublicDefs.h"
 #include "CtldClient.h"
 #include "protos/Crane.grpc.pb.h"
@@ -137,6 +139,22 @@ class CranedServer {
  public:
   explicit CranedServer(const Config::CranedListenConf &listen_conf);
 
+  // Hold a shared lease for the full duration of each work RPC. Status
+  // reports use the JobManager inbox, which stays open through cleanup.
+  [[nodiscard]] std::shared_lock<std::shared_mutex> AdmitWork(
+      std::optional<RequestSource> source = std::nullopt) {
+    if (m_work_closed_.load()) return {};
+    std::shared_lock lock(m_work_mutex_);
+    if (m_work_closed_ || (source && !ReadyFor(*source))) lock.unlock();
+    return lock;
+  }
+
+  void CloseWorkAdmission() {
+    m_work_closed_ = true;
+    // Synchronize with work already admitted. New arrivals cannot delay drain.
+    std::unique_lock lock(m_work_mutex_);
+  }
+
   void Shutdown() {
     m_status_ = CranedStatus::STOPPING;
     m_server_->Shutdown(std::chrono::system_clock::now() +
@@ -192,12 +210,22 @@ class CranedServer {
     return true;
   }
 
+  // Local restore can finish before registration. Its supervisors may be
+  // completing work when a stop request arrives during that interval.
+  [[nodiscard]] bool AcceptsStepStatus() const {
+    return ReadyFor(RequestSource::SUPERVISOR) ||
+           (m_work_closed_ &&
+            m_supervisor_recovered_.load(std::memory_order_acquire));
+  }
+
   void MarkSupervisorAsRecovered() {
     CRANE_DEBUG("Craned finished recover.");
     m_supervisor_recovered_.store(true, std::memory_order_release);
   }
 
  private:
+  std::shared_mutex m_work_mutex_;
+  std::atomic_bool m_work_closed_{false};
   std::unique_ptr<CranedServiceImpl> m_service_impl_;
   std::unique_ptr<Server> m_server_;
 

@@ -40,6 +40,7 @@ using JobCleanupFutureMap =
     std::unordered_map<job_id_t, std::future<CraneErrCode>>;
 
 struct CompletingStepState {
+  std::future<void> supervisor_rpc;
   StepInstance* step = nullptr;
   std::chrono::steady_clock::time_point completion_started_at{
       std::chrono::steady_clock::now()};
@@ -170,7 +171,7 @@ class JobManager {
                                   crane::grpc::JobStatus terminal_status,
                                   uint32_t exit_code, std::string reason);
 
-  void StepStatusChangeAsync(job_id_t job_id, step_id_t step_id,
+  bool StepStatusChangeAsync(job_id_t job_id, step_id_t step_id,
                              crane::grpc::JobStatus new_status,
                              uint32_t exit_code,
                              std::optional<std::string> reason,
@@ -344,6 +345,8 @@ class JobManager {
   void EvCleanFreeStepsQueueCb_();
 
   absl::Notification m_stop_requested_;
+  absl::Mutex m_status_inbox_mutex_;
+  bool m_status_closed_ ABSL_GUARDED_BY(m_status_inbox_mutex_) = false;
   bool m_cleanup_closed_ ABSL_GUARDED_BY(m_free_job_step_mtx_) = false;
   std::atomic_bool m_stop_loop_{false};
   bool FinishDrain_();

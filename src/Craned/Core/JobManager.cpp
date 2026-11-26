@@ -121,6 +121,13 @@ CraneErrCode WaitStepCleanupFutures_(StepCleanupFutureMap&& futures) {
 // progress separate from the execution result already reported by Supervisor.
 bool CheckSupervisorCompletion_(CompletingStepState& state,
                                 std::chrono::steady_clock::time_point now) {
+  if (state.supervisor_rpc.valid()) {
+    if (state.supervisor_rpc.wait_for(0s) != std::future_status::ready)
+      return false;
+    state.supervisor_rpc.get();
+    // Start the supervisor exit timeout once its shutdown RPC has returned.
+    state.completion_started_at = now;
+  }
   auto* step = state.step;
   if (step == nullptr || step->err_before_supv_start) return true;
 
@@ -1374,9 +1381,12 @@ void JobManager::DrainAndStop() {
 bool JobManager::FinishDrain_() {
   // RPC handlers and configuration workers have finished submitting. Run
   // queued handlers on their owning loop before testing for pending cleanup.
+  EvCleanGrpcAllocStepsQueueCb_();
+  EvCleanGrpcExecuteStepQueueCb_();
+  EvCleanStepStatusChangeQueueCb_();
+  EvCleanTerminateStepQueueCb_();
   EvCleanFreeJobsQueueCb_();
   EvCleanFreeStepsQueueCb_();
-  EvCleanStepStatusChangeQueueCb_();
   {
     absl::MutexLock lock(&m_free_job_step_mtx_);
     if (!m_step_cleanup_waiters_.empty() ||
@@ -1386,6 +1396,10 @@ bool JobManager::FinishDrain_() {
   // Pool work (including epilog) may need SIGCHLD on this loop. Keep polling
   // it while workers run. Consume their last status updates after they return.
   if (g_thread_pool && g_thread_pool->get_tasks_total() != 0) return false;
+  {
+    absl::MutexLock lock(&m_status_inbox_mutex_);
+    m_status_closed_ = true;
+  }
   EvCleanStepStatusChangeQueueCb_();
   return true;
 }
@@ -2288,12 +2302,17 @@ void JobManager::EvCleanTerminateStepQueueCb_() {
               elem.job_id, elem.step_id, step->status);
           continue;
         }
-        not_ready_elems.emplace_back(std::move(elem));
-        CRANE_DEBUG(
-            "[Step #{}.{}] Step not running/starting, current: {}, cannot "
-            "terminate now.",
-            elem.job_id, elem.step_id, step->status);
-        continue;
+        // During normal operation another state report can make a step
+        // terminable. At drain the accepted termination must reach its
+        // supervisor even if no further controller request arrives.
+        if (!m_stop_loop_) {
+          not_ready_elems.emplace_back(std::move(elem));
+          CRANE_DEBUG(
+              "[Step #{}.{}] Step not running/starting, current: {}, cannot "
+              "terminate now.",
+              elem.job_id, elem.step_id, step->status);
+          continue;
+        }
       }
 
       std::set<step_id_t> terminate_step_ids;
@@ -2341,7 +2360,6 @@ void JobManager::EvCleanTerminateStepQueueCb_() {
   }
   m_step_terminate_queue_.enqueue_bulk(
       std::make_move_iterator(not_ready_elems.begin()), not_ready_elems.size());
-  not_ready_elems.clear();
 }
 
 void JobManager::TerminateStepAsync(
@@ -2421,7 +2439,6 @@ void JobManager::EvCleanFreeJobsQueueCb_() {
 
 void JobManager::EvCleanFreeStepsQueueCb_() {
   FreeStepElem elem;
-  std::vector<StepInstance*> steps_to_shutdown;
   {
     std::vector<StepInstance*> steps_to_free;
     absl::flat_hash_set<StepKey> steps_to_free_keys;
@@ -2492,56 +2509,41 @@ void JobManager::EvCleanFreeStepsQueueCb_() {
       m_completing_step_retry_map_[key] = CompletingStepState{.step = step};
       if (step->err_before_supv_start) continue;
       if (!step->silent_cleanup && !step->IsDaemonStep()) continue;
-      steps_to_shutdown.emplace_back(step);
+      auto stub = step->supervisor_stub;
+      if (!stub) {
+        CRANE_ERROR("[Step #{}.{}] Supervisor stub is null when terminating",
+                    step->job_id, step->step_id);
+        continue;
+      }
+      m_completing_step_retry_map_.at(key).supervisor_rpc =
+          g_thread_pool->submit_task([stub = std::move(stub), key,
+                                      daemon = step->IsDaemonStep()] {
+            const auto err = daemon
+                                 ? stub->ShutdownSupervisor()
+                                 : stub->TerminateStep(
+                                       crane::grpc::TerminateSource::
+                                           TERMINATE_SOURCE_NORMAL_COMPLETION);
+            if (err != CraneErrCode::SUCCESS)
+              CRANE_ERROR("[Step #{}.{}] Failed to terminate supervisor: {}",
+                          key.first, key.second, CraneErrStr(err));
+          });
     }
   }
-
-  if (steps_to_shutdown.empty()) return;
-  std::latch shutdown_latch(steps_to_shutdown.size());
-
-  for (auto* step : steps_to_shutdown) {
-    auto stub = step->supervisor_stub;
-    if (!stub) {
-      CRANE_ERROR("[Step #{}.{}] Supervisor stub is null when terminating",
-                  step->job_id, step->step_id);
-      shutdown_latch.count_down();
-      continue;
-    }
-
-    g_thread_pool->detach_task([step, stub = std::move(stub), &shutdown_latch] {
-      CraneErrCode err;
-      if (step->IsDaemonStep()) {
-        CRANE_TRACE("[Step #{}.{}] Shutting down daemon supervisor.",
-                    step->job_id, step->step_id);
-        err = stub->ShutdownSupervisor();
-      } else {
-        CRANE_TRACE(
-            "[Step #{}.{}] Terminating non-daemon supervisor for silent "
-            "cleanup.",
-            step->job_id, step->step_id);
-        err = stub->TerminateStep(
-            crane::grpc::TerminateSource::TERMINATE_SOURCE_NORMAL_COMPLETION);
-      }
-      if (err != CraneErrCode::SUCCESS) {
-        CRANE_ERROR("[Step #{}.{}] Failed to terminate supervisor.",
-                    step->job_id, step->step_id);
-      }
-      shutdown_latch.count_down();
-    });
-  }
-  shutdown_latch.wait();
 }
 
-void JobManager::StepStatusChangeAsync(
+bool JobManager::StepStatusChangeAsync(
     job_id_t job_id, step_id_t step_id, crane::grpc::JobStatus new_status,
     uint32_t exit_code, std::optional<std::string> reason,
     std::optional<crane::grpc::JobStatus> final_status,
     const google::protobuf::Timestamp& timestamp) {
   CRANE_INFO("[Step #{}.{}] is doing StepStatusChange, new status: {}", job_id,
              step_id, new_status);
+  absl::MutexLock lock(&m_status_inbox_mutex_);
+  if (m_status_closed_) return false;
   ActivateStepStatusChangeAsync_(job_id, step_id, new_status, exit_code,
                                  std::move(reason), std::move(final_status),
                                  std::move(timestamp));
+  return true;
 }
 
 bool JobManager::ReceivePmixPort(
