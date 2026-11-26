@@ -140,7 +140,7 @@ CraneSched 需要 libbpf 版本 ≥ 1.4.6。
 
 ## 构建 eBPF 程序
 
-鹤思可以使用 GCC 或 Clang 构建，但编译 eBPF 程序必须使用 Clang 19 或更高版本。
+鹤思可以使用 GCC 或 Clang 构建，但编译 eBPF 程序必须使用 Clang 19 或更高版本。程序使用 BPF CO-RE 重定位，因此目标节点必须提供 `/sys/kernel/btf/vmlinux` 内核 BTF。
 
 构建鹤思时，请确保 Clang 已正确安装并且**在您的 PATH 中可用**，并设置 CMake 选项 `-DCRANE_ENABLE_BPF=ON`。
 
@@ -204,3 +204,7 @@ mount -t debugfs none /sys/kernel/debug
 ```bash
 cat /sys/kernel/debug/tracing/trace_pipe
 ```
+
+## 升级 eBPF runtime
+
+`/sys/fs/bpf/crane_devices` 下的 program 和 map 是部署级 ABI。如果新版本修改了 BPF program、map 布局或 `DevicePolicy`，应先停止 Crane daemon 并清空所有作业，确保没有旧 cgroup attachment。然后删除三个 pin（`device_access`、`managed_devices`、`device_policies`）以及空的 `crane_devices` 目录，安装新的 BPF object 后再启动 daemon。普通 daemon 重启会复用这些 pin。
