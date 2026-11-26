@@ -36,6 +36,7 @@ class CtldClientStateMachine {
  public:
   CtldClientStateMachine();
   ~CtldClientStateMachine();
+  void Shutdown();
   CtldClientStateMachine(CtldClientStateMachine const&) = delete;
   CtldClientStateMachine& operator=(CtldClientStateMachine const&) = delete;
   CtldClientStateMachine(CtldClientStateMachine&&) = delete;
@@ -157,6 +158,7 @@ class CtldClient {
  public:
   CtldClient();
   void Shutdown();
+  void Wait();
   ~CtldClient();
 
   CtldClient(CtldClient const&) = delete;
