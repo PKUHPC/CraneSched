@@ -762,7 +762,11 @@ grpc::Status CranedServiceImpl::ReceivePmixPort(
 
   CRANE_TRACE("[Step{}.{}] Delivering {} pmix ports to supervisor",
               request->job_id(), request->step_id(), pmix_ports.size());
-  bool ok = g_job_mgr->ReceivePmixPort(pmix_ports, request->job_id(),
+  auto forward = grpc::ClientContext::FromServerContext(*context);
+  forward->set_deadline(std::min(
+      context->deadline(), std::chrono::system_clock::now() +
+                               std::chrono::seconds(kCranedRpcTimeoutSeconds)));
+  bool ok = g_job_mgr->ReceivePmixPort(*forward, pmix_ports, request->job_id(),
                                        request->step_id());
   if (!ok) {
     response->set_ok(false);

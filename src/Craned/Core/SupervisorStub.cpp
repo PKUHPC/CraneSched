@@ -248,8 +248,8 @@ CraneErrCode SupervisorStub::ShutdownSupervisor() {
 }
 
 CraneErrCode SupervisorStub::ReceivePmixPort(
+    ClientContext& context,
     const std::vector<std::pair<CranedId, std::string>>& pmix_ports) {
-  ClientContext context;
   crane::grpc::supervisor::ReceivePmixPortRequest request;
   crane::grpc::supervisor::ReceivePmixPortReply reply;
 

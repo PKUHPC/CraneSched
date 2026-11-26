@@ -66,6 +66,7 @@ class SupervisorStub {
   CraneErrCode MigrateSshProcToCg(pid_t pid);
   CraneErrCode ShutdownSupervisor();
   CraneErrCode ReceivePmixPort(
+      grpc::ClientContext& context,
       const std::vector<std::pair<CranedId, std::string>>& pmix_ports);
 
  private:

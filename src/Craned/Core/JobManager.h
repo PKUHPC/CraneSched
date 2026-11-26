@@ -123,6 +123,7 @@ class JobManager {
       std::unordered_map<job_id_t, std::string> traceparents = {});
 
   bool ReceivePmixPort(
+      grpc::ClientContext& context,
       const std::vector<std::pair<CranedId, std::string>>& pmix_ports,
       job_id_t job_id, step_id_t step_id);
 
@@ -350,6 +351,7 @@ class JobManager {
   bool m_cleanup_closed_ ABSL_GUARDED_BY(m_free_job_step_mtx_) = false;
   std::atomic_bool m_stop_loop_{false};
   bool FinishDrain_();
+  bool QueueCompletedStepsForDrain_();
   CraneErrCode CleanInvalidJob_(job_id_t job_id);
 
   util::mutex m_prolog_serial_mutex_;  // when prolog flags set Serial

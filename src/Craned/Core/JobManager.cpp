@@ -1396,12 +1396,36 @@ bool JobManager::FinishDrain_() {
   // Pool work (including epilog) may need SIGCHLD on this loop. Keep polling
   // it while workers run. Consume their last status updates after they return.
   if (g_thread_pool && g_thread_pool->get_tasks_total() != 0) return false;
+  bool last_reports;
   {
     absl::MutexLock lock(&m_status_inbox_mutex_);
+    last_reports = !m_status_closed_;
     m_status_closed_ = true;
   }
   EvCleanStepStatusChangeQueueCb_();
+  if (last_reports && QueueCompletedStepsForDrain_()) return false;
   return true;
+}
+
+// After the status inbox closes, a Completing report may already have been
+// acknowledged while the corresponding FreeSteps RPC missed work admission.
+// Ordinary supervisors exit after this report. Complete their normal cleanup
+// so its terminal status is forwarded before the final flush.
+bool JobManager::QueueCompletedStepsForDrain_() {
+  bool queued = false;
+  auto jobs = m_job_map_.GetMapSharedPtr();
+  for (auto& [job_id, entry] : *jobs) {
+    auto job = entry.GetExclusivePtr();
+    absl::MutexLock lock(job->step_map_mtx.get());
+    for (const auto& [step_id, step] : job->step_map) {
+      if (step->IsDaemonStep() || step->silent_cleanup ||
+          !step->pending_terminal_status.has_value())
+        continue;
+      m_free_steps_queue_.enqueue({job_id, step_id});
+      queued = true;
+    }
+  }
+  return queued;
 }
 
 // NOTE: V3 changed dedicated_res_in_node() -> gres() in proto.
@@ -2547,35 +2571,29 @@ bool JobManager::StepStatusChangeAsync(
 }
 
 bool JobManager::ReceivePmixPort(
+    grpc::ClientContext& context,
     const std::vector<std::pair<CranedId, std::string>>& pmix_ports,
     job_id_t job_id, step_id_t step_id) {
-  auto job = m_job_map_.GetValueExclusivePtr(job_id);
-  if (!job) {
-    CRANE_ERROR(
-        "[Step #{}.{}] Failed to find job allocation when receiving PMIx ports",
-        job_id, step_id);
-    return false;
+  std::shared_ptr<SupervisorStub> stub;
+  {
+    auto job = m_job_map_.GetValueExclusivePtr(job_id);
+    if (!job) {
+      CRANE_ERROR(
+          "[Step #{}.{}] Failed to find job allocation when receiving PMIx "
+          "ports",
+          job_id, step_id);
+      return false;
+    }
+    absl::MutexLock lk(job->step_map_mtx.get());
+    auto step_it = job->step_map.find(step_id);
+    if (step_it != job->step_map.end()) stub = step_it->second->supervisor_stub;
   }
-
-  absl::MutexLock lk(job->step_map_mtx.get());
-  auto step_it = job->step_map.find(step_id);
-  if (step_it == job->step_map.end()) {
-    CRANE_ERROR(
-        "[Step #{}.{}] Failed to find step allocation when receiving PMIx "
-        "ports",
-        job_id, step_id);
-    return false;
-  }
-
-  auto& stub = step_it->second->supervisor_stub;
   if (!stub) {
-    CRANE_ERROR(
-        "[Step #{}.{}] Supervisor stub is null when receiving PMIx ports",
-        job_id, step_id);
+    CRANE_ERROR("[Step #{}.{}] No supervisor for PMIx port delivery", job_id,
+                step_id);
     return false;
   }
-
-  auto result = stub->ReceivePmixPort(pmix_ports);
+  auto result = stub->ReceivePmixPort(context, pmix_ports);
   if (result != CraneErrCode::SUCCESS) {
     CRANE_ERROR("[Step #{}.{}] Failed to deliver PMIx ports to supervisor: {}",
                 job_id, step_id, CraneErrStr(result));
