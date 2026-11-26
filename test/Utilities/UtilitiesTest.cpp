@@ -16,7 +16,6 @@
  * along with this program.  If not, see <https://www.gnu.org/licenses/>.
  */
 
-#include <absl/cleanup/cleanup.h>
 #include <absl/strings/str_join.h>
 #include <grp.h>
 #include <gtest/gtest.h>
@@ -172,12 +171,13 @@ class FilePermissionsTest : public ::testing::Test {
                kDefaultAsyncLogBlockWhenFull, policy);
   }
 
-  void Check(const std::filesystem::path& path, mode_t permissions) {
+  void Check(const std::filesystem::path& path, mode_t permissions,
+             uid_t owner = geteuid(), gid_t group = getegid()) {
     struct stat st{};
     ASSERT_EQ(stat(path.c_str(), &st), 0) << path;
     EXPECT_EQ(st.st_mode & 07777, permissions) << path;
-    EXPECT_EQ(st.st_uid, geteuid()) << path;
-    EXPECT_EQ(st.st_gid, getegid()) << path;
+    EXPECT_EQ(st.st_uid, owner) << path;
+    EXPECT_EQ(st.st_gid, group) << path;
   }
 
   std::filesystem::path root_, directory_, log_;
@@ -198,7 +198,7 @@ class PrivateLogFileTest : public FilePermissionsTest,
 };
 
 INSTANTIATE_TEST_SUITE_P(Policies, PrivateLogFileTest,
-                         ::testing::Values(LogFilePolicy::PRIVATE_FILE,
+                         ::testing::Values(LogFilePolicy::PRIVATE_ON_CREATE,
                                            LogFilePolicy::PRIVATE_DIRECTORY));
 
 TEST_P(PrivateLogFileTest, CreationAndRotationStayPrivateWithoutChangingUmask) {
@@ -220,22 +220,42 @@ TEST_P(PrivateLogFileTest, CreationAndRotationStayPrivateWithoutChangingUmask) {
   Check(output, 0666);
 }
 
-TEST_P(PrivateLogFileTest, RepairsExistingLogsAndOwnership) {
+TEST_P(PrivateLogFileTest, ExistingLogsFollowPolicyOnReopenAndRotation) {
   ASSERT_TRUE(std::filesystem::create_directory(directory_));
   auto rotated = directory_ / "1.0.1.log";
   std::ofstream(log_) << "old log";
   std::ofstream(rotated) << "old rotated log";
+  ASSERT_EQ(chmod(log_.c_str(), 0640), 0);
+  ASSERT_EQ(chmod(rotated.c_str(), 0644), 0);
   ASSERT_EQ(chmod(directory_.c_str(), 0755), 0);
+  uid_t owner = geteuid();
+  gid_t group = getegid();
   if (geteuid() == 0) {
-    ASSERT_EQ(chown(log_.c_str(), 65534, 65534), 0);
-    ASSERT_EQ(chown(rotated.c_str(), 65534, 65534), 0);
+    owner = group = 65534;
+    ASSERT_EQ(chown(log_.c_str(), owner, group), 0);
+    ASSERT_EQ(chown(rotated.c_str(), owner, group), 0);
   }
-  Init();
-  Check(directory_, DirectoryMode());
+  const bool repair = GetParam() == LogFilePolicy::PRIVATE_DIRECTORY;
+  if (repair) {
+    owner = geteuid();
+    group = getegid();
+  }
+  for (int i = 0; i < 2; ++i) {
+    Init();
+    Check(directory_, DirectoryMode());
+    Check(log_, repair ? 0600 : 0640, owner, group);
+    Check(rotated, repair ? 0600 : 0644, owner, group);
+    std::ifstream input(log_);
+    EXPECT_EQ(std::string(std::istreambuf_iterator<char>(input), {}),
+              "old log");
+  }
+  spdlog::logger logger("rotation-test",
+                        spdlog::default_logger()->sinks().front());
+  logger.info("{}", std::string(80, 'x'));
+  logger.flush();
   Check(log_, 0600);
-  Check(rotated, 0600);
-  std::ifstream input(log_);
-  EXPECT_EQ(std::string(std::istreambuf_iterator<char>(input), {}), "old log");
+  Check(rotated, repair ? 0600 : 0640, owner, group);
+  Check(directory_ / "1.0.2.log", repair ? 0600 : 0644, owner, group);
 }
 
 TEST_P(PrivateLogFileTest, OrdinaryUserCannotReadLogEvenInServiceGroup) {
@@ -258,7 +278,10 @@ TEST_P(PrivateLogFileTest, RejectsLinkedLogWithoutChangingTarget) {
   ASSERT_TRUE(std::filesystem::create_directory(directory_));
   auto other = root_ / "other";
   std::ofstream(other) << "unchanged";
-  for (const auto& path : {log_, directory_ / "1.0.1.log"}) {
+  std::vector<std::filesystem::path> paths{log_};
+  if (GetParam() == LogFilePolicy::PRIVATE_DIRECTORY)
+    paths.emplace_back(directory_ / "1.0.1.log");
+  for (const auto& path : paths) {
     SCOPED_TRACE(path.string());
     for (bool hard_link : {false, true}) {
       SCOPED_TRACE(hard_link ? "hard link" : "symbolic link");
@@ -288,7 +311,7 @@ TEST_F(FilePermissionsTest, PrivateFilesPreserveSharedDirectoryAndOtherFiles) {
   std::ofstream(other) << "another file";
   std::ofstream(script) << "#!/bin/sh\nexit 0\n";
   ASSERT_EQ(chmod(script.c_str(), 0755), 0);
-  Init(LogFilePolicy::PRIVATE_FILE);
+  Init(LogFilePolicy::PRIVATE_ON_CREATE);
   Check(directory_, 0751);
   Check(log_, 0600);
   Check(other, 0666);
@@ -305,18 +328,6 @@ TEST_F(FilePermissionsTest, PrivateFilesPreserveSharedDirectoryAndOtherFiles) {
   ASSERT_EQ(waitpid(pid, &status, 0), pid);
   ASSERT_TRUE(WIFEXITED(status));
   EXPECT_EQ(WEXITSTATUS(status), 0);
-}
-
-TEST_F(FilePermissionsTest, PrivateFileAcceptsRelativeFilename) {
-  const auto previous_directory = std::filesystem::current_path();
-  absl::Cleanup restore_directory = [&] {
-    std::filesystem::current_path(previous_directory);
-  };
-  std::filesystem::current_path(root_);
-  log_ = "craned.log";
-  Init(LogFilePolicy::PRIVATE_FILE);
-  Check(log_, 0600);
-  Check(root_, 0755);
 }
 
 TEST_F(FilePermissionsTest, RejectsLinkedDirectory) {

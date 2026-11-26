@@ -28,7 +28,8 @@ static spdlog::async_overflow_policy default_overflow_policy =
     spdlog::async_overflow_policy::block;
 
 namespace {
-void SecureLogFile(const spdlog::filename_t& filename, bool create) {
+void PrepareLogFile(const spdlog::filename_t& filename, bool create,
+                    LogFilePolicy policy) {
   int flags = O_WRONLY | O_APPEND | O_CLOEXEC | O_NOFOLLOW | O_NONBLOCK;
   int fd = open(filename.c_str(), flags | (create ? O_CREAT : 0), 0600);
   if (fd == -1) {
@@ -42,7 +43,8 @@ void SecureLogFile(const spdlog::filename_t& filename, bool create) {
   if (!S_ISREG(st.st_mode) || st.st_nlink != 1)
     throw spdlog::spdlog_ex("Log must be a regular, singly linked file: " +
                             filename);
-  if (fchown(fd, geteuid(), getegid()) != 0 || fchmod(fd, 0600) != 0)
+  if (policy == LogFilePolicy::PRIVATE_DIRECTORY &&
+      (fchown(fd, geteuid(), getegid()) != 0 || fchmod(fd, 0600) != 0))
     throw spdlog::spdlog_ex("Failed to secure log " + filename, errno);
 }
 
@@ -65,16 +67,19 @@ spdlog::file_event_handlers PrivateLogFileHandlers(
           result.error().value());
   }
 
-  // Repair retained files before rotation can rename them.
-  for (uint64_t i = 1; i <= max_files; ++i)
-    SecureLogFile(spdlog::sinks::rotating_file_sink_mt::calc_filename(path, i),
-                  false);
+  if (private_directory) {
+    // Repair retained Supervisor logs before rotation can rename them.
+    for (uint64_t i = 1; i <= max_files; ++i)
+      PrepareLogFile(
+          spdlog::sinks::rotating_file_sink_mt::calc_filename(path, i), false,
+          policy);
+  }
 
   spdlog::file_event_handlers handlers;
-  handlers.before_open = [](const spdlog::filename_t& filename) {
+  handlers.before_open = [policy](const spdlog::filename_t& filename) {
     // Pre-create each file privately before spdlog opens it, also on rotation.
     // Do not change the process-wide umask inherited by user tasks.
-    SecureLogFile(filename, true);
+    PrepareLogFile(filename, true, policy);
   };
   return handlers;
 }

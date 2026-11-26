@@ -159,8 +159,8 @@ std::optional<spdlog::level::level_enum> StrToLogLevel(
 
 enum class LogFilePolicy {
   DEFAULT,
-  PRIVATE_FILE,      // Service-owned files with mode 0600.
-  PRIVATE_DIRECTORY  // Also secure the dedicated parent directory with 0700.
+  PRIVATE_ON_CREATE,  // Create with mode 0600; preserve existing file metadata.
+  PRIVATE_DIRECTORY   // Enforce service ownership, files 0600, directory 0700.
 };
 
 void InitLogger(spdlog::level::level_enum level,
