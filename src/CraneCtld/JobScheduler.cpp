@@ -1220,7 +1220,8 @@ void JobScheduler::RequeueRecoveredJobIntoPendingQueueLock_(
   // The newly modified QoS resource limits do not apply to jobs that have
   // already been evaluated, which is the same as before the restart.
   if (!job->IsArrayParent()) {
-    g_account_meta_container->MallocMetaSubmitResource(*job);
+    g_account_meta_container->MallocMetaSubmitResource(
+        *job, QosSubmitReserveCount_(*job));
   }
 
   // The order of LockGuards matters.

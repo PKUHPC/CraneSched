@@ -5,10 +5,14 @@
 #include <gtest/gtest.h>
 
 #include <algorithm>
+#include <filesystem>
 #include <memory>
 #include <utility>
 #include <vector>
 
+#include "Accounting/AccountMetaContainer.h"
+#include "Array.h"
+#include "Database/EmbeddedDbClient.h"
 #include "JobScheduler.h"
 
 namespace {
@@ -297,3 +301,299 @@ TEST_F(JobSchedulerTest, ChecksCapacityWithinNodeFilters) {
 }
 
 }  // namespace
+
+namespace Ctld {
+class ArrayRequeueCancellationTest : public ::testing::Test {
+ protected:
+  void ExercisePendingChildCancellation() {
+    auto& scheduler = *g_job_scheduler;
+    auto* parent = MakeParent(scheduler);
+    auto parent_id = parent->JobId();
+    auto child = scheduler.m_array_manager_->MaterializeChildForAllocation(
+        parent, absl::Now());
+    ASSERT_NE(child, nullptr);
+    auto child_id = child->JobId();
+    child->ResetForRequeue();
+    scheduler.RequeueRecoveredJobIntoPendingQueueLock_(std::move(child));
+    ExpectSubmitSlots(*parent, 1);
+    {
+      absl::MutexLock guard(&scheduler.m_pending_job_map_mtx_);
+      auto ids = scheduler.CancelArrayParentNoLock_(
+          parent_id, crane::grpc::Cancelled, ExitCode::EC_TERMINATED, true);
+      ASSERT_EQ(ids.size(), 1U);
+      EXPECT_EQ(ids.front(), child_id);
+    }
+
+    EXPECT_FALSE(scheduler.m_pending_job_map_.contains(child_id));
+    JobScheduler::CancelJobQueueElem queued{
+        JobScheduler::CancelArrayParentQueueElem{}};
+    ASSERT_TRUE(scheduler.m_cancel_job_queue_.try_dequeue(queued));
+    ASSERT_TRUE(
+        std::holds_alternative<JobScheduler::CancelArrayParentQueueElem>(
+            queued));
+    ASSERT_TRUE(scheduler.m_cancel_job_queue_.try_dequeue(queued));
+    auto* cancelled =
+        std::get_if<JobScheduler::CancelPendingJobQueueElem>(&queued);
+    ASSERT_NE(cancelled, nullptr);
+    ASSERT_NE(cancelled->job, nullptr);
+    EXPECT_EQ(cancelled->job->JobId(), child_id);
+    EXPECT_EQ(cancelled->finish_status, crane::grpc::Cancelled);
+    // Exercise the same accounting operation as the Pending queue consumer.
+    // The child must not consume the parent's only remaining submit slot.
+    auto release_count = scheduler.QosSubmitReserveCount_(*cancelled->job);
+    EXPECT_EQ(release_count, 0U);
+    g_account_meta_container->FreeMetaSubmitResource(*cancelled->job,
+                                                     release_count);
+    EXPECT_TRUE(g_account_meta_container->UserHasJob(parent->Username()));
+    // A duplicate request queues only the parent, never the same child twice.
+    JobScheduler::CancelJobQueueElem duplicate{
+        JobScheduler::CancelArrayParentQueueElem{}};
+    {
+      absl::MutexLock guard(&scheduler.m_pending_job_map_mtx_);
+      scheduler.CancelArrayParentNoLock_(parent_id, crane::grpc::Cancelled,
+                                         ExitCode::EC_TERMINATED, true);
+    }
+    ASSERT_TRUE(scheduler.m_cancel_job_queue_.try_dequeue(duplicate));
+    EXPECT_TRUE(
+        std::holds_alternative<JobScheduler::CancelArrayParentQueueElem>(
+            duplicate));
+    EXPECT_FALSE(scheduler.m_cancel_job_queue_.try_dequeue(duplicate));
+    cancelled->job->SetStatus(crane::grpc::Cancelled);
+    auto final = scheduler.m_array_manager_->OnChildTerminal(
+        cancelled->job.get(), {cancelled->job.get()});
+    ASSERT_EQ(final.size(), 1U);
+    EXPECT_EQ(parent->Status(), crane::grpc::Cancelled);
+    EXPECT_EQ(parent->ExitCode(), ExitCode::EC_TERMINATED);
+    EXPECT_FALSE(g_account_meta_container->UserHasJob(parent->Username()));
+    ExpectSubmitSlots(*parent, 0);
+  }
+
+  void ExerciseTerminationBeforeChildCompletion(crane::grpc::JobStatus status) {
+    auto& scheduler = *g_job_scheduler;
+    auto parent = MakeParent(scheduler);
+    auto parent_id = parent->JobId();
+    auto child = scheduler.m_array_manager_->MaterializeChildForAllocation(
+        parent, absl::Now());
+    ASSERT_NE(child, nullptr);
+    AddParentDependents(parent);
+
+    const auto expected_exit_code = status == crane::grpc::Deadline
+                                        ? ExitCode::EC_REACHED_DEADLINE
+                                        : ExitCode::EC_TERMINATED;
+    if (status == crane::grpc::Deadline) {
+      scheduler.m_job_deadline_timer_queue_.enqueue(parent_id);
+      scheduler.CancelDeadlineJobCb_();
+    } else {
+      absl::MutexLock guard(&scheduler.m_pending_job_map_mtx_);
+      scheduler.CancelArrayParentNoLock_(parent_id, status, expected_exit_code,
+                                         false);
+    }
+    EXPECT_EQ(parent->Status(), crane::grpc::Pending);
+    EXPECT_EQ(parent->StartTime(), absl::UnixEpoch());
+    EXPECT_EQ(parent->EndTime(), absl::UnixEpoch());
+    EXPECT_EQ(scheduler.m_array_manager_->MaterializeChildForAllocation(
+                  parent, absl::Now()),
+              nullptr);
+    JobScheduler::DependencyEvent event;
+    EXPECT_FALSE(scheduler.m_dependency_event_queue_.try_dequeue(event));
+
+    // Complete the last child while the actual parent message is still queued.
+    child->SetStatus(crane::grpc::Failed);
+    {
+      absl::MutexLock guard(&scheduler.m_pending_job_map_mtx_);
+      auto final = scheduler.m_array_manager_->OnChildTerminal(child.get(), {});
+      ASSERT_EQ(final.size(), 1U);
+    }
+    EXPECT_EQ(parent->Status(), status);
+    EXPECT_EQ(parent->ExitCode(), expected_exit_code);
+    ExpectParentEvents(scheduler, *parent);
+    EXPECT_FALSE(g_account_meta_container->UserHasJob(parent->Username()));
+
+    scheduler.CleanCancelJobQueueCb_();
+    EXPECT_FALSE(scheduler.m_dependency_event_queue_.try_dequeue(event));
+  }
+
+  void ExerciseParentWithoutChildren() {
+    auto& scheduler = *g_job_scheduler;
+    auto* parent = MakeParent(scheduler);
+    AddParentDependents(parent);
+    auto* arrays = scheduler.m_array_manager_.get();
+    {
+      absl::MutexLock guard(&scheduler.m_pending_job_map_mtx_);
+      scheduler.CancelArrayParentNoLock_(parent->JobId(), crane::grpc::Deadline,
+                                         ExitCode::EC_REACHED_DEADLINE, false);
+    }
+    EXPECT_EQ(parent->Status(), crane::grpc::Pending);
+    EXPECT_EQ(parent->EndTime(), absl::UnixEpoch());
+    JobScheduler::DependencyEvent event;
+    EXPECT_FALSE(scheduler.m_dependency_event_queue_.try_dequeue(event));
+    // A later cancellation may widen the scope but must keep the first result.
+    arrays->RecordParentTerminalResult(parent->JobId(), crane::grpc::Cancelled,
+                                       ExitCode::EC_TERMINATED);
+    const auto finish_time =
+        absl::FromUnixSeconds(1234) + absl::Milliseconds(500);
+    auto result =
+        arrays->ApplyParentTerminalResult(parent->JobId(), finish_time);
+    ASSERT_EQ(result.final_parents.size(), 1U);
+    EXPECT_EQ(parent->Status(), crane::grpc::Deadline);
+    EXPECT_EQ(parent->ExitCode(), ExitCode::EC_REACHED_DEADLINE);
+    EXPECT_EQ(parent->StartTime(), absl::FromUnixSeconds(1234));
+    EXPECT_EQ(parent->EndTime(), absl::FromUnixSeconds(1234));
+    ExpectParentEvents(scheduler, *parent);
+  }
+
+  void ExerciseDeadlineBeforeCancel() {
+    auto& scheduler = *g_job_scheduler;
+    auto* parent = MakeParent(scheduler, 2);
+    auto& arrays = *scheduler.m_array_manager_;
+    auto child = arrays.MaterializeChildForAllocation(parent, absl::Now());
+    ASSERT_NE(child, nullptr);
+    auto other_child =
+        arrays.MaterializeChildForAllocation(parent, absl::Now());
+    ASSERT_NE(other_child, nullptr);
+    child->ResetForRequeue();
+    other_child->SetStatus(crane::grpc::Running);
+
+    AddParentDependents(parent);
+    scheduler.m_job_deadline_timer_queue_.enqueue(parent->JobId());
+    scheduler.CancelDeadlineJobCb_();
+    scheduler.CleanCancelJobQueueCb_();
+    EXPECT_EQ(parent->Status(), crane::grpc::Deadline);
+    const auto first_end_time = parent->EndTime();
+    crane::grpc::JobInEmbeddedDb stored;
+    ASSERT_TRUE(
+        g_embedded_db_client->FetchJobDataInDb(0, parent->JobDbId(), &stored));
+    EXPECT_EQ(stored.runtime_attr().status(), crane::grpc::Deadline);
+    EXPECT_EQ(stored.runtime_attr().exit_code(), ExitCode::EC_REACHED_DEADLINE);
+
+    {
+      absl::MutexLock guard(&scheduler.m_pending_job_map_mtx_);
+      scheduler.CancelArrayParentNoLock_(parent->JobId(),
+                                         crane::grpc::Cancelled,
+                                         ExitCode::EC_TERMINATED, true);
+    }
+    scheduler.CleanCancelJobQueueCb_();
+    EXPECT_EQ(parent->Status(), crane::grpc::Deadline);
+    EXPECT_EQ(parent->EndTime(), first_end_time);
+    EXPECT_EQ(arrays.UnfinishedChildJobIdsForParent(parent->JobId()).size(),
+              2U);
+    EXPECT_TRUE(arrays.IsRegisteredParent(parent->JobId()));
+    EXPECT_TRUE(g_account_meta_container->UserHasJob(parent->Username()));
+
+    child->SetStatus(crane::grpc::Cancelled);
+    EXPECT_TRUE(arrays.OnChildTerminal(child.get(), {}).empty());
+    EXPECT_TRUE(arrays.IsRegisteredParent(parent->JobId()));
+    EXPECT_TRUE(g_account_meta_container->UserHasJob(parent->Username()));
+
+    other_child->SetStatus(crane::grpc::Cancelled);
+    other_child->SetExitCode(ExitCode::EC_TERMINATED);
+    auto final_parents = arrays.OnChildTerminal(other_child.get(), {});
+    ASSERT_EQ(final_parents.size(), 1U);
+    EXPECT_EQ(final_parents.front().array_job_id, parent->JobId());
+    EXPECT_EQ(parent->Status(), crane::grpc::Deadline);
+    EXPECT_EQ(parent->ExitCode(), ExitCode::EC_REACHED_DEADLINE);
+    EXPECT_FALSE(arrays.IsRegisteredParent(parent->JobId()));
+    EXPECT_FALSE(g_account_meta_container->UserHasJob(parent->Username()));
+    ExpectParentEvents(scheduler, *parent);
+    EXPECT_TRUE(arrays.OnChildTerminal(other_child.get(), {}).empty());
+  }
+
+  JobInCtld* MakeParent(JobScheduler& scheduler, uint32_t concurrency = 1) {
+    auto parent = std::make_unique<JobInCtld>();
+    crane::grpc::JobToCtld submission;
+    submission.set_uid(::getuid());
+    submission.set_type(crane::grpc::Batch);
+    submission.mutable_time_limit()->set_seconds(300);
+    submission.mutable_array_spec()->set_start(1);
+    submission.mutable_array_spec()->set_end(2);
+    submission.mutable_array_spec()->set_max_concurrent(concurrency);
+    parent->SetFieldsByJobToCtld(submission);
+    parent->account_chain.emplace_back("test-account");
+    parent->SetStatus(crane::grpc::Pending);
+    parent->SetStartTime(absl::UnixEpoch());
+    parent->SetEndTime(absl::UnixEpoch());
+    EXPECT_TRUE(g_embedded_db_client->AppendJobsToPendingAndAdvanceJobIds(
+        {parent.get()}));
+    g_account_meta_container->MallocMetaSubmitResource(*parent, concurrency);
+    g_account_meta_container->UserAddJob(parent->Username(), concurrency);
+    scheduler.m_array_manager_->RegisterParent(parent.get());
+    auto* raw = parent.get();
+    scheduler.m_pending_job_map_.emplace(raw->JobId(), std::move(parent));
+    return raw;
+  }
+
+  void ExpectSubmitSlots(const JobInCtld& job, uint32_t expected) {
+    uint32_t reserved = 0;
+    g_account_meta_container->m_qos_meta_map_.if_contains(
+        job.qos,
+        [&](const auto& entry) { reserved = entry.second.submit_jobs_count; });
+    EXPECT_EQ(reserved, expected);
+  }
+
+  void AddParentDependents(JobInCtld* parent) {
+    parent->AddDependent(crane::grpc::AFTER, 900);
+    parent->AddDependent(crane::grpc::AFTER_ANY, 901);
+    parent->AddDependent(crane::grpc::AFTER_OK, 902);
+    parent->AddDependent(crane::grpc::AFTER_NOT_OK, 903);
+  }
+
+  void ExpectParentEvents(JobScheduler& scheduler, const JobInCtld& parent) {
+    for (auto [dependent, time] : {std::pair{900U, parent.StartTime()},
+                                   {901U, parent.EndTime()},
+                                   {902U, absl::InfiniteFuture()},
+                                   {903U, parent.EndTime()}}) {
+      JobScheduler::DependencyEvent event;
+      ASSERT_TRUE(scheduler.m_dependency_event_queue_.try_dequeue(event));
+      EXPECT_EQ(event.dependent_job_id, dependent);
+      EXPECT_EQ(event.dependee_job_id, parent.JobId());
+      EXPECT_EQ(event.event_time, time);
+    }
+    JobScheduler::DependencyEvent event;
+    EXPECT_FALSE(scheduler.m_dependency_event_queue_.try_dequeue(event));
+  }
+
+  void SetUp() override {
+    char path[] = "/tmp/crane-array-requeue-XXXXXX";
+    ASSERT_NE(::mkdtemp(path), nullptr);
+    db_dir_ = path;
+    g_embedded_db_client = MakeEmbeddedDbClient("Unqlite");
+    ASSERT_TRUE(g_embedded_db_client->Init((db_dir_ / "jobs").string()));
+    g_account_meta_container = std::make_unique<AccountMetaContainer>();
+    g_job_scheduler = std::make_unique<JobScheduler>();
+    loop_ = uvw::loop::create();
+    g_job_scheduler->m_cancel_job_async_handle_ =
+        loop_->resource<uvw::async_handle>();
+  }
+  void TearDown() override {
+    if (g_job_scheduler) {
+      g_job_scheduler->m_cancel_job_async_handle_->close();
+      loop_->run();
+    }
+    g_job_scheduler.reset();
+    g_account_meta_container.reset();
+    g_embedded_db_client.reset();
+    if (!db_dir_.empty()) std::filesystem::remove_all(db_dir_);
+  }
+  std::filesystem::path db_dir_;
+  std::shared_ptr<uvw::loop> loop_;
+};
+
+#ifdef CRANE_HAVE_UNQLITE
+TEST_F(ArrayRequeueCancellationTest, CancelAfterChildIsRequeued) {
+  ExercisePendingChildCancellation();
+}
+TEST_F(ArrayRequeueCancellationTest, RecordedCancelPrecedesChildCompletion) {
+  ExerciseTerminationBeforeChildCompletion(crane::grpc::Cancelled);
+}
+TEST_F(ArrayRequeueCancellationTest, DeadlinePrecedesChildCompletion) {
+  ExerciseTerminationBeforeChildCompletion(crane::grpc::Deadline);
+}
+TEST_F(ArrayRequeueCancellationTest, ParentWithoutChildrenUsesOneFinishTime) {
+  ExerciseParentWithoutChildren();
+}
+TEST_F(ArrayRequeueCancellationTest,
+       ParentDeadlineKeepsResultAfterLaterCancel) {
+  ExerciseDeadlineBeforeCancel();
+}
+#endif
+}  // namespace Ctld
