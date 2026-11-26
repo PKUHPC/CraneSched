@@ -258,10 +258,7 @@ TEST_P(PrivateLogFileTest, RejectsLinkedLogWithoutChangingTarget) {
   ASSERT_TRUE(std::filesystem::create_directory(directory_));
   auto other = root_ / "other";
   std::ofstream(other) << "unchanged";
-  std::vector<std::filesystem::path> log_paths{log_, directory_ / "1.0.1.log"};
-  if (GetParam() == LogFilePolicy::PRIVATE_FILE)
-    log_paths.emplace_back(directory_ / "1.0.9.log");
-  for (const auto& path : log_paths) {
+  for (const auto& path : {log_, directory_ / "1.0.1.log"}) {
     SCOPED_TRACE(path.string());
     for (bool hard_link : {false, true}) {
       SCOPED_TRACE(hard_link ? "hard link" : "symbolic link");
@@ -286,17 +283,14 @@ TEST_F(FilePermissionsTest, RepairsExistingPrivateDirectoryOwnership) {
 TEST_F(FilePermissionsTest, PrivateFilesPreserveSharedDirectoryAndOtherFiles) {
   ASSERT_TRUE(std::filesystem::create_directory(directory_));
   ASSERT_EQ(chmod(directory_.c_str(), 0751), 0);
-  auto retained = directory_ / "1.0.9.log";
   auto other = directory_ / "1.0.notes.log";
   auto script = directory_ / "job.sh";
-  std::ofstream(retained) << "old rotated log";
   std::ofstream(other) << "another file";
   std::ofstream(script) << "#!/bin/sh\nexit 0\n";
   ASSERT_EQ(chmod(script.c_str(), 0755), 0);
   Init(LogFilePolicy::PRIVATE_FILE);
   Check(directory_, 0751);
   Check(log_, 0600);
-  Check(retained, 0600);
   Check(other, 0666);
   Check(script, 0755);
   if (geteuid() != 0) return;

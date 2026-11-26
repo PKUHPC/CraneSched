@@ -65,30 +65,10 @@ spdlog::file_event_handlers PrivateLogFileHandlers(
           result.error().value());
   }
 
-  if (private_directory) {
-    // Older files beyond the configured count are protected by the directory.
-    for (uint64_t i = 1; i <= max_files; ++i)
-      SecureLogFile(
-          spdlog::sinks::rotating_file_sink_mt::calc_filename(path, i), false);
-  } else {
-    // Without a private directory, also repair older rotations left behind
-    // after MaxLogFileNum was reduced. Match spdlog's basename.index.extension.
-    auto [base, extension] =
-        spdlog::details::file_helper::split_by_extension(path.filename());
-    base += ".";
-    for (const auto& entry : std::filesystem::directory_iterator(directory)) {
-      const auto name = entry.path().filename().string();
-      if (!name.starts_with(base) || !name.ends_with(extension) ||
-          name.size() <= base.size() + extension.size())
-        continue;
-      const std::string_view index{
-          name.data() + base.size(),
-          name.size() - base.size() - extension.size()};
-      if (index.front() != '0' &&
-          index.find_first_not_of("0123456789") == std::string_view::npos)
-        SecureLogFile(entry.path(), false);
-    }
-  }
+  // Repair retained files before rotation can rename them.
+  for (uint64_t i = 1; i <= max_files; ++i)
+    SecureLogFile(spdlog::sinks::rotating_file_sink_mt::calc_filename(path, i),
+                  false);
 
   spdlog::file_event_handlers handlers;
   handlers.before_open = [](const spdlog::filename_t& filename) {
