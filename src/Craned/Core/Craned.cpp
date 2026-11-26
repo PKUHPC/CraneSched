@@ -163,8 +163,10 @@ CraneErrCode RecoverCgForJobSteps(
   };
 
   bool has_int_recovery = false;
-  for (auto ids : rn_job_ids_with_cg) {
-    auto [job_id_opt, step_id_opt, system_flag, task_id_opt, is_overflow] = ids;
+  for (const auto& ids : rn_job_ids_with_cg) {
+    if (!CgroupManager::IsCranedRecoveryCandidate(ids)) continue;
+    const auto& [job_id_opt, step_id_opt, subgroup, task_id_opt, is_overflow] =
+        ids;
     job_id_t job_id = job_id_opt.value();
 
     // Construct job path info for recovery.
@@ -182,8 +184,6 @@ CraneErrCode RecoverCgForJobSteps(
           is_overflow ? std::string(kOverflowCgName) : job_name;
     }
 
-    // For craned, we don't care task cgroup
-    if (task_id_opt.has_value()) continue;
     if (step_id_opt.has_value()) {
       step_id_t step_id = step_id_opt.value();
       // Step cgroup recovery
@@ -194,17 +194,17 @@ CraneErrCode RecoverCgForJobSteps(
         // For common step cgroup, craned only cares about system cgroup
         // For daemon step cgroup, craned cares about both system and user
         // cgroup
-        if (!step_instance->IsDaemonStep() && !system_flag) {
+        if (!step_instance->IsDaemonStep() &&
+            subgroup != StepSubgroup::System) {
           continue;
         }
         CRANE_DEBUG("Recover existing cgroup for step {} of job #{}", step_id,
                     job_id);
-        std::string step_cg_str = CgroupManager::CgroupStrByStepId(
-            job_path_info.cg_str, step_id, system_flag);
+        std::string step_cg_str = CgroupManager::CgroupStrByParsedIds(ids);
         auto cg_expt = CgroupManager::AllocateAndGetCgroup(
             step_cg_str, step_instance->step_to_d.res(), true);
         if (cg_expt.has_value()) {
-          if (system_flag) {
+          if (subgroup == StepSubgroup::System) {
             step_instance->cg_str = step_cg_str;
             step_instance->job_path_info = job_path_info;
             step_instance->crane_cgroup = std::move(cg_expt.value());

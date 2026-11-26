@@ -518,10 +518,21 @@ std::string CgroupManager::CgroupStrByJobId(job_id_t job_id) {
 }
 
 std::string CgroupManager::CgroupStrByStepId(const std::string& job_cg_name,
-                                             step_id_t step_id, bool system) {
-  std::string_view suffix = system ? "system" : "user";
-  return std::format("{}/{}{}/{}", job_cg_name, CgConstant::kStepCgNamePrefix,
-                     step_id, suffix);
+                                             step_id_t step_id,
+                                             StepSubgroup subgroup) {
+  std::string path = std::format("{}/{}{}", job_cg_name,
+                                 CgConstant::kStepCgNamePrefix, step_id);
+  switch (subgroup) {
+  case StepSubgroup::None:
+    break;
+  case StepSubgroup::System:
+    path += "/system";
+    break;
+  case StepSubgroup::User:
+    path += "/user";
+    break;
+  }
+  return path;
 }
 
 std::string CgroupManager::CgroupStrByTaskId(const std::string& job_cg_name,
@@ -532,20 +543,18 @@ std::string CgroupManager::CgroupStrByTaskId(const std::string& job_cg_name,
 }
 
 std::string CgroupManager::CgroupStrByParsedIds(const CgroupStrParsedIds& ids) {
-  auto [job_id_opt, step_id_opt, system_flag, task_id_opt, is_overflow] = ids;
+  const auto& [job_id_opt, step_id_opt, subgroup, task_id_opt, is_overflow] =
+      ids;
   CRANE_ASSERT(job_id_opt.has_value());
   std::string job_cg_name = is_overflow
                                 ? std::string(CgConstant::kOverflowCgName) +
                                       "/" + CgroupStrByJobId(job_id_opt.value())
                                 : CgroupStrByJobId(job_id_opt.value());
-  if (!step_id_opt.has_value()) {
-    return job_cg_name;
-  } else if (task_id_opt.has_value()) {
-    return CgroupStrByTaskId(job_cg_name, step_id_opt.value(),
-                             task_id_opt.value());
-  } else {
-    return CgroupStrByStepId(job_cg_name, step_id_opt.value(), system_flag);
-  }
+  if (!step_id_opt) return job_cg_name;
+  auto path = CgroupStrByStepId(job_cg_name, *step_id_opt, subgroup);
+  if (task_id_opt)
+    path += std::format("/{}{}", CgConstant::kTaskCgNamePrefix, *task_id_opt);
+  return path;
 }
 
 CgroupStrParsedIds CgroupManager::ParseIdsFromCgroupStr_(
@@ -561,22 +570,19 @@ CgroupStrParsedIds CgroupManager::ParseIdsFromCgroupStr_(
   std::optional<step_id_t> step_id;
   std::optional<task_id_t> task_id;
   std::optional<std::string> system_or_user;
-  CgroupStrParsedIds parsed_ids{};
-  if (RE2::FullMatch(cgroup_str, *cg_pattern, &job_id, &step_id,
-                     &system_or_user, &task_id)) {
-    std::get<CgConstant::kParsedJobIdIdx>(parsed_ids) = job_id;
-    std::get<CgConstant::kParsedStepIdIdx>(parsed_ids) = step_id;
-    std::get<CgConstant::kParsedSystemFlagIdx>(parsed_ids) =
-        system_or_user.has_value() && system_or_user.value() == "system";
-    std::get<CgConstant::kParsedTaskIdIdx>(parsed_ids) = task_id;
-    // Detect overflow by checking if path contains the overflow prefix
-    std::get<CgConstant::kParsedOverflowIdx>(parsed_ids) =
-        cgroup_str.find(std::string(CgConstant::kOverflowCgName) + "/") !=
-        std::string::npos;
-    return parsed_ids;
-  }
+  if (!RE2::FullMatch(cgroup_str, *cg_pattern, &job_id, &step_id,
+                      &system_or_user, &task_id))
+    return {};
 
-  return {};
+  StepSubgroup subgroup = StepSubgroup::None;
+  if (system_or_user) {
+    subgroup =
+        *system_or_user == "system" ? StepSubgroup::System : StepSubgroup::User;
+  }
+  const bool is_overflow =
+      cgroup_str.find(std::string(CgConstant::kOverflowCgName) + "/") !=
+      std::string::npos;
+  return {job_id, step_id, subgroup, task_id, is_overflow};
 }
 
 /**
@@ -963,6 +969,12 @@ CgroupManager::AllocateAndGetCgroupForJob(
                                      min_mem, is_integer);
 
   return result;
+}
+
+bool CgroupManager::IsCranedRecoveryCandidate(const CgroupStrParsedIds& ids) {
+  const auto& [job, step, subgroup, task, overflow] = ids;
+  return job.has_value() && !task.has_value() &&
+         (!step.has_value() || subgroup != StepSubgroup::None);
 }
 
 // Scan all cgroups (jobs, steps, tasks) with overflow detection via path.

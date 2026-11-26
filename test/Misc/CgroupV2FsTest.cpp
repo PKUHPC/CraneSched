@@ -10,6 +10,7 @@
 #include <filesystem>
 #include <format>
 #include <fstream>
+#include <set>
 
 #include "CgroupV2Fs.h"
 
@@ -65,6 +66,50 @@ class FakeCgroupFs {
  private:
   std::filesystem::path root_;
 };
+
+TEST(CgroupV2FsBackendTest, ScanPreservesStepParentAndSubgroupPaths) {
+  using Craned::Common::CgroupManager;
+  using Craned::Common::StepSubgroup;
+  FakeCgroupFs fs;
+  std::filesystem::create_directories(fs.Root() / "job_1/step_0/system");
+  std::filesystem::create_directories(fs.Root() / "job_1/step_1");
+  std::filesystem::create_directories(fs.Root() /
+                                      "overflow/job_2/step_0/system");
+  std::filesystem::create_directories(fs.Root() /
+                                      "overflow/job_2/step_0/user/task_0");
+
+  const auto scanned = CgroupManager::GetIdsFromCgroupV2_(fs.Root());
+  EXPECT_TRUE(
+      scanned.contains({1, 0, StepSubgroup::None, std::nullopt, false}));
+  EXPECT_TRUE(
+      scanned.contains({1, 0, StepSubgroup::System, std::nullopt, false}));
+  EXPECT_FALSE(
+      scanned.contains({1, 0, StepSubgroup::User, std::nullopt, false}));
+  EXPECT_TRUE(scanned.contains({2, 0, StepSubgroup::User, std::nullopt, true}));
+
+  std::set<std::string> paths;
+  std::set<std::string> recovery_paths;
+  for (const auto& ids : scanned) {
+    auto path = CgroupManager::CgroupStrByParsedIds(ids);
+    paths.insert(path);
+    if (CgroupManager::IsCranedRecoveryCandidate(ids))
+      recovery_paths.insert(path);
+  }
+  const std::set<std::string> expected{"job_1",
+                                       "job_1/step_0",
+                                       "job_1/step_0/system",
+                                       "job_1/step_1",
+                                       "overflow/job_2",
+                                       "overflow/job_2/step_0",
+                                       "overflow/job_2/step_0/system",
+                                       "overflow/job_2/step_0/user",
+                                       "overflow/job_2/step_0/user/task_0"};
+  EXPECT_EQ(paths, expected);
+  const std::set<std::string> expected_recovery{
+      "job_1", "job_1/step_0/system", "overflow/job_2",
+      "overflow/job_2/step_0/system", "overflow/job_2/step_0/user"};
+  EXPECT_EQ(recovery_paths, expected_recovery);
+}
 
 TEST(CgroupV2FsBackendTest, CreateOrOpenMergesControllerEnableAndUsesCache) {
   FakeCgroupFs fs;

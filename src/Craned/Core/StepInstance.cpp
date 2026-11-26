@@ -136,7 +136,8 @@ CraneErrCode StepInstance::Prepare(const Common::CgroupPathInfo& path_info) {
   step_to_d.mutable_gids()->Assign(resolved_gids.begin(), resolved_gids.end());
 
   job_path_info = path_info;
-  cg_str = CgroupManager::CgroupStrByStepId(path_info.cg_str, step_id, true);
+  cg_str = CgroupManager::CgroupStrByStepId(path_info.cg_str, step_id,
+                                            Common::StepSubgroup::System);
 
   // Diagnostic: dump cgroup memory state before allocating step cgroup
   {
