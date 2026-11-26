@@ -8224,6 +8224,10 @@ void SchedulerAlgo::NodeSelect(
           resv_craned_meta.emplace(craned_id,
                                    NodeState(craned_id, res, available));
         }
+        auto& resv_node_info = resv_node_state_ptrs_map[reservation_id];
+        for (auto& [craned_id, node_state] : resv_craned_meta) {
+          resv_node_info.emplace_back(&node_state);
+        }
       } else {
         for (const auto& [craned_id, res] :
              resv_meta->res_total.EachNodeResMap()) {
@@ -8234,16 +8238,6 @@ void SchedulerAlgo::NodeSelect(
           }
         }
       }
-    }
-  }
-
-  // Offline nodes, including unmapped FUTURE nodes, are not candidates in
-  // this round, so reservation jobs keep pending until the nodes are up.
-  for (auto& [resv_id, resv_info] : resv_node_state_map) {
-    auto& resv_node_info = resv_node_state_ptrs_map[resv_id];
-    for (auto& [craned_id, node_state] : resv_info.second) {
-      if (g_meta_container->CheckCranedOnline(craned_id))
-        resv_node_info.emplace_back(&node_state);
     }
   }
 
