@@ -1094,6 +1094,15 @@ grpc::Status CraneCtldServiceImpl::QueryReservationInfo(
   if (!g_runtime_status.srv_ready.load(std::memory_order_acquire))
     return grpc::Status{grpc::StatusCode::UNAVAILABLE,
                         "CraneCtld Server is not ready"};
+  if (auto msg = CheckCertAndUIDAllowed_(context, request->uid()); msg)
+    return {grpc::StatusCode::UNAUTHENTICATED, msg.value()};
+
+  auto res = g_account_manager->CheckUidIsAdmin(request->uid());
+  if (!res && res.error() != CraneErrCode::ERR_USER_NO_PRIVILEGE) {
+    response->set_ok(false);
+    response->set_reason(CraneErrStr(res.error()));
+    return grpc::Status::OK;
+  }
 
   if (request->reservation_name().empty()) {
     *response = g_meta_container->QueryAllResvInfo();
