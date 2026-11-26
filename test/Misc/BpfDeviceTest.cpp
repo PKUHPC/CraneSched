@@ -20,6 +20,7 @@
 // Precompiled header comes first.
 
 #include <bpf/bpf.h>
+#include <bpf/libbpf.h>
 #include <fcntl.h>
 #include <gtest/gtest.h>
 #include <sched.h>
@@ -39,6 +40,7 @@
 
 #include "BpfRuntime.h"
 #include "DeviceManager.h"
+#include "crane/FileDescriptor.h"
 
 namespace {
 using Craned::Common::BpfRuntimeInfo;
@@ -284,6 +286,33 @@ class BpfDeviceKernel : public testing::Test {
     EXPECT_EQ(OpenIn(task, "/dev/zero", O_RDONLY), EPERM);
   }
 
+  void CheckRejectedPin(const char* name, int replacement,
+                        const std::string& error) {
+    auto path = paths_.pins / name;
+    util::FileDescriptor original(bpf_obj_get(path.c_str()));
+    ASSERT_GE(original.Get(), 0);
+    ASSERT_TRUE(fs::remove(path));
+    ASSERT_EQ(bpf_obj_pin(replacement, path.c_str()), 0) << strerror(errno);
+    const auto replaced_id =
+        PinnedId(name, std::string_view(name) == "device_access");
+
+    BpfRuntimeInfo recovered(paths_);
+    auto result = recovered.Initialize({});
+    EXPECT_FALSE(result);
+    if (!result) EXPECT_EQ(result.error(), error);
+    result = recovered.Connect({});
+    EXPECT_FALSE(result);
+    if (!result) EXPECT_EQ(result.error(), error);
+    EXPECT_EQ(PinnedId(name, std::string_view(name) == "device_access"),
+              replaced_id);
+
+    ASSERT_TRUE(fs::remove(path));
+    ASSERT_EQ(bpf_obj_pin(original.Get(), path.c_str()), 0) << strerror(errno);
+    result = recovered.Initialize(device_keys_by_slot_);
+    ASSERT_TRUE(result) << result.error();
+    EXPECT_EQ(recovered.DeviceIndicesBySlot(), runtime_->DeviceIndicesBySlot());
+  }
+
   const CgroupVersion previous_cgroup_version_{
       CgroupManager::GetCgroupVersion()};
   fs::path temp_, cgroup_;
@@ -293,6 +322,147 @@ class BpfDeviceKernel : public testing::Test {
   ManagedDeviceKeysBySlot device_keys_by_slot_;
   std::unique_ptr<BpfRuntimeInfo> runtime_;
 };
+
+TEST_F(BpfDeviceKernel, RejectsIncompatiblePinnedMaps) {
+  struct MapCase {
+    const char* pin;
+    bpf_map_type type;
+    uint32_t key_size, value_size, capacity, flags;
+    const char* error;
+  };
+  const MapCase cases[] = {
+      {"managed_devices", BPF_MAP_TYPE_HASH, sizeof(DeviceKey) + 8,
+       sizeof(uint32_t), MAX_MANAGED_DEVICES, BPF_F_RDONLY_PROG,
+       "Incompatible managed device map layout"},
+      {"managed_devices", BPF_MAP_TYPE_HASH, sizeof(DeviceKey),
+       sizeof(uint64_t), MAX_MANAGED_DEVICES, BPF_F_RDONLY_PROG,
+       "Incompatible managed device map layout"},
+      {"managed_devices", BPF_MAP_TYPE_HASH, sizeof(DeviceKey), 1,
+       MAX_MANAGED_DEVICES, BPF_F_RDONLY_PROG,
+       "Incompatible managed device map layout"},
+      {"managed_devices", BPF_MAP_TYPE_LRU_HASH, sizeof(DeviceKey),
+       sizeof(uint32_t), MAX_MANAGED_DEVICES, BPF_F_RDONLY_PROG,
+       "Incompatible managed device map layout"},
+      {"managed_devices", BPF_MAP_TYPE_PERCPU_HASH, sizeof(DeviceKey),
+       sizeof(uint32_t), MAX_MANAGED_DEVICES, BPF_F_RDONLY_PROG,
+       "Incompatible managed device map layout"},
+      {"managed_devices", BPF_MAP_TYPE_HASH, sizeof(DeviceKey),
+       sizeof(uint32_t), MAX_MANAGED_DEVICES - 1, BPF_F_RDONLY_PROG,
+       "Insufficient managed device map capacity"},
+      {"managed_devices", BPF_MAP_TYPE_HASH, sizeof(DeviceKey),
+       sizeof(uint32_t), MAX_MANAGED_DEVICES, BPF_F_WRONLY_PROG,
+       "Incompatible managed device map access flags"},
+      {"device_policies", BPF_MAP_TYPE_HASH, sizeof(bpf_cgroup_storage_key),
+       sizeof(DevicePolicy), 1, 0, "Incompatible device policy map layout"},
+      {"device_policies", BPF_MAP_TYPE_CGROUP_STORAGE, sizeof(uint64_t),
+       sizeof(DevicePolicy), 0, 0, "Incompatible device policy map layout"},
+      {"device_policies", BPF_MAP_TYPE_CGROUP_STORAGE,
+       sizeof(bpf_cgroup_storage_key), sizeof(DevicePolicy) + 8, 0, 0,
+       "Incompatible device policy map layout"},
+      {"device_policies", BPF_MAP_TYPE_CGROUP_STORAGE,
+       sizeof(bpf_cgroup_storage_key), sizeof(DevicePolicy), 0,
+       BPF_F_WRONLY_PROG, "Incompatible device policy map access flags"},
+  };
+  for (const auto& test : cases) {
+    SCOPED_TRACE(test.pin);
+    SCOPED_TRACE(test.error);
+    bpf_map_create_opts opts{};
+    opts.sz = sizeof(opts);
+    opts.map_flags = test.flags;
+    util::FileDescriptor map(bpf_map_create(test.type, nullptr, test.key_size,
+                                            test.value_size, test.capacity,
+                                            &opts));
+    ASSERT_GE(map.Get(), 0) << strerror(errno);
+    ASSERT_NO_FATAL_FAILURE(CheckRejectedPin(test.pin, map.Get(), test.error));
+  }
+}
+
+TEST_F(BpfDeviceKernel, RejectsUnrelatedPinnedMapsAndPrograms) {
+  for (const char* name : {"managed_devices", "device_policies"}) {
+    SCOPED_TRACE(name);
+    util::FileDescriptor original(bpf_obj_get((paths_.pins / name).c_str()));
+    ASSERT_GE(original.Get(), 0);
+    bpf_map_info info{};
+    uint32_t size = sizeof(info);
+    ASSERT_EQ(bpf_obj_get_info_by_fd(original.Get(), &info, &size), 0);
+    bpf_map_create_opts opts{};
+    opts.sz = sizeof(opts);
+    opts.map_flags = info.map_flags;
+    util::FileDescriptor map(bpf_map_create(
+        static_cast<bpf_map_type>(info.type), nullptr, info.key_size,
+        info.value_size, info.max_entries, &opts));
+    ASSERT_GE(map.Get(), 0) << strerror(errno);
+    ASSERT_NO_FATAL_FAILURE(CheckRejectedPin(
+        name, map.Get(), "Device program does not reference the pinned maps"));
+  }
+
+  const bpf_insn instructions[] = {
+      {.code = BPF_ALU64 | BPF_MOV | BPF_K, .dst_reg = BPF_REG_0, .imm = 1},
+      {.code = BPF_JMP | BPF_EXIT},
+  };
+  for (auto type : {BPF_PROG_TYPE_SOCKET_FILTER, BPF_PROG_TYPE_CGROUP_DEVICE}) {
+    bpf_prog_load_opts opts{};
+    opts.sz = sizeof(opts);
+    if (type == BPF_PROG_TYPE_CGROUP_DEVICE)
+      opts.expected_attach_type = BPF_CGROUP_DEVICE;
+    util::FileDescriptor program(bpf_prog_load(
+        type, nullptr, "GPL", instructions, std::size(instructions), &opts));
+    ASSERT_GE(program.Get(), 0) << strerror(errno);
+    ASSERT_NO_FATAL_FAILURE(CheckRejectedPin(
+        "device_access", program.Get(),
+        type == BPF_PROG_TYPE_CGROUP_DEVICE
+            ? "Device program does not reference the pinned maps"
+            : "Incompatible device program type"));
+  }
+}
+
+TEST_F(BpfDeviceKernel, ReusesLargerMapsWithCompatibleFlags) {
+  std::unique_ptr<bpf_object, decltype(&bpf_object__close)> object(
+      bpf_object__open_file(paths_.object.c_str(), nullptr), bpf_object__close);
+  ASSERT_NE(object, nullptr);
+  auto* devices = bpf_object__find_map_by_name(object.get(), "managed_devices");
+  auto* policies =
+      bpf_object__find_map_by_name(object.get(), "device_policies");
+  auto* program =
+      bpf_object__find_program_by_name(object.get(), "craned_device_access");
+  ASSERT_NE(devices, nullptr);
+  ASSERT_NE(policies, nullptr);
+  ASSERT_NE(program, nullptr);
+  ASSERT_EQ(bpf_map__set_max_entries(devices, MAX_MANAGED_DEVICES * 2), 0);
+  ASSERT_EQ(bpf_map__set_map_flags(devices, BPF_F_NO_PREALLOC), 0);
+  ASSERT_EQ(bpf_map__set_map_flags(policies, BPF_F_RDONLY_PROG | BPF_F_WRONLY),
+            0);
+  ASSERT_EQ(bpf_object__load(object.get()), 0);
+  const auto indices = runtime_->DeviceIndicesBySlot();
+  for (const auto& [slot, keys] : device_keys_by_slot_) {
+    for (size_t i = 0; i < keys.size(); ++i)
+      ASSERT_EQ(bpf_map_update_elem(bpf_map__fd(devices), &keys[i],
+                                    &indices.at(slot)[i], BPF_ANY),
+                0);
+  }
+  // Reopening only reads the device catalog; a frozen catalog is compatible.
+  ASSERT_EQ(bpf_map_freeze(bpf_map__fd(devices)), 0);
+  for (const auto& [name, fd] :
+       {std::pair{"managed_devices", bpf_map__fd(devices)},
+        std::pair{"device_policies", bpf_map__fd(policies)},
+        std::pair{"device_access", bpf_program__fd(program)}}) {
+    auto path = paths_.pins / name;
+    ASSERT_TRUE(fs::remove(path));
+    ASSERT_EQ(bpf_obj_pin(fd, path.c_str()), 0);
+  }
+  BpfRuntimeInfo recovered(paths_);
+  auto result = recovered.Initialize(device_keys_by_slot_);
+  ASSERT_TRUE(result) << result.error();
+  EXPECT_EQ(recovered.DeviceIndicesBySlot(), indices);
+  BpfRuntimeInfo supervisor(paths_);
+  result = supervisor.Connect(indices);
+  ASSERT_TRUE(result) << result.error();
+  auto task = Group(cgroup_, "compatible");
+  result = supervisor.SetDeviceAccess(task, {"null"}, true, true, true);
+  ASSERT_TRUE(result) << result.error();
+  EXPECT_EQ(OpenIn(task, "/dev/null", O_RDWR), 0);
+  EXPECT_EQ(OpenIn(task, "/dev/zero", O_RDONLY), EPERM);
+}
 
 TEST_F(BpfDeviceKernel, InheritanceUpdatesRestartAndReclamation) {
   auto indices = runtime_->DeviceIndicesBySlot();

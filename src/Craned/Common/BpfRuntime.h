@@ -65,6 +65,7 @@ class BpfRuntimeInfo {
 
  private:
   BpfResult Open_();
+  BpfResult Validate_();
   BpfResult Create_(const ManagedDeviceKeysBySlot& device_keys_by_slot);
   BpfResult LoadManagedDeviceIndices_();
   BpfResult ResolveIndices_(const ManagedDeviceKeysBySlot& device_keys_by_slot);

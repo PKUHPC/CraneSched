@@ -25,6 +25,7 @@
 #include <sys/stat.h>
 #include <unistd.h>
 
+#include <algorithm>
 #include <array>
 #include <cerrno>
 #include <memory>
@@ -107,19 +108,57 @@ BpfResult BpfRuntimeInfo::Open_() {
     return error;
   }
 
-  // The pin set is deployment-owned. An ABI upgrade must remove all three
-  // pins after old jobs/cgroups are drained before starting the new daemon.
-  bpf_prog_info info{};
-  uint32_t size = sizeof(info);
-  if (bpf_obj_get_info_by_fd(m_program_fd_, &info, &size) < 0) {
-    auto error = Error("Read pinned device program metadata");
-    Close_();
-    return error;
-  }
-  m_program_id_ = info.id;
-  auto result = LoadManagedDeviceIndices_();
+  auto result = Validate_();
+  if (result) result = LoadManagedDeviceIndices_();
   if (!result) Close_();
   return result;
+}
+
+BpfResult BpfRuntimeInfo::Validate_() {
+  // BPF map syscalls copy the map's actual key/value sizes, not the sizes of
+  // our buffers. Validate metadata before any key enumeration or value I/O.
+  bpf_map_info devices{}, policies{};
+  uint32_t size = sizeof(devices);
+  if (bpf_obj_get_info_by_fd(m_devices_fd_, &devices, &size) < 0)
+    return Error("Read pinned managed device map metadata");
+  if (devices.type != BPF_MAP_TYPE_HASH ||
+      devices.key_size != sizeof(DeviceKey) ||
+      devices.value_size != sizeof(uint32_t))
+    return std::unexpected("Incompatible managed device map layout");
+  if (devices.max_entries < MAX_MANAGED_DEVICES)
+    return std::unexpected("Insufficient managed device map capacity");
+  if (devices.map_flags & BPF_F_WRONLY_PROG)
+    return std::unexpected("Incompatible managed device map access flags");
+
+  size = sizeof(policies);
+  if (bpf_obj_get_info_by_fd(m_policies_fd_, &policies, &size) < 0)
+    return Error("Read pinned device policy map metadata");
+  if (policies.type != BPF_MAP_TYPE_CGROUP_STORAGE ||
+      policies.key_size != sizeof(bpf_cgroup_storage_key) ||
+      policies.value_size != sizeof(DevicePolicy))
+    return std::unexpected("Incompatible device policy map layout");
+  if (policies.map_flags & BPF_F_WRONLY_PROG)
+    return std::unexpected("Incompatible device policy map access flags");
+
+  bpf_prog_info info{};
+  size = sizeof(info);
+  if (bpf_obj_get_info_by_fd(m_program_fd_, &info, &size) < 0)
+    return Error("Read pinned device program metadata");
+  if (info.type != BPF_PROG_TYPE_CGROUP_DEVICE)
+    return std::unexpected("Incompatible device program type");
+  std::vector<uint32_t> map_ids(info.nr_map_ids);
+  info = {};
+  info.nr_map_ids = map_ids.size();
+  info.map_ids = reinterpret_cast<uintptr_t>(map_ids.data());
+  size = sizeof(info);
+  if (bpf_obj_get_info_by_fd(m_program_fd_, &info, &size) < 0)
+    return Error("Read pinned device program map IDs");
+  if (info.nr_map_ids != map_ids.size() ||
+      std::ranges::find(map_ids, devices.id) == map_ids.end() ||
+      std::ranges::find(map_ids, policies.id) == map_ids.end())
+    return std::unexpected("Device program does not reference the pinned maps");
+  m_program_id_ = info.id;
+  return {};
 }
 
 BpfResult BpfRuntimeInfo::Create_(
