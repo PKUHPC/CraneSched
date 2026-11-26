@@ -117,10 +117,6 @@ inline constexpr std::string kTaskCgNamePrefix = "task_";
 inline constexpr std::string kOverflowCgName = "overflow";
 
 constexpr int kParsedJobIdIdx = 0;
-constexpr int kParsedStepIdIdx = 1;
-constexpr int kParsedSystemFlagIdx = 2;
-constexpr int kParsedTaskIdIdx = 3;
-constexpr int kParsedOverflowIdx = 4;
 
 // Common cgroup filename constants
 // cgroup v2 memory events file used to read OOM and OOM_KILL counters
@@ -491,9 +487,11 @@ class ResourceInNodeV3Allocator {
                        bool apply_device_policy = true);
 };
 
+enum class StepSubgroup { None, System, User };
+
 using CgroupStrParsedIds =
-    std::tuple<std::optional<job_id_t>, std::optional<step_id_t>,
-               bool /*true if system step*/, std::optional<task_id_t>,
+    std::tuple<std::optional<job_id_t>, std::optional<step_id_t>, StepSubgroup,
+               std::optional<task_id_t>,
                bool /*true if overflow (fractional CPU pool)*/>;
 
 // Encapsulates cgroup path knowledge for a job.
@@ -529,7 +527,7 @@ class CgroupManager {
   static std::string CgroupStrByJobId(job_id_t job_id);
   static std::string CgroupStrByStepId(
       const std::string& job_cg_name, step_id_t step_id,
-      bool system = false /* system = true is only for supervisor itself. */);
+      StepSubgroup subgroup = StepSubgroup::User);
   static std::string CgroupStrByTaskId(const std::string& job_cg_name,
                                        step_id_t step_id, task_id_t task_id);
   static std::string CgroupStrByParsedIds(const CgroupStrParsedIds& ids);
@@ -644,6 +642,9 @@ class CgroupManager {
       const std::string& cgroup_str, ControllerFlags preferred_controllers,
       ControllerFlags required_controllers, bool retrieve);
 
+  // Craned owns job cgroups and step subgroups. Supervisors own task cgroups.
+  static bool IsCranedRecoveryCandidate(const CgroupStrParsedIds& ids);
+
   // Scan all cgroups (jobs, steps, tasks). Returns set of parsed IDs.
   // overflow flag is set based on whether the cgroup is under the overflow
   // path.
@@ -662,7 +663,7 @@ class CgroupManager {
 
  private:
   static CgroupStrParsedIds ParseIdsFromCgroupStr_(
-      const std::string& cgroup_str, bool include_step_parent);
+      const std::string& cgroup_str);
 
   static int InitializeController_(struct cgroup& cgroup,
                                    CgConstant::Controller controller,

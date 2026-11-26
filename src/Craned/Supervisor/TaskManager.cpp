@@ -4163,7 +4163,7 @@ void TaskManager::EvGrpcExecuteStepCb_() {
       cg_span.SetAttribute("step_id", m_step_.step_id);
       auto cg_expt = CgroupManager::AllocateAndGetCgroup(
           CgroupManager::CgroupStrByStepId(g_config.JobCgStr, m_step_.step_id,
-                                           false),
+                                           Common::StepSubgroup::User),
           m_step_.GetStep().res(), false, Common::CgConstant::kCgMinMem);
       if (!cg_expt.has_value()) {
         CRANE_ERROR("[Step #{}.{}] Failed to allocate cgroup", m_step_.job_id,
@@ -4245,7 +4245,7 @@ void TaskManager::EvGrpcMigrateSshProcToCgroupCb_() {
     if (!m_step_.step_user_cg) {
       auto cg_expt = CgroupManager::AllocateAndGetCgroup(
           CgroupManager::CgroupStrByStepId(g_config.JobCgStr, m_step_.step_id,
-                                           false),
+                                           Common::StepSubgroup::User),
           m_step_.GetStep().res(), false, Common::CgConstant::kCgMinMem);
       if (!cg_expt.has_value()) {
         CRANE_ERROR("[Step #{}.{}] Failed to allocate cgroup", m_step_.job_id,
