@@ -39,6 +39,8 @@ using StepCleanupFutureMap = std::unordered_map<
 using JobCleanupFutureMap =
     std::unordered_map<job_id_t, std::future<CraneErrCode>>;
 
+CraneErrCode WaitStepCleanupFutures(StepCleanupFutureMap&& futures);
+
 struct CompletingStepState {
   std::future<void> supervisor_rpc;
   StepInstance* step = nullptr;
@@ -118,9 +120,10 @@ class JobManager {
   [[nodiscard]] JobCleanupFutureMap FreeInvalidJobs(
       std::set<job_id_t>&& job_ids);
 
-  CraneErrCode ExecuteStepAsync(
-      std::unordered_map<job_id_t, std::unordered_set<step_id_t>>&& steps,
-      std::unordered_map<job_id_t, std::string> traceparents = {});
+  void ExecuteStepsAsync(
+      const std::unordered_map<job_id_t, std::unordered_set<step_id_t>>& steps,
+      const google::protobuf::Map<uint32_t, std::string>& traceparents,
+      crane::grpc::ExecuteStepsReply* reply);
 
   bool ReceivePmixPort(
       grpc::ClientContext& context,
@@ -206,7 +209,6 @@ class JobManager {
     job_id_t job_id;
     step_id_t step_id;
     std::string traceparent;
-    std::promise<CraneErrCode> ok_prom;
   };
 
   struct EvQueueQueryJobIdFromPid {

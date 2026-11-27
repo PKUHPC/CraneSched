@@ -137,7 +137,7 @@ class CranedServiceImpl : public Craned::Service {
 
 class CranedServer {
  public:
-  explicit CranedServer(const Config::CranedListenConf &listen_conf);
+  void Start(const Config::CranedListenConf &listen_conf);
 
   // Hold a shared lease for the full duration of each work RPC. Status
   // reports use the JobManager inbox, which stays open through cleanup.

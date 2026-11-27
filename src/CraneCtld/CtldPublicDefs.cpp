@@ -422,6 +422,12 @@ void StepInCtld::RecoverFromDb(
                        runtime_attr.configuring_nodes().end()});
   SetRunningNodes({runtime_attr.running_nodes().begin(),
                    runtime_attr.running_nodes().end()});
+  // Older common-step records did not track outstanding supervisors until
+  // execution began. Keep reconciling their allocation while configuring.
+  if (runtime_attr.step_type() == crane::grpc::COMMON &&
+      runtime_attr.status() == crane::grpc::Configuring &&
+      runtime_attr.running_nodes().empty())
+    SetRunningNodes(ExecutionNodes());
   m_completing_nodes_ = {runtime_attr.completing_nodes().begin(),
                          runtime_attr.completing_nodes().end()};
 
@@ -2426,6 +2432,7 @@ uint32_t JobInCtld::SchedulePendingSteps(
       const auto node_set = CranedIds() | std::ranges::to<std::unordered_set>();
       step->SetConfiguringNodes(node_set);
       step->SetExecutionNodes(node_set);
+      step->SetRunningNodes(node_set);
       step->SetStartTime(now);
       step->SetStatus(crane::grpc::JobStatus::Configuring);
       step->deadline_time = deadline_time;
@@ -2538,6 +2545,7 @@ uint32_t JobInCtld::SchedulePendingSteps(
     step->allocated_craneds_regex = util::HostNameListToStr(step->CranedIds());
     step->SetConfiguringNodes({step_craned_ids.begin(), step_craned_ids.end()});
     step->SetExecutionNodes({step_craned_ids.begin(), step_craned_ids.end()});
+    step->SetRunningNodes(step->ExecutionNodes());
     step->SetStartTime(now);
     step->SetStatus(crane::grpc::JobStatus::Configuring);
 

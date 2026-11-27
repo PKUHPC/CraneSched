@@ -96,7 +96,9 @@ bool ParseHexMask_(const std::string& line, uint64_t* mask) {
   }
 }
 
-CraneErrCode WaitStepCleanupFutures_(StepCleanupFutureMap&& futures) {
+}  // namespace
+
+CraneErrCode WaitStepCleanupFutures(StepCleanupFutureMap&& futures) {
   CraneErrCode result = CraneErrCode::SUCCESS;
   for (auto& [job_id, step_futures] : futures) {
     for (auto& [step_id, future] : step_futures) {
@@ -116,6 +118,8 @@ CraneErrCode WaitStepCleanupFutures_(StepCleanupFutureMap&& futures) {
   }
   return result;
 }
+
+namespace {
 
 // Called by the completion timer under m_free_job_step_mtx_. Keep cleanup
 // progress separate from the execution result already reported by Supervisor.
@@ -957,13 +961,13 @@ CraneErrCode JobManager::CleanInvalidJob_(job_id_t job_id) {
   if (!non_daemon_steps.empty()) {
     std::unordered_map<job_id_t, std::unordered_set<step_id_t>> steps_to_free;
     steps_to_free[job_id] = std::move(non_daemon_steps);
-    result = WaitStepCleanupFutures_(FreeSteps(std::move(steps_to_free)));
+    result = WaitStepCleanupFutures(FreeSteps(std::move(steps_to_free)));
   }
 
   if (result == CraneErrCode::SUCCESS && !daemon_steps.empty()) {
     std::unordered_map<job_id_t, std::unordered_set<step_id_t>> steps_to_free;
     steps_to_free[job_id] = std::move(daemon_steps);
-    result = WaitStepCleanupFutures_(FreeSteps(std::move(steps_to_free)));
+    result = WaitStepCleanupFutures(FreeSteps(std::move(steps_to_free)));
   }
 
   if (result == CraneErrCode::SUCCESS) {
@@ -1388,6 +1392,10 @@ bool JobManager::FinishDrain_() {
   EvCleanFreeJobsQueueCb_();
   EvCleanFreeStepsQueueCb_();
   {
+    absl::MutexLock lock(&m_unexpected_supervisor_exit_mtx_);
+    if (!m_unexpected_supervisor_exit_map_.empty()) return false;
+  }
+  {
     absl::MutexLock lock(&m_free_job_step_mtx_);
     if (!m_step_cleanup_waiters_.empty() ||
         !m_completing_step_retry_map_.empty())
@@ -1428,37 +1436,32 @@ bool JobManager::QueueCompletedStepsForDrain_() {
   return queued;
 }
 
-// NOTE: V3 changed dedicated_res_in_node() -> gres() in proto.
-// This change needs to be applied in StepInstance.cpp which now holds
-// the SpawnSupervisor logic (moved there by x11_task branch).
-CraneErrCode JobManager::ExecuteStepAsync(
-    std::unordered_map<job_id_t, std::unordered_set<step_id_t>>&& steps,
-    std::unordered_map<job_id_t, std::string> traceparents) {
-  if (m_stop_requested_.HasBeenNotified()) {
-    return CraneErrCode::ERR_SHUTTING_DOWN;
-  }
-
-  for (auto& [job_id, step_ids] : steps) {
+void JobManager::ExecuteStepsAsync(
+    const std::unordered_map<job_id_t, std::unordered_set<step_id_t>>& steps,
+    const google::protobuf::Map<uint32_t, std::string>& traceparents,
+    crane::grpc::ExecuteStepsReply* reply) {
+  for (const auto& [job_id, step_ids] : steps) {
+    auto job = m_job_map_.GetValueExclusivePtr(job_id);
+    if (!job) {
+      (*reply->mutable_failed_job_step_ids_map())[job_id]
+          .mutable_steps()
+          ->Assign(step_ids.begin(), step_ids.end());
+      continue;
+    }
+    auto trace = traceparents.find(job_id);
+    absl::MutexLock lock(job->step_map_mtx.get());
     for (auto step_id : step_ids) {
-      auto job = m_job_map_[job_id];
-      if (!job) {
-        CRANE_DEBUG("[Step #{}.{}] without job allocation. Ignoring it.",
-                    job_id, step_id);
-        return CraneErrCode::ERR_CGROUP;
+      if (!job->step_map.contains(step_id)) {
+        (*reply->mutable_failed_job_step_ids_map())[job_id].add_steps(step_id);
+        continue;
       }
-
-      EvQueueExecuteStepElem elem{
-          .job_id = job_id,
-          .step_id = step_id,
-          .traceparent = traceparents.count(job_id) ? traceparents[job_id] : "",
-          .ok_prom = std::promise<CraneErrCode>{}};
-
-      m_grpc_execute_step_queue_.enqueue(std::move(elem));
+      m_grpc_execute_step_queue_.enqueue(
+          {.job_id = job_id,
+           .step_id = step_id,
+           .traceparent = trace == traceparents.end() ? "" : trace->second});
     }
   }
   m_grpc_execute_step_async_handle_->send();
-
-  return CraneErrCode::SUCCESS;
 }
 
 CraneExpected<void> JobManager::ChangeStepTimeConstraint(
@@ -1602,7 +1605,7 @@ void JobManager::EvCleanGrpcExecuteStepQueueCb_() {
 
   while (m_grpc_execute_step_queue_.try_dequeue(elem)) {
     // Once ExecuteStep RPC is processed, the Execution goes into m_job_map_.
-    auto& [job_id, step_id, traceparent, ok_prom] = elem;
+    auto& [job_id, step_id, traceparent] = elem;
 
     CRANE_TRACE_SCOPE_FROM_REMOTE(dispatch_span, "step/queue_dispatch",
                                   traceparent);
@@ -1614,7 +1617,6 @@ void JobManager::EvCleanGrpcExecuteStepQueueCb_() {
     if (!job) {
       CRANE_ERROR("[Step #{}.{}] Failed to find job allocation", job_id,
                   step_id);
-      elem.ok_prom.set_value(CraneErrCode::ERR_NON_EXISTENT);
       continue;
     }
     absl::MutexLock lk(job->step_map_mtx.get());
@@ -1622,19 +1624,16 @@ void JobManager::EvCleanGrpcExecuteStepQueueCb_() {
     if (step_it == job->step_map.end()) {
       CRANE_ERROR("[Step #{}.{}] Failed to find step allocation", job_id,
                   step_id);
-      elem.ok_prom.set_value(CraneErrCode::ERR_NON_EXISTENT);
       continue;
     }
     if (step_it->second->status != StepStatus::Starting) {
       CRANE_DEBUG(
           "[Step #{}.{}] Ignoring duplicate or late ExecuteStep in status {}.",
           job_id, step_id, step_it->second->status);
-      elem.ok_prom.set_value(CraneErrCode::SUCCESS);
       continue;
     }
     step_it->second->wait_execute_span.End();
     step_it->second->ExecuteStepAsync();
-    elem.ok_prom.set_value(CraneErrCode::SUCCESS);
   }
 }
 

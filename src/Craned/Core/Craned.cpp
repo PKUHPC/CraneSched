@@ -1651,7 +1651,8 @@ void GlobalVariableInit() {
   });
   g_ctld_client->SetCranedId(g_config.CranedIdOfThisNode);
 
-  g_server = std::make_unique<Craned::CranedServer>(g_config.ListenConf);
+  g_server = std::make_unique<Craned::CranedServer>();
+  g_server->Start(g_config.ListenConf);
   g_ctld_client->InitGrpcChannel(g_config.ControlMachineAddr,
                                  g_config.ControlMachine);
 
@@ -1699,7 +1700,7 @@ void WaitForStopAndDoGvarFini() {
   g_craned_for_pam_server->Wait();
 
   // Recovery can wait on JobManager's event loop and submit terminal reports.
-  g_ctld_client->StopHandshakes().wait();
+  g_ctld_client->StopHandshakesAndWait();
   g_job_mgr->DrainAndStop();
   g_server->Shutdown();
   g_server->Wait();

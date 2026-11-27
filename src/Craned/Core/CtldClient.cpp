@@ -115,18 +115,18 @@ CtldClientStateMachine::CtldClientStateMachine(CtldClient& client)
   });
 }
 
-CtldClientStateMachine::~CtldClientStateMachine() {
-  StopHandshakes().wait();
-  for (auto& action : m_actions_) ObserveAction(action);
-}
+CtldClientStateMachine::~CtldClientStateMachine() { StopHandshakesAndWait(); }
 
-const BS::multi_future<void>& CtldClientStateMachine::StopHandshakes() {
+void CtldClientStateMachine::StopHandshakesAndWait() {
+  std::vector<std::future<void>> actions;
   {
     absl::MutexLock lock(&m_mtx_);
     m_stopping_ = true;
+    actions.swap(m_actions_);
   }
   if (m_uvw_thread_.joinable()) m_uvw_thread_.join();
-  return m_actions_;
+  if (m_recovery_thread_.joinable()) m_recovery_thread_.join();
+  for (auto& action : actions) ObserveAction(action);
 }
 
 void CtldClientStateMachine::TrackAction_(std::future<void> action) {
@@ -341,12 +341,35 @@ void CtldClientStateMachine::ActionConfigure_(const ConfigureRequest& request) {
     m_initial_restore_(request);
     m_initial_restore_ = {};
   }
-  // Cleanup waits for supervisor RPCs on the shared pool. Leave its workers
-  // available even with a single worker or overlapping configurations.
-  TrackAction_(std::async(std::launch::async, [this, request] {
-    util::SetCurrentThreadName("CfgCleanupThr");
-    m_client_.Reconcile_(request);
-  }));
+  m_pending_config_ = request;
+  if (!m_recovery_thread_.joinable())
+    m_recovery_thread_ =
+        std::thread(&CtldClientStateMachine::RunRecovery_, this);
+}
+
+void CtldClientStateMachine::RunRecovery_() {
+  util::SetCurrentThreadName("CfgCleanupThr");
+  for (;;) {
+    ConfigureRequest request;
+    {
+      absl::MutexLock lock(&m_mtx_);
+      auto ready = [this]() ABSL_SHARED_LOCKS_REQUIRED(m_mtx_) {
+        return m_pending_config_.has_value() || m_stopping_.load();
+      };
+      m_mtx_.Await(absl::Condition(&ready));
+      if (!m_pending_config_) return;
+      request = std::move(*m_pending_config_);
+      m_pending_config_.reset();
+      if (m_state_ != State::CONFIGURING || m_reg_token_ != request.token())
+        continue;
+    }
+    // Reconciliation waits for RPCs on the shared pool.
+    try {
+      m_client_.Reconcile_(request);
+    } catch (const std::exception& ex) {
+      CRANE_ERROR("Configuration recovery failed: {}", ex.what());
+    }
+  }
 }
 
 void CtldClientStateMachine::ActionRegister_(
@@ -382,10 +405,9 @@ void CtldClientStateMachine::ActionDisconnected_() {
   g_server->SetGrpcSrvReady(false);
 }
 
-const BS::multi_future<void>& CtldClient::StopHandshakes() {
-  const auto& actions = m_state_machine_.StopHandshakes();
+void CtldClient::StopHandshakesAndWait() {
+  m_state_machine_.StopHandshakesAndWait();
   StopPingCtld();
-  return actions;
 }
 
 void CtldClient::Shutdown() {
@@ -505,7 +527,7 @@ CtldClient::CtldClient() : m_state_machine_(*this) {
 }
 
 CtldClient::~CtldClient() {
-  StopHandshakes().wait();
+  StopHandshakesAndWait();
   Shutdown();
 }
 
@@ -524,8 +546,6 @@ void CtldClient::Init(std::function<void(const ConfigureRequest&)> restore) {
 }
 
 void CtldClient::Reconcile_(const ConfigureRequest& request) {
-  // A replacement snapshot must see the effects of already dispatched work.
-  std::lock_guard reconcile(m_reconcile_mutex_);
   // FIXME: step recovery
   auto token = request.token();
   CRANE_LOGGER_DEBUG(g_runtime_status.conn_logger,
@@ -739,27 +759,6 @@ void CtldClient::Reconcile_(const ConfigureRequest& request) {
     }
   }
 
-  auto wait_step_futures = [](StepCleanupFutureMap&& futures) -> CraneErrCode {
-    CraneErrCode result = CraneErrCode::SUCCESS;
-    for (auto& [job_id, step_futures] : futures) {
-      for (auto& [step_id, future] : step_futures) {
-        try {
-          auto step_result = future.get();
-          if (step_result != CraneErrCode::SUCCESS &&
-              result == CraneErrCode::SUCCESS) {
-            result = step_result;
-          }
-        } catch (const std::exception& ex) {
-          CRANE_ERROR("[Step #{}.{}] Cleanup future failed: {}", job_id,
-                      step_id, ex.what());
-          if (result == CraneErrCode::SUCCESS)
-            result = CraneErrCode::ERR_SYSTEM_ERR;
-        }
-      }
-    }
-    return result;
-  };
-
   auto wait_job_futures = [](JobCleanupFutureMap&& futures) -> CraneErrCode {
     CraneErrCode result = CraneErrCode::SUCCESS;
     for (auto& [job_id, future] : futures) {
@@ -801,7 +800,7 @@ void CtldClient::Reconcile_(const ConfigureRequest& request) {
             futures = g_job_mgr->FreeSteps(std::move(*batch));
           }))
         return CraneErrCode::ERR_SHUTTING_DOWN;
-      auto result = wait_step_futures(std::move(futures));
+      auto result = WaitStepCleanupFutures(std::move(futures));
       if (result != CraneErrCode::SUCCESS) return result;
     }
     return CraneErrCode::SUCCESS;

@@ -97,19 +97,10 @@ grpc::Status CranedServiceImpl::ExecuteSteps(
     recv_span.SetAttribute("job_id", job_id);
   }
 
-  // Build traceparent map for downstream tracing
-  std::unordered_map<job_id_t, std::string> traceparents;
-  for (const auto &[job_id, tp] : request->job_traceparents()) {
-    traceparents[job_id] = tp;
-  }
-
   CRANE_INFO("Receive ExecuteSteps for steps [{}]",
              util::JobStepsToString(job_steps_map));
-  auto err = g_job_mgr->ExecuteStepAsync(std::move(job_steps_map),
-                                         std::move(traceparents));
-  if (err != CraneErrCode::SUCCESS)
-    return {grpc::StatusCode::FAILED_PRECONDITION,
-            std::string(CraneErrStr(err))};
+  g_job_mgr->ExecuteStepsAsync(job_steps_map, request->job_traceparents(),
+                               response);
 
   return Status::OK;
 }
@@ -777,7 +768,7 @@ grpc::Status CranedServiceImpl::ReceivePmixPort(
   return Status::OK;
 }
 
-CranedServer::CranedServer(const Config::CranedListenConf &listen_conf) {
+void CranedServer::Start(const Config::CranedListenConf &listen_conf) {
   m_service_impl_ = std::make_unique<CranedServiceImpl>();
 
   grpc::ServerBuilder builder;

@@ -32,12 +32,21 @@ class TestController final : public CraneCtldForInternal::Service {
       config.set_ok(true);
       *config.mutable_token() = req->token();
       triggered.Notify();
-    } else if (!retried.HasBeenNotified()) {
+    } else {
       retry_config.set_ok(true);
       *retry_config.mutable_token() = req->token();
-      retried.Notify();
+      ++retries;
     }
     return grpc::Status::OK;
+  }
+
+  std::optional<ConfigureRequest> WaitForRetry(int number) {
+    absl::MutexLock lock(&requests_mutex);
+    auto received = [&] { return retries >= number; };
+    if (!requests_mutex.AwaitWithTimeout(absl::Condition(&received),
+                                         absl::Seconds(5)))
+      return std::nullopt;
+    return retry_config;
   }
 
   grpc::Status CranedRegister(grpc::ServerContext*,
@@ -62,7 +71,7 @@ class TestController final : public CraneCtldForInternal::Service {
   ConfigureRequest config;
   absl::Mutex requests_mutex;
   ConfigureRequest retry_config;
-  absl::Notification retried;
+  int retries{0};
   absl::Notification triggered;
   absl::Notification registered;
   absl::Notification release_register;
@@ -88,7 +97,7 @@ class TestSupervisor final
       grpc::ServerContext*,
       const crane::grpc::supervisor::StepExecutionRequest*,
       crane::grpc::supervisor::StepExecutionReply*) override {
-    executed = true;
+    executed.Notify();
     return grpc::Status::OK;
   }
   grpc::Status TerminateStep(
@@ -109,7 +118,7 @@ class TestSupervisor final
     return grpc::Status::OK;
   }
   absl::Notification pmix_received;
-  std::atomic_bool executed{false};
+  absl::Notification executed;
   std::atomic_bool terminated{false};
   absl::Notification shutdown;
   absl::Notification release;
@@ -149,7 +158,8 @@ class CtldSessionTest : public ::testing::Test {
     listen.CranedListenPort = "0";
     listen.UnixSocketListenAddr =
         "unix:" + g_config.CranedUnixSockPath.string();
-    g_server = std::make_unique<CranedServer>(listen);
+    g_server = std::make_unique<CranedServer>();
+    g_server->Start(listen);
     g_server->SetGrpcSrvReady(true);
     g_job_mgr = std::make_unique<JobManager>();
     g_ctld_client = std::make_unique<CtldClient>();
@@ -163,7 +173,8 @@ class CtldSessionTest : public ::testing::Test {
   }
 
   void RestoreJob(job_id_t id, StepStatus status = StepStatus::Running,
-                  step_id_t step_id = kDaemonStepId) {
+                  step_id_t step_id = kDaemonStepId,
+                  pid_t pid = std::numeric_limits<pid_t>::max()) {
     crane::grpc::JobToD job;
     job.set_job_id(id);
     std::unordered_map<job_id_t, JobInD> jobs;
@@ -178,8 +189,7 @@ class CtldSessionTest : public ::testing::Test {
     absl::flat_hash_map<StepKey, std::unique_ptr<StepInstance>> steps;
     steps.emplace(
         StepKey{id, step_id},
-        std::make_unique<StepInstance>(step, std::numeric_limits<pid_t>::max(),
-                                       status, std::move(stub)));
+        std::make_unique<StepInstance>(step, pid, status, std::move(stub)));
     g_job_mgr->Recover(std::move(jobs), std::move(steps));
   }
 
@@ -218,7 +228,7 @@ class CtldSessionTest : public ::testing::Test {
     if (!supervisor.release.HasBeenNotified()) supervisor.release.Notify();
     if (!controller.release_register.HasBeenNotified())
       controller.release_register.Notify();
-    g_ctld_client->StopHandshakes().wait();
+    g_ctld_client->StopHandshakesAndWait();
     g_job_mgr->DrainAndStop();
     g_ctld_client->Shutdown();
     g_server->Shutdown();
@@ -257,12 +267,14 @@ TEST_F(ReconnectTest, SupersededCleanupPreservesJobInNewSnapshot) {
   ASSERT_TRUE(g_ctld_client->Configure(old));
   ASSERT_TRUE(
       supervisor.shutdown.WaitForNotificationWithTimeout(absl::Seconds(5)));
-  ASSERT_TRUE(
-      controller.retried.WaitForNotificationWithTimeout(absl::Seconds(5)));
-  auto replacement = controller.retry_config;
-  (*(*replacement.mutable_job_steps())[43]
+  auto first_retry = controller.WaitForRetry(1);
+  ASSERT_TRUE(first_retry);
+  ASSERT_TRUE(g_ctld_client->Configure(*first_retry));
+  auto replacement = controller.WaitForRetry(2);
+  ASSERT_TRUE(replacement);
+  (*(*replacement->mutable_job_steps())[43]
         .mutable_step_status())[kDaemonStepId] = StepStatus::Running;
-  ASSERT_TRUE(g_ctld_client->Configure(replacement));
+  ASSERT_TRUE(g_ctld_client->Configure(*replacement));
   supervisor.release.Notify();
   ASSERT_TRUE(
       controller.registered.WaitForNotificationWithTimeout(absl::Seconds(5)));
@@ -275,13 +287,12 @@ TEST_F(ReconnectTest, FailedRefreezeRequiresNewConfiguration) {
       StepStatus::Suspended;
   // The recovered job has no cgroup, so the requested suspend cannot succeed.
   ASSERT_TRUE(g_ctld_client->Configure(suspended));
-  ASSERT_TRUE(
-      controller.retried.WaitForNotificationWithTimeout(absl::Seconds(5)));
+  auto running = controller.WaitForRetry(1);
+  ASSERT_TRUE(running);
   EXPECT_FALSE(controller.registered.HasBeenNotified());
-  auto running = controller.retry_config;
-  (*(*running.mutable_job_steps())[42].mutable_step_status())[kDaemonStepId] =
+  (*(*running->mutable_job_steps())[42].mutable_step_status())[kDaemonStepId] =
       StepStatus::Running;
-  ASSERT_TRUE(g_ctld_client->Configure(running));
+  ASSERT_TRUE(g_ctld_client->Configure(*running));
   ASSERT_TRUE(
       controller.registered.WaitForNotificationWithTimeout(absl::Seconds(5)));
 }
@@ -303,10 +314,11 @@ TEST_F(CtldSessionTest, JoinsRegistrationAlreadyInFlightOnStop) {
       controller.registered.WaitForNotificationWithTimeout(absl::Seconds(10)));
   kill(getpid(), SIGTERM);
   g_job_mgr->WaitForStopRequest();
-  const auto& actions = g_ctld_client->StopHandshakes();
-  EXPECT_LT(actions.ready_count(), actions.size());
+  auto stopped = std::async(std::launch::async,
+                            [] { g_ctld_client->StopHandshakesAndWait(); });
+  EXPECT_EQ(stopped.wait_for(200ms), std::future_status::timeout);
   controller.release_register.Notify();
-  actions.wait();
+  stopped.get();
   EXPECT_FALSE(g_ctld_client->Configure(controller.config));
 }
 
@@ -317,11 +329,12 @@ TEST_F(CtldSessionTest, DrainsAcceptedRecoveryAndSendsLastStatusOnStop) {
   EXPECT_TRUE(g_ctld_client->Configure(controller.config));
   kill(getpid(), SIGTERM);
   g_job_mgr->WaitForStopRequest();
-  const auto& actions = g_ctld_client->StopHandshakes();
-  EXPECT_LT(actions.ready_count(), actions.size());
+  auto stopped = std::async(std::launch::async,
+                            [] { g_ctld_client->StopHandshakesAndWait(); });
+  EXPECT_EQ(stopped.wait_for(200ms), std::future_status::timeout);
   release_worker.Notify();
   blocker.get();
-  actions.wait();
+  stopped.get();
   EXPECT_FALSE(g_ctld_client->Configure(controller.config));
   EXPECT_TRUE(g_job_mgr->GetAllocatedJobSteps().empty());
   g_job_mgr->StepStatusChangeAsync(42, 7, StepStatus::Completed, 0,
@@ -347,7 +360,7 @@ TEST_F(CtldSessionTest, ReceivesFinalSupervisorStatusWhileDrainingWork) {
   kill(getpid(), SIGTERM);
   g_job_mgr->WaitForStopRequest();
   g_server->CloseWorkAdmission();
-  g_ctld_client->StopHandshakes().wait();
+  g_ctld_client->StopHandshakesAndWait();
   auto drain =
       std::async(std::launch::async, [] { g_job_mgr->DrainAndStop(); });
   CranedServiceImpl receiver;
@@ -377,17 +390,57 @@ TEST_F(CtldSessionTest, ReceivesFinalSupervisorStatusWhileDrainingWork) {
 TEST_F(CtldSessionTest, DrainsAcceptedExecutionAndDeferredTermination) {
   RestoreJob(44, StepStatus::Starting);
   RestoreJob(45, StepStatus::Configuring);
-  ASSERT_EQ(g_job_mgr->ExecuteStepAsync({{44, {kDaemonStepId}}}),
-            CraneErrCode::SUCCESS);
+  crane::grpc::ExecuteStepsReply reply;
+  g_job_mgr->ExecuteStepsAsync({{44, {kDaemonStepId}}}, {}, &reply);
+  ASSERT_TRUE(reply.failed_job_step_ids_map().empty());
   g_job_mgr->TerminateStepAsync(45, kDaemonStepId,
                                 crane::grpc::TERMINATE_SOURCE_USER_CANCEL);
   kill(getpid(), SIGTERM);
   g_job_mgr->WaitForStopRequest();
   g_server->CloseWorkAdmission();
-  g_ctld_client->StopHandshakes().wait();
+  g_ctld_client->StopHandshakesAndWait();
   g_job_mgr->DrainAndStop();
-  EXPECT_TRUE(supervisor.executed.load());
+  EXPECT_TRUE(supervisor.executed.HasBeenNotified());
   EXPECT_TRUE(supervisor.terminated.load());
+}
+
+TEST_F(CtldSessionTest, ExecutesValidStepsInPartiallyStaleBatch) {
+  RestoreJob(44, StepStatus::Starting);
+  CranedServiceImpl receiver;
+  grpc::ServerContext context;
+  crane::grpc::ExecuteStepsRequest request;
+  for (const auto id : {44, 45})
+    (*request.mutable_job_step_ids_map())[id].add_steps(kDaemonStepId);
+  crane::grpc::ExecuteStepsReply reply;
+  ASSERT_TRUE(receiver.ExecuteSteps(&context, &request, &reply).ok());
+  ASSERT_EQ(reply.failed_job_step_ids_map().size(), 1);
+  ASSERT_TRUE(reply.failed_job_step_ids_map().contains(45));
+  EXPECT_EQ(reply.failed_job_step_ids_map().at(45).steps(0), kDaemonStepId);
+  EXPECT_TRUE(
+      supervisor.executed.WaitForNotificationWithTimeout(absl::Seconds(3)));
+}
+
+TEST_F(CtldSessionTest, DrainsUnexpectedSupervisorExitWithItsSignal) {
+  const pid_t child = fork();
+  ASSERT_GE(child, 0);
+  if (child == 0) {
+    for (;;) pause();
+  }
+  RestoreJob(45, StepStatus::Running, 3, child);
+  ASSERT_EQ(kill(child, SIGKILL), 0);
+  // Only JobManager reaps this child. Start drain during its status grace
+  // period.
+  const auto deadline = std::chrono::steady_clock::now() + 5s;
+  while (kill(child, 0) == 0 && std::chrono::steady_clock::now() < deadline)
+    std::this_thread::sleep_for(1ms);
+  ASSERT_EQ(kill(child, 0), -1);
+  ASSERT_EQ(errno, ESRCH);
+  g_job_mgr->DrainAndStop();
+  g_ctld_client->Shutdown();
+  EXPECT_EQ(controller.last_step.load(), 3);
+  EXPECT_EQ(controller.last_status.load(), StepStatus::Failed);
+  EXPECT_EQ(controller.last_code.load(),
+            ExitCode::kTerminationSignalBase + SIGKILL);
 }
 
 TEST_F(CtldSessionTest, ProcessesSignalsWhileSupervisorRpcIsPending) {
@@ -410,7 +463,7 @@ TEST_F(CtldSessionTest, ReportsNaturalStepExitWithoutControllerFreeSteps) {
   kill(getpid(), SIGTERM);
   g_job_mgr->WaitForStopRequest();
   g_server->CloseWorkAdmission();
-  g_ctld_client->StopHandshakes().wait();
+  g_ctld_client->StopHandshakesAndWait();
 
   CranedServiceImpl receiver;
   grpc::ServerContext context;

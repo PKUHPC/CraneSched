@@ -40,7 +40,7 @@ class CtldClientStateMachine {
  public:
   explicit CtldClientStateMachine(CtldClient& client);
   ~CtldClientStateMachine();
-  const BS::multi_future<void>& StopHandshakes();
+  void StopHandshakesAndWait();
   CtldClientStateMachine(CtldClientStateMachine const&) = delete;
   CtldClientStateMachine& operator=(CtldClientStateMachine const&) = delete;
   CtldClientStateMachine(CtldClientStateMachine&&) = delete;
@@ -102,6 +102,7 @@ class CtldClientStateMachine {
   // State Actions:
   void ActionRequestConfig_();
   void ActionConfigure_(const crane::grpc::ConfigureCranedRequest& config_req);
+  void RunRecovery_();
   void ActionRegister_(
       std::set<job_id_t>&& lost_jobs,
       std::unordered_map<job_id_t, std::set<step_id_t>>&& lost_steps);
@@ -115,7 +116,9 @@ class CtldClientStateMachine {
   void TrackAction_(std::future<void> action);
   CtldClient& m_client_;
   std::function<void(const ConfigureRequest&)> m_initial_restore_;
-  BS::multi_future<void> m_actions_ ABSL_GUARDED_BY(m_mtx_);
+  std::vector<std::future<void>> m_actions_ ABSL_GUARDED_BY(m_mtx_);
+  std::optional<ConfigureRequest> m_pending_config_ ABSL_GUARDED_BY(m_mtx_);
+  std::thread m_recovery_thread_;
 
   State m_state_ ABSL_GUARDED_BY(m_mtx_) = State::DISCONNECTED;
 
@@ -138,9 +141,8 @@ class CtldClientStateMachine {
 class CtldClient {
  public:
   CtldClient();
-  // Seal handshake dispatch. Wait on the returned actions while JobManager
-  // and the status reporting channel are still available.
-  [[nodiscard]] const BS::multi_future<void>& StopHandshakes();
+  // Drain accepted handshakes while JobManager and status reporting are live.
+  void StopHandshakesAndWait();
   // Call after the producers of step status changes have drained.
   void Shutdown();
   ~CtldClient();
@@ -207,7 +209,6 @@ class CtldClient {
  private:
   friend class CtldClientStateMachine;
   CtldClientStateMachine m_state_machine_;
-  std::mutex m_reconcile_mutex_;
   void Reconcile_(const ConfigureRequest& request);
   void Wait();
   bool RequestConfigFromCtld_(RegToken const& token);
