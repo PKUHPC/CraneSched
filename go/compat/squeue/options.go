@@ -215,6 +215,13 @@ func parse(args []string, env map[string]string, diag io.Writer) (*options, erro
 	if o.customFormat && o.long {
 		return nil, fmt.Errorf("squeue: fatal: Options -o(--format) and -l(--long) are mutually exclusive. Please remove one and retry.")
 	}
+	// Slurm checks explicit query options before applying SQUEUE_* filter defaults.
+	if o.onlyState && (o.all || o.long || o.steps || o.start || o.priority || o.notUser != "" ||
+		o.nodes != nil || o.over > 0 || o.under > 0 || assigned(values, "accounts") ||
+		assigned(values, "partitions") || assigned(values, "qos") || assigned(values, "name") ||
+		assigned(values, "licenses") || assigned(values, "users") || assigned(values, "reservation")) {
+		return nil, fmt.Errorf("squeue: fatal: Option --only-job-state only works alone, with -j (--jobs) and/or -t (--states) parameters, parameters for cluster/federation selection, and the printing options.")
+	}
 	rest := s.Operands()
 	if len(rest) > 0 {
 		if o.jobs {
@@ -257,11 +264,7 @@ func parse(args []string, env map[string]string, diag io.Writer) (*options, erro
 	o.qos = list(values["qos"])
 	o.licenses = list(values["licenses"])
 	if raw, ok := values["reservation"]; ok && !o.steps {
-		for name := range strings.SplitSeq(raw, ",") {
-			if name = strings.TrimSpace(name); name != "" {
-				o.req.FilterReservations = append(o.req.FilterReservations, name)
-			}
-		}
+		o.req.FilterReservations = reservationNames(raw, diag)
 	}
 	o.names = list(values["name"])
 	if values["users"] != "" {
@@ -286,9 +289,7 @@ func parse(args []string, env map[string]string, diag io.Writer) (*options, erro
 	if err := o.selectStates(values["states"]); err != nil {
 		return nil, err
 	}
-	if o.onlyState && (o.notUser != "" || o.all || o.long || o.steps || o.start || len(o.accounts)+len(o.req.FilterPartitions)+len(o.qos)+len(o.names)+len(o.licenses)+len(o.users)+len(o.req.FilterReservations) > 0 || o.nodes != nil || o.priority || o.over > 0 || o.under > 0) {
-		return nil, fmt.Errorf("squeue: fatal: Option --only-job-state only works alone, with -j (--jobs) and/or -t (--states) parameters, parameters for cluster/federation selection, and the printing options.")
-	}
+
 	if o.under > 0 && o.over > o.under {
 		return nil, fmt.Errorf("squeue: fatal: --running-over=%02d:%02d:%02d and --running-under=%02d:%02d:%02d will return 0 jobs.", o.over/3600, o.over/60%60, o.over%60, o.under/3600, o.under/60%60, o.under%60)
 	}
@@ -297,6 +298,44 @@ func parse(args []string, env map[string]string, diag io.Writer) (*options, erro
 	}
 	o.req.OptionQueryStepsOnly = o.steps
 	return o, nil
+}
+
+// A reservation filter is a Slurm name list. Commas inside a bracketed
+// range belong to the range, and a leading quote delimits the whole list.
+func reservationNames(raw string, diag io.Writer) []string {
+	if raw != "" && (raw[0] == '\'' || raw[0] == '"') {
+		raw, _, _ = strings.Cut(raw[1:], raw[:1])
+	}
+	raw = strings.ReplaceAll(strings.ReplaceAll(raw, "'", "`"), "\"", "`")
+	var names []string
+	start := 0
+	inRange, sawRange := false, false
+	for i, ch := range raw {
+		switch ch {
+		case '[':
+			inRange = true
+		case ']':
+			hosts, err := utils.ParseHostList(strings.TrimSpace(raw[start : i+1]))
+			if err != nil {
+				fmt.Fprintf(diag, "squeue: error: %v\n", err)
+			} else {
+				names = slices.AppendSeq(names, hosts.Names())
+				start = i + 1
+			}
+			inRange, sawRange = false, true
+		case ',':
+			if !inRange {
+				if name := strings.TrimSpace(raw[start:i]); !sawRange && name != "" {
+					names = append(names, name)
+				}
+				start, sawRange = i+1, false
+			}
+		}
+	}
+	if name := strings.TrimSpace(raw[start:]); name != "" {
+		names = append(names, name)
+	}
+	return names
 }
 
 func (o *options) selectIDs() error {

@@ -8,8 +8,6 @@ import (
 	"fmt"
 	"io"
 	"math"
-	"os"
-	"os/user"
 	"slices"
 	"sort"
 	"strconv"
@@ -176,18 +174,6 @@ func renderStructured(w, diagnostics io.Writer, argv []string, rows []*row, snap
 	for _, row := range rows {
 		entries = append(entries, structuredRow(row, o, userName))
 	}
-	name, _ := userName(uint32(os.Getuid()))
-	group := strconv.Itoa(os.Getgid())
-	if g, err := user.LookupGroupId(group); err == nil {
-		group = g.Name
-	}
-	report := v45.SinfoResponse{
-		Sinfo: entries,
-		Meta: v45.Meta{
-			Plugin: v45.MetaPlugin{DataParser: o.Parser.Plugin},
-			Client: v45.MetaClient{User: name, Group: group}, Command: argv,
-			Slurm: v45.SlurmMeta{Version: v45.SlurmVersion{Major: "26", Micro: "4", Minor: "05"}, Release: compatibilityVersion, Cluster: snap.Cluster},
-		},
-	}
+	report := v45.SinfoResponse{Sinfo: entries, Meta: v45.NewMeta(argv, o.Parser.Plugin, snap.Cluster)}
 	return utils.WriteReport(w, report, o.Serialization, o.Serializer, o.Parser.Complex)
 }

@@ -7,6 +7,7 @@ package squeue
 import (
 	"bytes"
 	"context"
+	"encoding/json"
 	"fmt"
 	"io"
 	"net"
@@ -120,12 +121,13 @@ func TestQueueTextOutput(t *testing.T) {
 	visibility := pb.QueryVisibility_QUERY_VISIBILITY_DETAILS
 	held := &pb.JobInfo{
 		JobId: 7, Type: pb.JobType_Batch, Name: "compile", Partition: "cpu", Held: true,
-		TimeLimit: durationpb.New(15 * time.Minute), QueryVisibility: visibility,
+		PendingReasonOrCranedList: &pb.JobInfo_PendingReason{PendingReason: "JobHeldAdmin"},
+		TimeLimit:                 durationpb.New(15 * time.Minute), QueryVisibility: visibility,
 		ReqTotalResView: &pb.ResourceView{MemoryBytes: 128 << 20}, NodeNum: 1,
 		IoMeta: &pb.IoMeta{OutputFilePattern: "/tmp/build-%j.log"},
 	}
 	active := &pb.JobInfo{
-		JobId: 8, Type: pb.JobType_Batch, Status: pb.JobStatus_Running, Reservation: "Maint", Partition: "cpu", Uid: 1001, Username: "alice",
+		JobId: 8, Type: pb.JobType_Batch, Status: pb.JobStatus_Running, Reservation: "Maint01", Partition: "cpu", Uid: 1001, Username: "alice",
 		PendingReasonOrCranedList: &pb.JobInfo_CranedList{CranedList: "slurm[02-03]"}, ExecutionNode: []string{"slurm02"},
 		QueryVisibility: visibility,
 		StepInfoList: []*pb.StepInfo{
@@ -142,23 +144,25 @@ func TestQueueTextOutput(t *testing.T) {
 		stdout, stderr string
 	}{
 		{"literal prefix, alignment and truncation", []string{"-hj7", "-o", "job=%3j|%.9j|%t"}, nil, "job=com|  compile|PD\n", ""},
-		{"held job reason and unassigned nodes", []string{"-hj7", "-o", "%r|%R|%N"}, nil, "JobHeldUser|(JobHeldUser)|\n", ""},
+		{"held job reason and unassigned nodes", []string{"-hj7", "-o", "%r|%R|%N"}, nil, "JobHeldAdmin|(JobHeldAdmin)|\n", ""},
 		{"job stream defaults and literal pattern", []string{"-hj7", "-O", "StdIn:0|,StdOut:0|,StdErr:0"}, nil, "/dev/null|/tmp/build-%j.log|(null)\n", ""},
 		{"long format from environment", []string{"-hj7"}, []string{"SQUEUE_FORMAT2=Name:0|,MinMemory:0|,TimeLeft:0"}, "compile|128M|15:00\n", ""},
 		{"short format wins over long environment format", []string{"-hj7"}, []string{"SQUEUE_FORMAT=id=%i", "SQUEUE_FORMAT2=Name:0"}, "id=7\n", ""},
 		{"command line overrides format and state environment", []string{"-hj7", "-o", "%T", "-t", "PD"}, []string{"SQUEUE_FORMAT2=Name:0", "SQUEUE_STATES=RUNNING"}, "PENDING\n", ""},
 		{"environment name filter", []string{"-hj7", "-o", "%i"}, []string{"SQUEUE_NAMES=missing"}, "", ""},
 		{"environment partition filter", []string{"-hj7", "-o", "%i"}, []string{"SQUEUE_PARTITION=other"}, "", ""},
+		{"state text filters on state records without a partition", []string{"--only-job-state", "-h", "-o", "%i"}, []string{"SQUEUE_PARTITION=cpu"}, "", ""},
+		{"state text filters on the synthetic UID", []string{"--only-job-state", "-hj8", "-o", "%i"}, []string{"SQUEUE_USERS=0"}, "8\n", ""},
 		{"pending job excluded by elapsed filter", []string{"-hj7", "--running-under=15", "-o", "%i"}, nil, "", ""},
 		{"invalid job field is echoed", []string{"-hj7", "-o", "%j/%@@"}, nil, "compile/%@@\n", "squeue: error: Invalid job format specification: @\n"},
 		{"job nodelist width", []string{"-j8", "-o", "%.4N|%4N"}, nil, "NODELIST|NODE\nslurm[02-03]|slur\n", ""},
 		{"step nodelist width", []string{"-s8.0", "-o", "%.4N|%4N"}, nil, "NODELIST|NODE\nslurm[02-03]|slur\n", ""},
 		{"job filter matches secondary node alias", []string{"-hj8", "-w", "host03", "-o", "%i"}, nil, "8\n", ""},
 		{"step filter matches secondary node alias", []string{"-hs8.0", "-w", "host03", "-o", "%i"}, nil, "8.0\n", ""},
-		{"reservation list", []string{"-h", "-R", "other,Maint", "-o", "%i|%v"}, nil, "8|Maint\n", ""},
+		{"reservation list", []string{"-h", "-R", `"other,Maint[01-02,04]"`, "-o", "%i|%v"}, nil, "8|Maint01\n", ""},
 		{"empty reservation selects no jobs", []string{"-h", "--reservation=", "-o", "%i"}, nil, "", ""},
-		{"single job in reservation", []string{"-hj8", "-R", "Maint", "-o", "%i"}, nil, "8\n", ""},
-		{"reservation case mismatch on single job", []string{"-hj8", "-R", "maint", "-o", "%i"}, nil, "", ""},
+		{"single job in reservation", []string{"-hj8", "-R", "Maint01", "-o", "%i"}, nil, "8\n", ""},
+		{"reservation case mismatch on single job", []string{"-hj8", "-R", "maint01", "-o", "%i"}, nil, "", ""},
 		{"steps ignore job reservation", []string{"-hs8.0", "-R", "other", "-o", "%i"}, nil, "8.0\n", ""},
 		{"job exists outside node filter", []string{"-hj8", "-w", "slurm01", "-o", "%i"}, nil, "", ""},
 		{"job numeric UID with leading zeros", []string{"-hj8", "-u", "01001", "-o", "%U"}, nil, "1001\n", ""},
@@ -184,13 +188,57 @@ func TestQueueTextOutput(t *testing.T) {
 	}
 }
 
+func TestVerboseJobSnapshot(t *testing.T) {
+	public := pb.QueryVisibility_QUERY_VISIBILITY_PUBLIC
+	config := serveQueue(t, &referenceQueue{jobs: []*pb.JobInfo{
+		{JobId: 7, Reservation: "Maint01", Uid: 1001, QueryVisibility: public},
+		{JobId: 8, Uid: 1001, QueryVisibility: public},
+		{JobId: 9, Uid: 1002, QueryVisibility: public},
+	}})
+	for _, tc := range []struct {
+		args []string
+		want string
+	}{
+		{[]string{"-R", "Maint01"}, "3\n7\n"},
+		{[]string{"-j7,9", "-R", "Maint01"}, "3\n7\n"},
+		{[]string{"-j8,9"}, "3\n8\n9\n"},
+		{[]string{"-u1001", "-R", "Maint01"}, "2\n7\n"},
+		{[]string{"-j8", "-R", "Maint01"}, "1\n"},
+	} {
+		var out, diag bytes.Buffer
+		rc := execute(t.Context(), config, append([]string{"squeue", "-vh", "-o", "%i"}, tc.args...), nil, &out, &diag)
+		_, records, found := strings.Cut(out.String(), " records=")
+		if rc != 0 || diag.Len() != 0 || !found || records != tc.want {
+			t.Errorf("%v: exit %d, records and rows %q, stderr %q", tc.args, rc, records, &diag)
+		}
+	}
+}
+
+func TestStateReportIgnoresDisplayFilters(t *testing.T) {
+	public := pb.QueryVisibility_QUERY_VISIBILITY_PUBLIC
+	config := serveQueue(t, &referenceQueue{jobs: []*pb.JobInfo{
+		{JobId: 7, Partition: "cpu", QueryVisibility: public}, {JobId: 8, Partition: "cpu", QueryVisibility: public},
+	}})
+	var out, diag bytes.Buffer
+	rc := execute(t.Context(), config, []string{"squeue", "--only-job-state", "--json", "-j7"}, []string{"SQUEUE_PARTITION=other", "SQUEUE_STATES=RUNNING"}, &out, &diag)
+	var result struct {
+		Jobs []struct {
+			ID string `json:"job_id"`
+		}
+	}
+	if err := json.Unmarshal(out.Bytes(), &result); rc != 0 || err != nil || diag.Len() != 0 || len(result.Jobs) != 1 || result.Jobs[0].ID != "7" {
+		t.Fatalf("exit %d, jobs %v, stderr %q, decode error %v", rc, result.Jobs, &diag, err)
+	}
+}
+
 func TestReservationQueryScope(t *testing.T) {
 	for _, tc := range []struct {
 		args []string
 		want []string
 	}{
 		{[]string{"-R", "old", "--reservation=Maint, other"}, []string{"Maint", "other"}},
-		{[]string{"-R", "Maint", "-j7,8", "--json"}, []string{"Maint"}},
+		{[]string{"-R", "'Maint[01,03-04],other'ignored"}, []string{"Maint01", "Maint03", "Maint04", "other"}},
+		{[]string{"-R", "Maint", "-j7,8", "--json", "-v"}, []string{"Maint"}},
 		{[]string{"-R", "Maint", "-j8"}, nil},
 		{[]string{"-R", "Maint", "-s"}, nil},
 	} {
@@ -406,6 +454,9 @@ func TestQueueLocalOptionPrecedence(t *testing.T) {
 	}{
 		{[]string{"--json", "--version"}, []string{"SLURM_JSON=unknown"}, "Unable to parse serializer"},
 		{[]string{"-i3", "-ibad", "--help"}, nil, "--iterate=bad"},
+		{[]string{"--only-job-state", "--reservation=", "--json"}, nil, "Option --only-job-state only works alone"},
+		{[]string{"--only-job-state", "--accounts=", "operand"}, nil, "Option --only-job-state only works alone"},
+		{[]string{"--only-job-state"}, []string{"SQUEUE_ALL=1"}, "Option --only-job-state only works alone"},
 	} {
 		var out, diag bytes.Buffer
 		if rc := execute(t.Context(), "", append([]string{"squeue"}, tc.args...), tc.env, &out, &diag); rc != 1 || out.Len() != 0 || !strings.Contains(diag.String(), tc.message) {

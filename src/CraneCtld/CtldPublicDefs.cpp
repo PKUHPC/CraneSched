@@ -2427,7 +2427,7 @@ void JobInCtld::SetFieldsOfJobInfo(crane::grpc::JobInfo* job_info) const {
   auto job_status = Status();
   job_info->set_status(job_status);
   if (job_status == crane::grpc::Pending) {
-    job_info->set_pending_reason(pending_reason);
+    *job_info->mutable_pending_reason() = held ? HoldReason() : pending_reason;
   } else {
     job_info->set_craned_list(allocated_craneds_regex);
   }

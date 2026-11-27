@@ -9,13 +9,13 @@ package sinfo
 import (
 	_ "embed"
 	"fmt"
-	"github.com/PKUHPC/CraneSched/go/compat/utils"
 	"io"
 	"strconv"
 	"strings"
-)
 
-const compatibilityVersion = "26.05.4"
+	"github.com/PKUHPC/CraneSched/go/compat/protocol/v45"
+	"github.com/PKUHPC/CraneSched/go/compat/utils"
+)
 
 type options struct {
 	Program                                                      string
@@ -248,7 +248,7 @@ func writeAction(w io.Writer, o *plan) error {
 	case "usage":
 		output.WriteString(usageText)
 	case "version":
-		fmt.Fprintf(&output, "slurm %s\n", compatibilityVersion)
+		fmt.Fprintf(&output, "slurm %s\n", v45.Release)
 	case "helpstate":
 		output.WriteString(strings.ReplaceAll(stateNames, ",", "\n"))
 		output.WriteByte('\n')

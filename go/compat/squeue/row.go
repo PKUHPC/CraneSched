@@ -255,9 +255,6 @@ func (r row) value(f string, o *options) (string, error) {
 	if reason == "Resource" {
 		reason = "Resources"
 	}
-	if j.Held && status == pb.JobStatus_Pending {
-		reason = "JobHeldUser"
-	}
 	switch f {
 	case "JobId":
 		return num(j.JobId), nil

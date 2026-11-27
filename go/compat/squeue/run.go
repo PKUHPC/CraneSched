@@ -15,6 +15,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/PKUHPC/CraneSched/go/compat/protocol/v45"
 	"github.com/PKUHPC/CraneSched/go/compat/utils"
 	pb "github.com/PKUHPC/CraneSched/go/generated/protos"
 	"github.com/PKUHPC/CraneSched/go/internal/util"
@@ -54,7 +55,7 @@ func run(ctx context.Context, config string, argv []string, env map[string]strin
 	case "usage":
 		local = usage
 	case "version":
-		local = "slurm 26.05.4\n"
+		local = "slurm " + v45.Release + "\n"
 	case "helpstate":
 		local = stateNames("\n") + "\n"
 	case "helpformat", "helpFormat":
@@ -179,16 +180,29 @@ func (o *options) loadInventory(ctx context.Context, session *utils.Session, nod
 	return nil
 }
 
+func (o *options) verboseJobTable() bool {
+	return o.verbose > 0 && o.serializer == "" && !o.steps && !o.onlyState
+}
+
 func (o *options) queueRequest() *pb.QueryJobsInfoRequest {
-	// Slurm loads the unfiltered step snapshot before serializing it.
-	if o.steps && o.serializer != "" {
-		return &pb.QueryJobsInfoRequest{Mode: o.req.Mode, NumLimit: o.req.NumLimit, IncludePublicQueueDetails: true, OptionQueryStepsOnly: true}
+	ids := o.req.FilterJobIds
+	var selectors []*pb.JobIdSelector
+	switch {
+	case o.onlyState:
+		// Only job IDs enter the state query, even with SQUEUE_* defaults.
+		selectors = ids
+	case !o.steps && len(ids) == 1:
+		// Fetch the allocation to distinguish an unknown ID from a display mismatch.
+		selectors = []*pb.JobIdSelector{{JobId: ids[0].JobId}}
+	case o.steps && o.serializer != "" || o.verboseJobTable():
+		// Slurm serializes the full step snapshot and counts loaded jobs before filtering.
+	default:
+		return o.req
 	}
-	if !o.steps && len(o.req.FilterJobIds) == 1 && (!o.onlyState || o.serializer == "") {
-		// The single-job path fetches the allocation before applying display filters.
-		return &pb.QueryJobsInfoRequest{Mode: o.req.Mode, NumLimit: o.req.NumLimit, IncludePublicQueueDetails: true, FilterJobIds: []*pb.JobIdSelector{{JobId: o.req.FilterJobIds[0].JobId}}}
+	return &pb.QueryJobsInfoRequest{
+		Mode: o.req.Mode, NumLimit: o.req.NumLimit, IncludePublicQueueDetails: true,
+		OptionQueryStepsOnly: o.steps, FilterJobIds: selectors,
 	}
-	return o.req
 }
 
 func (o *options) loadQueue(ctx context.Context, session *utils.Session, req *pb.QueryJobsInfoRequest, needCluster bool) (*pb.QueryJobsInfoReply, error) {
@@ -224,6 +238,15 @@ func (o *options) loadQueue(ctx context.Context, session *utils.Session, req *pb
 func (o *options) printFrame(out, diag io.Writer, argv []string, cols []column, report utils.DataParserOptions, reply *pb.QueryJobsInfoReply) error {
 	if o.verbose > 0 && !o.onlyState && o.serializer == "" {
 		n := len(reply.JobInfoList)
+		if !o.steps && len(o.req.FilterJobIds) != 1 && len(o.users) == 1 && o.users[0] != "0" {
+			// Slurm loads a single non-root user's jobs directly.
+			n = 0
+			for _, j := range reply.JobInfoList {
+				if num(j.Uid) == o.users[0] {
+					n++
+				}
+			}
+		}
 		if o.steps {
 			n = 0
 			for _, j := range reply.JobInfoList {
@@ -354,6 +377,7 @@ func (o *options) rows(reply *pb.QueryJobsInfoReply) ([]row, error) {
 	if !o.steps && assigned(o.raw, "reservation") && len(o.req.FilterReservations) == 0 {
 		return nil, nil
 	}
+	filterLoadedJobs := len(o.req.FilterJobIds) == 1 || o.verboseJobTable()
 	var result []row
 	for _, j := range reply.JobInfoList {
 		if o.steps {
@@ -375,15 +399,16 @@ func (o *options) rows(reply *pb.QueryJobsInfoReply) ([]row, error) {
 			}
 			continue
 		}
-		if len(o.req.FilterJobIds) == 1 && o.req.FilterJobIds[0].ArrayTaskId != nil && !util.IsPendingArrayParent(j) {
-			sel := o.req.FilterJobIds[0]
-			a := j.ArrayTask
-			if a == nil || a.ArrayJobId != sel.JobId || a.TaskId != *sel.ArrayTaskId {
-				continue
-			}
+		// Single-job and verbose loads can return jobs outside the display selectors.
+		if filterLoadedJobs && len(o.req.FilterJobIds) > 0 && !util.IsPendingArrayParent(j) &&
+			!slices.ContainsFunc(o.req.FilterJobIds, func(sel *pb.JobIdSelector) bool { return matchesJob(j, sel) }) {
+			continue
 		}
-		// Single-job lookup must distinguish a missing ID from a reservation mismatch.
-		if len(o.req.FilterJobIds) == 1 && len(o.req.FilterReservations) > 0 && !slices.Contains(o.req.FilterReservations, j.Reservation) {
+		if o.onlyState {
+			// Text display filters see only the identity and state returned by Slurm.
+			j = &pb.JobInfo{JobId: j.JobId, ArrayTask: j.ArrayTask, ArraySpec: j.ArraySpec, Status: j.Status, Username: "root"}
+		}
+		if filterLoadedJobs && len(o.req.FilterReservations) > 0 && !slices.Contains(o.req.FilterReservations, j.Reservation) {
 			continue
 		}
 		if len(o.req.FilterPartitions) > 0 && !slices.Contains(o.req.FilterPartitions, j.Partition) {
@@ -414,10 +439,7 @@ func (o *options) rows(reply *pb.QueryJobsInfoReply) ([]row, error) {
 				continue
 			}
 		}
-		if o.onlyState {
-			// Slurm builds text and structured output from the identity/state response.
-			j = &pb.JobInfo{JobId: j.JobId, ArrayTask: j.ArrayTask, ArraySpec: j.ArraySpec, Status: j.Status, Username: "root"}
-		}
+
 		if util.IsPendingArrayParent(j) && o.jobIDs != "" {
 			var indexes []uint32
 			allTasks := false

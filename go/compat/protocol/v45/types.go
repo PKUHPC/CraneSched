@@ -4,6 +4,19 @@
 
 package v45
 
+import (
+	"os"
+	"os/user"
+	"strconv"
+)
+
+const (
+	releaseMajor = "26"
+	releaseMinor = "05"
+	releaseMicro = "4"
+	Release      = releaseMajor + "." + releaseMinor + "." + releaseMicro
+)
+
 // These v0.0.45 types define both the data report and its runtime schema.
 // Declaration order is output order. Descriptions and enums are public interface
 // metadata. Removed fields are deliberately omitted from both representations.
@@ -257,7 +270,7 @@ type MetaPlugin struct {
 
 type MetaClient struct {
 	Source string `json:"source" description:"Client source description" report:"-"`
-	User   string `json:"user" description:"Client user (if known)"`
+	User   string `json:"user" description:"Client user (if known)" complex:"keep_empty"`
 	Group  string `json:"group" description:"Client group (if known)"`
 }
 
@@ -278,6 +291,26 @@ type Meta struct {
 	Client  MetaClient `json:"client"`
 	Command []string   `json:"command" description:"CLI command (if applicable)"`
 	Slurm   SlurmMeta  `json:"slurm"`
+}
+
+// NewMeta identifies the invoking user, selected data parser and cluster in a v45 report.
+func NewMeta(argv []string, parser, cluster string) Meta {
+	var client MetaClient
+	if u, err := user.LookupId(strconv.Itoa(os.Getuid())); err == nil {
+		client.User = u.Username
+	}
+	if g, err := user.LookupGroupId(strconv.Itoa(os.Getgid())); err == nil {
+		client.Group = g.Name
+	}
+	return Meta{
+		Plugin:  MetaPlugin{DataParser: parser},
+		Client:  client,
+		Command: argv,
+		Slurm: SlurmMeta{
+			Version: SlurmVersion{Major: releaseMajor, Minor: releaseMinor, Micro: releaseMicro},
+			Release: Release, Cluster: cluster,
+		},
+	}
 }
 
 type Error struct {

@@ -282,6 +282,13 @@ TEST(CtldPublicDefs, HoldSourceSurvivesRecovery) {
     EXPECT_TRUE(recovered.Held());
     EXPECT_EQ(recovered.HoldReason(),
               by_admin ? "JobHeldAdmin" : "JobHeldUser");
+    recovered.pending_reason = "BeginTime";
+    crane::grpc::JobInfo info;
+    recovered.SetFieldsOfJobInfo(&info);
+    EXPECT_EQ(info.pending_reason(), recovered.HoldReason());
+    recovered.SetHeld(false);
+    recovered.SetFieldsOfJobInfo(&info);
+    EXPECT_EQ(info.pending_reason(), "BeginTime");
   }
 
   crane::grpc::JobToCtld request;

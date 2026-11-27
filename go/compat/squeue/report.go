@@ -8,9 +8,6 @@ import (
 	"cmp"
 	"io"
 	"math"
-	"os"
-	"os/user"
-	"strconv"
 	"strings"
 	"syscall"
 
@@ -35,15 +32,7 @@ func (o *options) writeReport(out io.Writer, s utils.DataParserOptions, argv []s
 			return utils.WriteSchema[v45.QueueResponse](out, o.serializer, o.encoding)
 		}
 	}
-	uid := strconv.Itoa(os.Getuid())
-	gid := strconv.Itoa(os.Getgid())
-	if u, e := user.LookupId(uid); e == nil {
-		uid = u.Username
-	}
-	if g, e := user.LookupGroupId(gid); e == nil {
-		gid = g.Name
-	}
-	meta := v45.Meta{Plugin: v45.MetaPlugin{DataParser: s.Plugin}, Client: v45.MetaClient{User: uid, Group: gid}, Command: argv, Slurm: v45.SlurmMeta{Version: v45.SlurmVersion{Major: "26", Minor: "05", Micro: "4"}, Release: "26.05.4", Cluster: o.clusterName}}
+	meta := v45.NewMeta(argv, s.Plugin, o.clusterName)
 	if o.steps {
 		response := v45.QueueStepsResponse{Meta: meta}
 		if len(rows) == 0 {

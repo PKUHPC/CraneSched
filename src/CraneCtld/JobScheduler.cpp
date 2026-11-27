@@ -1517,10 +1517,7 @@ void JobScheduler::ScheduleThread_() {
         const auto& job = it.second;
 
         job->scheduled_nodes.clear();
-        if (job->Held()) {
-          job->pending_reason = job->HoldReason();
-          continue;
-        }
+        if (job->Held()) continue;
         if (job->begin_time > now) {
           job->pending_reason = "BeginTime";
           continue;

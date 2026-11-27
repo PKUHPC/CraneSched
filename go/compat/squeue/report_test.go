@@ -16,8 +16,9 @@ import (
 
 func TestJobReportKeepsKnownFalseAndFractionalBilling(t *testing.T) {
 	job := &pb.JobInfo{
-		Type: pb.JobType_Batch, Status: pb.JobStatus_Pending,
-		RequeueEligible: new(false), ReqTotalResView: &pb.ResourceView{CpuCount: 0.5},
+		Type: pb.JobType_Batch, Status: pb.JobStatus_Pending, Held: true,
+		PendingReasonOrCranedList: &pb.JobInfo_PendingReason{PendingReason: "JobHeldAdmin"},
+		RequeueEligible:           new(false), ReqTotalResView: &pb.ResourceView{CpuCount: 0.5},
 	}
 	o, err := parse([]string{"--json", "--sort=?"}, nil, io.Discard)
 	if err != nil {
@@ -40,6 +41,9 @@ func TestJobReportKeepsKnownFalseAndFractionalBilling(t *testing.T) {
 		if _, ok := record[missing]; ok {
 			t.Errorf("unexpected %s: %s", missing, record[missing])
 		}
+	}
+	if string(record["state_reason"]) != `"JobHeldAdmin"` {
+		t.Errorf("state_reason = %s", record["state_reason"])
 	}
 	if string(record["requeue"]) != "false" {
 		t.Errorf("requeue = %s", record["requeue"])
