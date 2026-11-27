@@ -15,6 +15,15 @@ Private fields such as command lines and comments are access-controlled and disp
 
 ## Options
 
+**-R, --reservation=&lt;name1,name2,...&gt;**
+
+:   Filter jobs by reservation name. Multiple names match any listed reservation and combine with other filters.
+The filter uses the reservation recorded on each job, including after the reservation has expired or been deleted.
+For step queries, it filters the parent jobs. This option cannot be combined with `--count`.
+Use `cqueue -R course -o "%j %t %v"` to show job IDs, states and reservation names.
+The Slurm adapter also supports `squeue -R course`
+and `squeue --reservation=course,lab -o "%i %T %v"`.
+
 **-h, --help**
 
 :   **Applies to:** `job`, `step`  
@@ -197,6 +206,7 @@ When querying jobs (default mode), the following format identifiers are supporte
 | %T         | JobType         | Job type                                                    |
 | %u         | User            | User who submitted the job                                  |
 | %U         | Uid             | UID of the job                                              |
+| %v         | Reservation     | Reservation associated with the job                         |
 | %x         | ExcludeNodes    | Nodes excluded from the job                                 |
 | %X         | Exclusive       | Exclusive status of the job                                 |
 

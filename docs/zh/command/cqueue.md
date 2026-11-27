@@ -14,6 +14,15 @@ cqueue
 
 ## 选项
 
+**-R, --reservation=&lt;name1,name2,...&gt;**
+
+:   按预约名称筛选作业，多个名称之间为“或”关系，与其他过滤条件组合使用。
+匹配作业自身记录的预约名称，因此预约到期或删除后仍可查询其关联作业。
+查询作业步时按所属作业筛选。不支持与 `--count` 同时使用。
+例如 `cqueue -R course -o "%j %t %v"` 显示作业 ID、状态和预约名称。
+Slurm 适配同时支持 `squeue -R course`
+和 `squeue --reservation=course,lab -o "%i %T %v"`。
+
 **-h, --help**
 
 :   **适用于：** `作业`, `作业步`  
@@ -178,6 +187,7 @@ cqueue
 | %T  | JobType         | 作业类型                  |
 | %u  | User            | 提交作业的用户               |
 | %U  | Uid             | 作业的UID                |
+| %v  | Reservation     | 作业关联的预约名称              |
 | %x  | ExcludeNodes    | 从作业中排除的节点             |
 | %X  | Exclusive       | 作业的独占状态               |
 

@@ -73,11 +73,11 @@ func TestNormalizeSacctmgrArgsAcceptsNameFilters(t *testing.T) {
 }
 
 func TestConvertSqueueFormats(t *testing.T) {
-	got, err := convertSqueueFormat("%a %C %D %.8i %20j %k %l %M %m %N %n %o %P %p %q %r %S %T %t %u %U %V %State %JobType")
+	got, err := convertSqueueFormat("%a %C %D %.8i %20j %k %l %M %m %N %n %o %P %p %q %r %S %T %t %u %U %V %.20v %Reservation %State %JobType")
 	if err != nil {
 		t.Fatalf("convertSqueueFormat() error = %v", err)
 	}
-	const want = "%a %C %N %.8j %20n %k %l %e %M %L %r %o %P %p %q %R %S %state %statecompact %u %U %s %State %JobType"
+	const want = "%a %C %N %.8j %20n %k %l %e %M %L %r %o %P %p %q %R %S %state %statecompact %u %U %s %.20v %Reservation %State %JobType"
 	if got != want {
 		t.Fatalf("convertSqueueFormat() = %q, want %q", got, want)
 	}
@@ -108,6 +108,8 @@ func TestSqueueHelpMatchesSlurmFormatSemantics(t *testing.T) {
 		"%t/%StateCompact",
 		"%T/%State",
 		"%V/%SubmitTime",
+		"%v/%Reservation",
+		"-R, --reservation",
 		"Supported Crane extension identifiers (long form only):",
 		"%StepId",
 		"%Wckey",

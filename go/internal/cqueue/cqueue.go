@@ -49,6 +49,7 @@ func FillReqByCobraFlags() (*protos.QueryJobsInfoRequest, error) {
 		&UserFilterProcessor{},
 		&QosProcessor{},
 		&AccountProcessor{},
+		&ReservationsProcessor{},
 		&PartitionsProcessor{},
 		&JobIDsProcessor{},
 		&StepIDsProcessor{},

@@ -28,29 +28,30 @@ import (
 var DefaultStepIdFilter = "ALL"
 
 var (
-	FlagConfigFilePath   string
-	FlagFull             bool
-	FlagNoHeader         bool
-	FlagStartTime        bool
-	FlagDeadlineTime     bool
-	FlagSelf             bool
-	FlagFilterPartitions string
-	FlagStep             bool
-	FlagFilterStepIDs    string
-	FlagFilterJobIDs     string
-	FlagFilterJobNames   string
-	FlagFilterQos        string
-	FlagFilterStates     string
-	FlagFilterUsers      string
-	FlagFilterAccounts   string
-	FlagFilterJobTypes   string
-	FlagFilterLicenses   string
-	FlagFormat           string
-	FlagFilterNodeNames  string
-	FlagIterate          uint64
-	FlagNumLimit         uint32
-	FlagJson             bool
-	FlagCount            bool
+	FlagConfigFilePath     string
+	FlagFull               bool
+	FlagNoHeader           bool
+	FlagStartTime          bool
+	FlagDeadlineTime       bool
+	FlagSelf               bool
+	FlagFilterPartitions   string
+	FlagStep               bool
+	FlagFilterStepIDs      string
+	FlagFilterJobIDs       string
+	FlagFilterJobNames     string
+	FlagFilterQos          string
+	FlagFilterStates       string
+	FlagFilterUsers        string
+	FlagFilterAccounts     string
+	FlagFilterReservations string
+	FlagFilterJobTypes     string
+	FlagFilterLicenses     string
+	FlagFormat             string
+	FlagFilterNodeNames    string
+	FlagIterate            uint64
+	FlagNumLimit           uint32
+	FlagJson               bool
+	FlagCount              bool
 
 	RootCmd = &cobra.Command{
 		Use:           "cqueue [flags]",
@@ -114,6 +115,8 @@ func init() {
 		"Specify users to view (comma separated list), default is all users")
 	RootCmd.Flags().StringVarP(&FlagFilterAccounts, "account", "A", "",
 		"Specify accounts to view (comma separated list), \ndefault is all accounts")
+	RootCmd.Flags().StringVarP(&FlagFilterReservations, "reservation", "R", "",
+		"Specify reservations of jobs to view (comma separated list), default is all")
 	RootCmd.Flags().StringVarP(&FlagFilterPartitions, "partition", "p", "",
 		"Specify partitions to view (comma separated list), \ndefault is all partitions")
 	RootCmd.Flags().StringVar(&FlagFilterJobTypes, "type", "",
@@ -169,6 +172,7 @@ Supported format identifiers or string, string case insensitive:
 	%T/%JobType            - Display the job type. (For jobs only)
 	%U/%Uid                - Display the uid of the job/step.
 	%u/%User               - Display the user who submitted the job/step.
+	%v/%Reservation        - Display the reservation associated with the job. (For jobs only)
 	%X/%Exclusive          - Display the exclusive status of the job. (For jobs only)
 	%x/%ExcludeNodes       - Display the exclude nodes of the job. (For jobs only)
 
@@ -198,7 +202,7 @@ func validateCountFlags(cmd *cobra.Command) error {
 	unsupported := []string{
 		"step", "job", "name", "qos", "user", "account", "partition",
 		"type", "licenses", "start", "deadline", "self", "format", "full",
-		"max-lines", "nodelist",
+		"max-lines", "nodelist", "reservation",
 	}
 	for _, name := range unsupported {
 		if cmd.Flags().Changed(name) {

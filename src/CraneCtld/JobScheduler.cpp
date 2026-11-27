@@ -7018,6 +7018,14 @@ void JobScheduler::QueryJobsInRam(
     return no_accounts_constraint || req_accounts.contains(job.account);
   };
 
+  std::unordered_set<std::string> req_reservations(
+      request->filter_reservations().begin(),
+      request->filter_reservations().end());
+  auto job_rng_filter_reservation = [&](auto* job_ptr) {
+    return req_reservations.empty() ||
+           req_reservations.contains(job_ptr->reservation);
+  };
+
   bool no_username_constraint = request->filter_users().empty();
   std::unordered_set<std::string> req_users(request->filter_users().begin(),
                                             request->filter_users().end());
@@ -7118,6 +7126,7 @@ void JobScheduler::QueryJobsInRam(
   };
 
   auto joined_filters = ranges::views::filter(job_rng_filter_account) |
+                        ranges::views::filter(job_rng_filter_reservation) |
                         ranges::views::filter(job_rng_filter_name) |
                         ranges::views::filter(job_rng_filter_partition) |
                         ranges::views::filter(job_rng_filter_state) |
