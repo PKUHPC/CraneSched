@@ -713,6 +713,7 @@ message QueryJobsInfoRequest {
   optional uint32 uid = 16;
   QueryJobsInfoMode mode = 17;
   bool option_query_steps_only = 18;
+  repeated string filter_reservations = 19;
 }
 
 message QueryJobsInfoReply {

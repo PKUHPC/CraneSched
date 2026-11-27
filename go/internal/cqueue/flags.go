@@ -101,6 +101,20 @@ func (p *AccountProcessor) Process(req *protos.QueryJobsInfoRequest) error {
 	return nil
 }
 
+type ReservationsProcessor struct{}
+
+func (p *ReservationsProcessor) Process(req *protos.QueryJobsInfoRequest) error {
+	if FlagFilterReservations == "" {
+		return nil
+	}
+	reservations, err := util.ParseStringParamList(FlagFilterReservations, ",")
+	if err != nil {
+		return util.NewCraneErr(util.ErrorCmdArg, fmt.Sprintf("Invalid reservation list specified: %s.", err))
+	}
+	req.FilterReservations = reservations
+	return nil
+}
+
 // FlagFilterPartitions
 type PartitionsProcessor struct{}
 

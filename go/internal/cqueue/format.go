@@ -301,6 +301,9 @@ var fieldMap = map[string]FieldProcessor{
 	"U":    {"Uid", ProcessUid},
 	"uid":  {"Uid", ProcessUid},
 
+	"v":           {"Reservation", (*protos.JobInfo).GetReservation},
+	"reservation": {"Reservation", (*protos.JobInfo).GetReservation},
+
 	// 'x' group
 	"x":            {"ExcludeNodes", ProcessExcludeNodes},
 	"excludenodes": {"ExcludeNodes", ProcessExcludeNodes},

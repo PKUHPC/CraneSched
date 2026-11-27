@@ -1102,6 +1102,8 @@ func squeue() *cobra.Command {
 		"Request jobs or job steps from a comma separated list of users.")
 	cmd.Flags().StringVarP(&cqueue.FlagFilterAccounts, "account", "A", "",
 		"Specify the accounts of the jobs to view. Accepts a comma separated list of account names.")
+	cmd.Flags().StringVarP(&cqueue.FlagFilterReservations, "reservation", "R", "",
+		"Specify the reservations of the jobs to view. Accepts a comma separated list of reservation names.")
 	cmd.Flags().Uint64VarP(&cqueue.FlagIterate, "iterate", "i", 0,
 		"Repeatedly gather and report the requested information at the interval specified (in seconds). \nBy default, prints a time stamp with the header.")
 	cmd.Flags().StringVarP(&cqueue.FlagFormat, "format", "o", "",
@@ -1133,6 +1135,7 @@ Supported Slurm format identifiers:
 	%u/%User               - Display the user who submitted the job.
 	%U/%Uid                - Display the uid of the job.
 	%V/%SubmitTime         - Display the submission time of the job.
+	%v/%Reservation        - Display the reservation associated with the job.
 
 Supported Crane extension identifiers (long form only):
 	%AllocCpus             - Display the cpus allocated to the job.
@@ -1181,6 +1184,7 @@ var squeueFormatSpecMapping = map[string]string{
 	"u": "u",
 	"U": "U",
 	"V": "s",
+	"v": "v",
 }
 
 // convertSqueueFormat rewrites the Slurm single-letter format specifiers in a
