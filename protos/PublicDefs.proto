@@ -188,6 +188,15 @@ message Signal {
   SignalFlag signal_flag = 3;
 }
 
+// The effective submission option after script and CLI precedence.
+enum RequeuePolicy {
+  REQUEUE_POLICY_UNKNOWN = 0;
+  REQUEUE_DEFAULT = 1;
+  REQUEUE_ON_FAILURE = 2;
+  REQUEUE_ON_FAILURE_FALSE = 3;
+  REQUEUE_DISABLED = 4;
+}
+
 message JobToCtld {
   /* -------- Fields that are set at the submission time. ------- */
   google.protobuf.Duration time_limit = 1;
@@ -259,6 +268,7 @@ message JobToCtld {
   optional uint64 mem_per_node = 51;
   optional GresMap gres_per_node = 52;
   bool no_requeue = 53;
+  RequeuePolicy requeue_policy = 60;
   uint32 node_num_max = 54;
 
   // Array submission spec for this job. Child identity is runtime-only.
@@ -312,6 +322,10 @@ message RuntimeAttrOfJob {
   // Normalized query request, retained for recovery archival.
   GresMap requested_gres = 30;
   bool held_by_admin = 31;
+  optional bool requeue_eligible = 32;
+  // Set with the terminal job record, before starting a new attempt.
+  bool requeue_pending_archive = 33;
+  repeated StepInEmbeddedDb requeue_final_steps = 34;
 }
 
 message StepToCtld {
@@ -707,7 +721,9 @@ message JobInfo {
   optional uint32 ntasks = 44;
   google.protobuf.Timestamp deadline_time = 45;
   int32 requeue_count = 46;
-  bool requeue_if_failed = 47;
+  optional bool requeue_if_failed = 47;
+  optional RequeuePolicy requeue_policy = 65;
+  optional bool requeue_eligible = 60;
 
   ArraySpec array_spec = 50;
   ArrayTaskIdentity array_task = 51;

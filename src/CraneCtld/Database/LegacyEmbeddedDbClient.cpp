@@ -1242,7 +1242,7 @@ bool LegacyEmbeddedDbClient::PurgeEndedSteps(
   if (!BeginDbTransaction_(m_step_var_db_.get(), &txn_id)) return false;
   for (const auto& id : db_ids) {
     res = m_step_var_db_->Delete(txn_id, GetStepVariableDbEntryName_(id));
-    if (!res) {
+    if (!res && res.error() != DbErrorCode::NOT_FOUND) {
       CRANE_ERROR(
           "Failed to delete embedded variable data entry. Error code: {}",
           int(res.error()));
@@ -1254,7 +1254,7 @@ bool LegacyEmbeddedDbClient::PurgeEndedSteps(
   if (!BeginDbTransaction_(m_step_fixed_db_.get(), &txn_id)) return false;
   for (const auto& id : db_ids) {
     res = m_step_fixed_db_->Delete(txn_id, GetStepFixedDbEntryName_(id));
-    if (!res) {
+    if (!res && res.error() != DbErrorCode::NOT_FOUND) {
       CRANE_ERROR("Failed to delete embedded fixed data entry. Error code: {}",
                   int(res.error()));
       return false;

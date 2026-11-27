@@ -188,7 +188,7 @@ class MongodbClient {
       const crane::grpc::QueryJobsInfoRequest* request,
       std::unordered_map<job_id_t, crane::grpc::JobInfo>* job_info_map);
 
-  bool CheckJobDbIdExisted(int64_t job_db_id);
+  bool HasArchivedJob(job_id_t job_id, job_db_id_t db_id, int32_t attempt);
 
   // Fetch job status (state, exit_code, time_end, time_start)
   std::unordered_map<
@@ -199,10 +199,11 @@ class MongodbClient {
       job_id_t array_job_id);
 
   /* ----- Method of operating the step table ----------- */
+  bool ArchiveRequeueAttempt(JobInCtld* job);
   bool InsertRecoveredStep(
+      job_db_id_t job_db_id,
       crane::grpc::StepInEmbeddedDb const& step_in_embedded_db);
   bool InsertSteps(const std::unordered_set<StepInCtld*>& steps);
-  bool CheckStepExisted(job_id_t job_id, step_id_t step_id);
 
   bool QueryJobSizeSummary(
       const crane::grpc::QueryJobSizeSummaryRequest* request,

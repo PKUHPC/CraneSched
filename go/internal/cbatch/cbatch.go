@@ -89,6 +89,7 @@ func BuildCbatchJob(cmd *cobra.Command, args []string, config *util.Config) (*pr
 	job.ShScript = shScript
 
 	// Set default values
+	job.RequeuePolicy = protos.RequeuePolicy_REQUEUE_DEFAULT
 	job.NtasksPerNode = 0
 	job.NodeNumMin = 0
 	job.NodeNumMax = 0
@@ -305,6 +306,7 @@ func BuildCbatchJob(cmd *cobra.Command, args []string, config *util.Config) (*pr
 	if cmd.Flags().Changed("no-requeue") || cmd.Flags().Changed("requeue") {
 		job.NoRequeue = FlagNoRequeue
 		job.RequeueIfFailed = FlagRequeue
+		job.RequeuePolicy = requeuePolicy(FlagRequeue, FlagNoRequeue, cmd.Flags().Changed("requeue"))
 	}
 	if cmd.Flags().Changed("reservation") {
 		job.Reservation = FlagReservation
@@ -353,6 +355,19 @@ func BuildCbatchJob(cmd *cobra.Command, args []string, config *util.Config) (*pr
 	}
 
 	return job, nil
+}
+
+func requeuePolicy(onFailure, disabled, specifiedOnFailure bool) protos.RequeuePolicy {
+	switch {
+	case disabled:
+		return protos.RequeuePolicy_REQUEUE_DISABLED
+	case onFailure:
+		return protos.RequeuePolicy_REQUEUE_ON_FAILURE
+	case specifiedOnFailure:
+		return protos.RequeuePolicy_REQUEUE_ON_FAILURE_FALSE
+	default:
+		return protos.RequeuePolicy_REQUEUE_DEFAULT
+	}
 }
 
 func applyScriptArgs(cmd *cobra.Command, cbatchArgs []CbatchArg, job *protos.JobToCtld, extraFromScript *util.JobExtraAttrs, podOpts *podOptions) error {
@@ -572,6 +587,7 @@ func applyScriptArgs(cmd *cobra.Command, cbatchArgs []CbatchArg, job *protos.Job
 			}
 			job.NoRequeue = false
 			job.RequeueIfFailed = val
+			job.RequeuePolicy = requeuePolicy(val, false, true)
 		case "--no-requeue":
 			val, err := parseScriptBool(arg)
 			if err != nil {
@@ -579,6 +595,7 @@ func applyScriptArgs(cmd *cobra.Command, cbatchArgs []CbatchArg, job *protos.Job
 			}
 			job.NoRequeue = val
 			job.RequeueIfFailed = false
+			job.RequeuePolicy = requeuePolicy(false, val, false)
 		default:
 			return fmt.Errorf("invalid argument: unrecognized '%s' in script", arg.name)
 		}

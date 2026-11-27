@@ -656,6 +656,7 @@ struct StepInCtld {
 
   JobInCtld* job;
   job_id_t job_id;
+  job_db_id_t job_db_id{};
 
   uid_t uid;
   std::vector<gid_t> gids;
@@ -1244,8 +1245,15 @@ struct JobInCtld {
 
   int32_t RequeueCount() const { return requeue_count; }
 
+  std::optional<std::string_view> RequeueRejectionReason() const;
+  bool RequeueEligible() const { return !RequeueRejectionReason().has_value(); }
   bool ShouldRequeue() const;
+  void BeginRequeueArchive() { runtime_attr.set_requeue_pending_archive(true); }
+  void RetainRequeueStep(const crane::grpc::StepInEmbeddedDb& step) {
+    *runtime_attr.add_requeue_final_steps() = step;
+  }
   void ResetForRequeue();
+  void TransferRequeueDependencies(JobInCtld& replacement);
 
   // Array job tracking accessors
   bool ArrayMaterializationComplete() const;

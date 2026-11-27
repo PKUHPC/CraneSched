@@ -1712,7 +1712,12 @@ crane::grpc::JobInfo ProjectJobForQuery(
     result.set_exit_code(source.exit_code());
     result.set_priority(source.priority());
     result.set_requeue_count(source.requeue_count());
-    result.set_requeue_if_failed(source.requeue_if_failed());
+    if (source.has_requeue_if_failed())
+      result.set_requeue_if_failed(source.requeue_if_failed());
+    if (source.has_requeue_policy())
+      result.set_requeue_policy(source.requeue_policy());
+    if (source.has_requeue_eligible())
+      result.set_requeue_eligible(source.requeue_eligible());
     result.set_node_num(source.node_num());
     if (source.has_ntasks()) result.set_ntasks(source.ntasks());
     if (source.has_req_total_res_view())

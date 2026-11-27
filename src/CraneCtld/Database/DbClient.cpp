@@ -498,14 +498,27 @@ bool MongodbClient::CheckDefaultRootAccountUserAndInit_() {
   return true;
 }
 
+// Older step-only documents have no submission ID until the job is archived.
+static bsoncxx::document::value AttemptFilter(job_id_t job_id,
+                                              job_db_id_t db_id,
+                                              int32_t attempt) {
+  using namespace bsoncxx::builder::basic;
+  return make_document(
+      kvp("job_id", static_cast<int32_t>(job_id)),
+      kvp("requeue_count", attempt),
+      kvp("$or",
+          make_array(make_document(kvp("job_db_id", db_id)),
+                     make_document(kvp(
+                         "job_db_id", make_document(kvp("$exists", false)))))));
+}
+
 bool MongodbClient::InsertRecoveredJob(
     const crane::grpc::JobInEmbeddedDb& job_in_embedded_db) {
   document job_doc = JobInEmbeddedDbToDocument_(job_in_embedded_db);
 
-  // Create filter by job_id
-  document filter;
-  filter.append(kvp("job_id", static_cast<int32_t>(
-                                  job_in_embedded_db.runtime_attr().job_id())));
+  const auto& attr = job_in_embedded_db.runtime_attr();
+  auto filter =
+      AttemptFilter(attr.job_id(), attr.job_db_id(), attr.requeue_count());
 
   // Use $set to update job fields, and $setOnInsert for steps array
   document update_doc;
@@ -572,11 +585,8 @@ bool MongodbClient::InsertJob(JobInCtld* job) {
   }
   document job_doc = JobInCtldToDocument_(job);
 
-  // Create filter by (job_id, requeue_count) composite key
-  document filter;
-  filter.append(kvp("job_id", static_cast<int32_t>(job->JobId())));
-  filter.append(
-      kvp("requeue_count", static_cast<int32_t>(job->RequeueCount())));
+  auto filter =
+      AttemptFilter(job->JobId(), job->JobDbId(), job->RequeueCount());
   // Use $set to update job fields, and $setOnInsert for steps array
   document update_doc;
   update_doc.append(kvp("$set", job_doc));
@@ -655,12 +665,8 @@ bool MongodbClient::InsertJobs(const std::unordered_set<JobInCtld*>& jobs) {
     for (const auto& job : jobs) {
       document job_doc = JobInCtldToDocument_(job);
 
-      // Create filter by (job_id, requeue_count) composite key
-      document filter;
-      filter.append(kvp("job_id", static_cast<int32_t>(job->JobId())));
-      filter.append(
-          kvp("requeue_count", static_cast<int32_t>(job->RequeueCount())));
-
+      auto filter =
+          AttemptFilter(job->JobId(), job->JobDbId(), job->RequeueCount());
       // Use $set to update job fields, and $setOnInsert for steps array
       // This ensures job fields are always updated, but steps array is only
       // created if document doesn't exist
@@ -1190,6 +1196,13 @@ bool MongodbClient::FetchJobRecords(
           mutable_licenses->emplace(std::string(elem.key()),
                                     static_cast<uint32_t>(license_count));
         }
+        if (auto field = view["requeue_if_failed"])
+          job_info.set_requeue_if_failed(field.get_bool().value);
+        if (auto field = view["requeue_policy"])
+          job_info.set_requeue_policy(
+              static_cast<crane::grpc::RequeuePolicy>(field.get_int32().value));
+        if (auto field = view["requeue_eligible"])
+          job_info.set_requeue_eligible(field.get_bool().value);
         job_info.set_requeue_count(
             ViewGetArithmeticValue_<int32_t>(view["requeue_count"]));
 
@@ -1445,9 +1458,12 @@ bool MongodbClient::FetchJobStepRecords(
   return true;
 }
 
-bool MongodbClient::CheckJobDbIdExisted(int64_t job_db_id) {
+bool MongodbClient::HasArchivedJob(job_id_t job_id, job_db_id_t db_id,
+                                   int32_t attempt) {
   document doc;
-  doc.append(kvp("job_db_id", job_db_id));
+  doc.append(kvp("job_id", static_cast<int32_t>(job_id)),
+             kvp("job_db_id", db_id), kvp("requeue_count", attempt),
+             kvp("has_job_info", true));
 
   try {
     bsoncxx::stdx::optional<bsoncxx::document::value> result =
@@ -1484,7 +1500,11 @@ MongodbClient::FetchJobStatus(const std::unordered_set<job_id_t>& job_ids) {
       job_id_doc.append(kvp("$in", job_id_array));
     }));
 
+    filter.append(kvp("has_job_info", true));
     mongocxx::options::find options;
+    using bsoncxx::builder::basic::make_document;
+    // emplace below keeps the newest completed attempt for each submission.
+    options.sort(make_document(kvp("job_db_id", -1), kvp("requeue_count", -1)));
     document projection;
     projection.append(kvp("job_id", 1));
     projection.append(kvp("state", 1));
@@ -1567,37 +1587,65 @@ MongodbClient::FetchArrayTaskAggregateInfo(job_id_t array_job_id) {
   return result;
 }
 
-bool MongodbClient::InsertRecoveredStep(
-    crane::grpc::StepInEmbeddedDb const& step_in_embedded_db) {
-  document step_doc = StepInEmbeddedDbToDocument_(step_in_embedded_db);
-  job_id_t job_id = step_in_embedded_db.step_to_ctld().job_id();
-
-  // Filter by job_id
-  document filter;
-  filter.append(kvp("job_id", static_cast<int32_t>(job_id)));
-
-  // Use $push to append step, and $setOnInsert to create minimal document if
-  // needed
-  document update_doc;
-  update_doc.append(kvp("$push", [&step_doc](sub_document push_doc) {
-    push_doc.append(kvp("steps", step_doc));
-  }));
-  update_doc.append(kvp("$setOnInsert", [&job_id](sub_document set_on_insert) {
-    set_on_insert.append(kvp("job_id", static_cast<int32_t>(job_id)));
-  }));
-
+bool MongodbClient::ArchiveRequeueAttempt(JobInCtld* job) {
+  using namespace bsoncxx::builder::basic;
+  auto attempt =
+      AttemptFilter(job->JobId(), job->JobDbId(), job->RequeueCount());
   try {
-    bsoncxx::stdx::optional<mongocxx::result::update> ret =
-        (*GetClient_())[m_db_name_][m_job_collection_name_].update_one(
-            *GetSession_(), filter.view(), update_doc.view(),
-            mongocxx::options::update{}.upsert(true));
-
-    if (ret != bsoncxx::stdx::nullopt) return true;
+    auto collection = (*GetClient_())[m_db_name_][m_job_collection_name_];
+    // The presence of has_job_info distinguishes a previously archived job
+    // from a document created by an earlier step. Do not repeat accounting.
+    auto complete = make_document(bsoncxx::builder::concatenate(attempt.view()),
+                                  kvp("has_job_info", true));
+    if (!collection.find_one(*GetSession_(), complete.view()) &&
+        !InsertJob(job))
+      return false;
+    for (const auto& step : job->RuntimeAttr().requeue_final_steps())
+      if (!InsertRecoveredStep(job->JobDbId(), step)) return false;
+    return true;
   } catch (const std::exception& e) {
-    CRANE_LOGGER_ERROR(m_logger_, e.what());
+    CRANE_ERROR("Failed to archive requeue attempt {} for job #{}: {}",
+                job->RequeueCount(), job->JobId(), e.what());
+    return false;
   }
-  CRANE_LOGGER_ERROR(m_logger_, "Failed to insert in-memory StepInCtld.");
-  return false;
+}
+
+bool MongodbClient::InsertRecoveredStep(
+    job_db_id_t job_db_id, const crane::grpc::StepInEmbeddedDb& step) {
+  using namespace bsoncxx::builder::basic;
+  const int32_t job_id = step.step_to_ctld().job_id();
+  const auto attempt = step.runtime_attr().requeue_count();
+  auto key = AttemptFilter(job_id, job_db_id, attempt);
+  try {
+    auto collection = (*GetClient_())[m_db_name_][m_job_collection_name_];
+    // A running job may have no history document yet. Ensure the parent
+    // exists before conditionally appending the step without an upsert.
+    auto init = make_document(
+        kvp("$setOnInsert",
+            make_document(kvp("job_id", job_id), kvp("job_db_id", job_db_id),
+                          kvp("requeue_count", attempt))));
+    if (!collection.update_one(*GetSession_(), key.view(), init.view(),
+                               mongocxx::options::update{}.upsert(true)))
+      return false;
+    auto filter = make_document(
+        bsoncxx::builder::concatenate(key.view()),
+        kvp("steps.step_id",
+            make_document(kvp(
+                "$ne", static_cast<int32_t>(step.runtime_attr().step_id())))));
+    auto doc = StepInEmbeddedDbToDocument_(step);
+    auto update = make_document(kvp(
+        "$push",
+        make_document(kvp(
+            "steps",
+            make_document(kvp("$each", make_array(doc.view())),
+                          kvp("$sort", make_document(kvp("step_id", 1))))))));
+    return static_cast<bool>(
+        collection.update_one(*GetSession_(), filter.view(), update.view()));
+  } catch (const std::exception& e) {
+    CRANE_ERROR("Failed to restore step #{}.{} (attempt {}): {}", job_id,
+                step.runtime_attr().step_id(), attempt, e.what());
+    return false;
+  }
 }
 
 bool MongodbClient::InsertSteps(const std::unordered_set<StepInCtld*>& steps) {
@@ -1628,9 +1676,8 @@ bool MongodbClient::InsertSteps(const std::unordered_set<StepInCtld*>& steps) {
       }
 
       // Filter by (job_id, requeue_count) composite key
-      document filter;
-      filter.append(kvp("job_id", static_cast<int32_t>(job_id)));
-      filter.append(kvp("requeue_count", static_cast<int32_t>(requeue_count)));
+      auto filter =
+          AttemptFilter(job_id, job_steps.front()->job_db_id, requeue_count);
 
       // Combine $push and $setOnInsert
       // $push: append steps to existing document, sorted by step_id
@@ -1644,8 +1691,8 @@ bool MongodbClient::InsertSteps(const std::unordered_set<StepInCtld*>& steps) {
           }));
         }));
       }));
-      update_doc.append(kvp("$setOnInsert", [&job_id, &requeue_count](
-                                                sub_document set_on_insert) {
+      update_doc.append(kvp("$setOnInsert", [&](sub_document set_on_insert) {
+        set_on_insert.append(kvp("job_db_id", job_steps.front()->job_db_id));
         set_on_insert.append(kvp("job_id", static_cast<int32_t>(job_id)));
         set_on_insert.append(
             kvp("requeue_count", static_cast<int32_t>(requeue_count)));
@@ -1666,27 +1713,6 @@ bool MongodbClient::InsertSteps(const std::unordered_set<StepInCtld*>& steps) {
   }
 
   CRANE_LOGGER_ERROR(m_logger_, "Failed to insert in-memory StepInCtld.");
-  return false;
-}
-
-bool MongodbClient::CheckStepExisted(job_id_t job_id, step_id_t step_id) {
-  // Query for a job with the given job_id that contains a step with the given
-  // step_id
-  document filter;
-  filter.append(kvp("job_id", static_cast<int32_t>(job_id)));
-  filter.append(kvp("steps.step_id", static_cast<int32_t>(step_id)));
-
-  try {
-    bsoncxx::stdx::optional<bsoncxx::document::value> result =
-        (*GetClient_())[m_db_name_][m_job_collection_name_].find_one(
-            filter.view());
-    if (result) {
-      return true;
-    }
-  } catch (const std::exception& e) {
-    CRANE_LOGGER_ERROR(m_logger_, e.what());
-  }
-
   return false;
 }
 
@@ -5253,6 +5279,23 @@ PodMetaInJob MongodbClient::BsonToPodMeta(const bsoncxx::document::view& doc) {
   return result;
 }
 
+static void AppendRequeuePolicy(bsoncxx::builder::basic::document& doc,
+                                const crane::grpc::JobToCtld& request,
+                                const crane::grpc::RuntimeAttrOfJob& runtime) {
+  doc.append(kvp("requeue_if_failed", request.requeue_if_failed()));
+  auto policy = request.requeue_policy();
+  if (policy == crane::grpc::REQUEUE_POLICY_UNKNOWN) {
+    if (request.no_requeue())
+      policy = crane::grpc::REQUEUE_DISABLED;
+    else if (request.requeue_if_failed())
+      policy = crane::grpc::REQUEUE_ON_FAILURE;
+  }
+  if (policy != crane::grpc::REQUEUE_POLICY_UNKNOWN)
+    doc.append(kvp("requeue_policy", static_cast<int32_t>(policy)));
+  if (runtime.has_requeue_eligible())
+    doc.append(kvp("requeue_eligible", runtime.requeue_eligible()));
+}
+
 MongodbClient::document MongodbClient::JobInEmbeddedDbToDocument_(
     const crane::grpc::JobInEmbeddedDb& job_in_db) {
   auto const& job_to_ctld = job_in_db.job_to_ctld();
@@ -5459,6 +5502,7 @@ MongodbClient::document MongodbClient::JobInEmbeddedDbToDocument_(
           : 0,
       runtime_attr.has_requested_gres() ? &runtime_attr.requested_gres()
                                         : nullptr);
+  AppendRequeuePolicy(doc, job_to_ctld, runtime_attr);
   AppendRequestFields_(doc, job_to_ctld.ntasks(), gres ? &*gres : nullptr,
                        FromGrpcGresMap(job_to_ctld.gres_per_node()));
   return doc;
@@ -5648,6 +5692,7 @@ MongodbClient::document MongodbClient::JobInCtldToDocument_(JobInCtld* job) {
       request.node_num_min() == request.node_num_max() ? request.node_num_min()
                                                        : 0,
       runtime.has_requested_gres() ? &runtime.requested_gres() : nullptr);
+  AppendRequeuePolicy(doc, request, runtime);
   AppendRequestFields_(doc, job->ntasks, gres ? &*gres : nullptr,
                        FromGrpcGresMap(request.gres_per_node()));
   return doc;

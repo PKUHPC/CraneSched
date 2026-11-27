@@ -333,6 +333,7 @@ void StepInCtld::RecoverFromDb(
   const auto& runtime_attr = step_in_db.runtime_attr();
 
   this->job = const_cast<JobInCtld*>(&job);
+  job_db_id = job.JobDbId();
 
   type = step_to_ctld.type();
   job_id = step_to_ctld.job_id();
@@ -482,6 +483,7 @@ void StepInCtld::SetFieldsOfStepInfo(
 void DaemonStepInCtld::InitFromJob(const JobInCtld& job) {
   /* Fields in StepInCtld */
   this->job = const_cast<JobInCtld*>(&job);
+  job_db_id = job.JobDbId();
   type = job.type;
 
   job_id = job.JobId();
@@ -1004,6 +1006,7 @@ void CommonStepInCtld::InitPrimaryStepFromJob(JobInCtld& job) {
 
   /* Fields in StepInCtld */
   this->job = const_cast<JobInCtld*>(&job);
+  job_db_id = job.JobDbId();
   type = job.type;
   job_id = job.JobId();
   name = job.name;
@@ -1850,6 +1853,8 @@ void JobInCtld::SetPrimaryStepStatus(crane::grpc::JobStatus val) {
 void JobInCtld::SetStatus(crane::grpc::JobStatus val) {
   status = val;
   runtime_attr.set_status(val);
+  if (IsFinishedStepStatus(val))
+    runtime_attr.set_requeue_eligible(RequeueEligible());
 }
 
 void JobInCtld::SetPrimaryStepExitCode(uint32_t val) {
@@ -1933,24 +1938,35 @@ std::string_view JobInCtld::HoldReason() const {
   return runtime_attr.held_by_admin() ? "JobHeldAdmin" : "JobHeldUser";
 }
 
-bool JobInCtld::ShouldRequeue() const {
-  if (type != crane::grpc::Batch) return false;
-  if (job_to_ctld.no_requeue()) return false;
+std::optional<std::string_view> JobInCtld::RequeueRejectionReason() const {
+  if (!IsBatch()) {
+    if (IsInteractive()) return "Interactive jobs cannot be requeued";
+    return "Only batch jobs can be requeued";
+  }
+  if (job_to_ctld.no_requeue()) return "Job requested no requeue";
+  if (!g_config.CtldConf.JobRequeue && !requeue_if_failed)
+    return "Job requeue is disabled by configuration";
+  return std::nullopt;
+}
 
-  bool requeue_allowed = g_config.CtldConf.JobRequeue || requeue_if_failed;
-  if (requeue_requested) return requeue_allowed;
+bool JobInCtld::ShouldRequeue() const {
+  if (!RequeueEligible()) return false;
+  if (requeue_requested) return true;
 
   // System-level failures trigger requeue if the cluster default allows
   // requeue or the job explicitly requested it.
   if (exit_code == ExitCode::EC_CRANED_DOWN ||
       exit_code == ExitCode::EC_RPC_ERR)
-    return requeue_allowed;
+    return true;
 
   return requeue_if_failed && status != crane::grpc::Completed &&
          status != crane::grpc::Cancelled;
 }
 
 void JobInCtld::ResetForRequeue() {
+  runtime_attr.clear_requeue_pending_archive();
+  runtime_attr.clear_requeue_final_steps();
+  runtime_attr.clear_requeue_eligible();
   requeue_count++;
   runtime_attr.set_requeue_count(requeue_count);
 
@@ -1984,6 +2000,13 @@ void JobInCtld::ResetForRequeue() {
   SetEndTimeByUnixSecond(0);
   runtime_attr.mutable_suspend_time()->Clear();
   suspend_time = absl::InfinitePast();
+}
+
+void JobInCtld::TransferRequeueDependencies(JobInCtld& replacement) {
+  // The previous attempt already started. Its submission dependencies were
+  // satisfied, but jobs waiting for its terminal outcome still need events.
+  replacement.dependencies = {};
+  std::swap(dependents, replacement.dependents);
 }
 
 bool JobInCtld::ArrayMaterializationComplete() const {
@@ -2117,6 +2140,12 @@ void JobInCtld::TriggerTerminalDependencyEvents(absl::Time end_time) {
 
 void JobInCtld::SetFieldsByJobToCtld(crane::grpc::JobToCtld const& val) {
   job_to_ctld = val;
+  if (val.requeue_policy() == crane::grpc::REQUEUE_POLICY_UNKNOWN) {
+    if (val.no_requeue())
+      job_to_ctld.set_requeue_policy(crane::grpc::REQUEUE_DISABLED);
+    else if (val.requeue_if_failed())
+      job_to_ctld.set_requeue_policy(crane::grpc::REQUEUE_ON_FAILURE);
+  }
 
   partition_id = (val.partition_name().empty()) ? g_config.DefaultPartition
                                                 : val.partition_name();
@@ -2239,7 +2268,7 @@ void JobInCtld::SetFieldsByRuntimeAttrOfJob(
     if (ShouldLaunchOnAllNodes()) {
       for (auto const& craned_id : craned_ids)
         executing_craned_ids.emplace_back(craned_id);
-    } else {
+    } else if (!craned_ids.empty()) {
       executing_craned_ids.emplace_back(craned_ids.front());
     }
 
@@ -2380,6 +2409,15 @@ void JobInCtld::SetFieldsOfJobInfo(crane::grpc::JobInfo* job_info) const {
   job_info->set_ntasks(ntasks);
   job_info->set_requeue_count(requeue_count);
   job_info->set_requeue_if_failed(requeue_if_failed);
+  if (job_to_ctld.requeue_policy() != crane::grpc::REQUEUE_POLICY_UNKNOWN)
+    job_info->set_requeue_policy(job_to_ctld.requeue_policy());
+  if (!IsFinishedStepStatus(status)) {
+    job_info->set_requeue_eligible(RequeueEligible());
+  } else if (runtime_attr.has_requeue_eligible()) {
+    job_info->set_requeue_eligible(runtime_attr.requeue_eligible());
+  } else {
+    job_info->clear_requeue_eligible();
+  }
 }
 
 uint32_t JobInCtld::SchedulePendingSteps(

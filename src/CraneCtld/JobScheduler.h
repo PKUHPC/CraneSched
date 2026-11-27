@@ -1466,7 +1466,14 @@ class JobScheduler {
   static FinalTransferResult PersistAndTransferJobsToMongodb_(
       std::unordered_set<JobInCtld*> const& jobs);
 
+  bool FinishRequeue_(std::unique_ptr<JobInCtld>& job);
+  std::unordered_set<job_id_t> m_recovered_requeues_;
   void PersistAndRequeueJobs_(std::vector<std::unique_ptr<JobInCtld>>& jobs);
+  // Owned by the status-change loop after startup recovery.
+  std::vector<std::unique_ptr<JobInCtld>> m_requeue_retries_;
+  absl::Time m_next_requeue_retry_;
+  std::unordered_map<job_id_t, std::vector<crane::grpc::StepInEmbeddedDb>>
+      m_unarchived_steps_;
 
   CraneErrCode TerminateRunningStepNoLock_(
       CommonStepInCtld* step, crane::grpc::TerminateSource terminate_source =
