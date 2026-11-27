@@ -365,10 +365,7 @@ CraneRichError CranedMetaContainer::CheckReservationEndTime(
     absl::Time new_end) {
   if (!reservation.empty()) {
     auto meta = GetResvMetaPtr(reservation);
-    if (!meta)
-      return FormatRichErr(CraneErrCode::ERR_INVALID_PARAM,
-                           "Reservation '{}' does not exist", reservation);
-    if (!meta->flex && new_end > meta->end_time)
+    if (meta && !meta->flex && new_end > meta->end_time)
       return FormatRichErr(
           CraneErrCode::ERR_INVALID_PARAM,
           "New end time {} exceeds end time {} of non-FLEX reservation '{}'",
@@ -401,7 +398,8 @@ void CranedMetaContainer::FreeResourceFromResv(ResvId resv_id,
                                                job_id_t job_id) {
   auto resv_meta = resv_meta_map_.GetValueExclusivePtr(resv_id);
   if (!resv_meta) {
-    CRANE_ERROR("Try to free resource from an unknown reservation {}", resv_id);
+    CRANE_DEBUG("Reservation {} already removed when freeing job {}", resv_id,
+                job_id);
     return;
   }
 

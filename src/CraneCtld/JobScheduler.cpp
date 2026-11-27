@@ -343,13 +343,6 @@ bool JobScheduler::Init() {
 
       CRANE_TRACE("Restore job #{} from embedded running queue.", job->JobId());
       bool recovery_failed = false;
-      if (!job->reservation.empty() &&
-          !g_meta_container->GetResvMetaPtr(job->reservation)) {
-        CRANE_ERROR("Cannot restore running job #{}: reservation {} is missing",
-                    job_id, job->reservation);
-        job->SetExitCode(ExitCode::EC_EXEC_ERR);
-        recovery_failed = true;
-      }
       for (const auto& node : job->CranedIds()) {
         if (g_config.Nodes.contains(node)) continue;
         CRANE_ERROR(
@@ -1310,16 +1303,19 @@ void JobScheduler::PutRecoveredJobIntoRunningQueueLock_(
     g_meta_container->MallocResourceFromNode(craned_id, job->JobId(),
                                              job->AllocatedRes());
   if (!job->reservation.empty()) {
-    ResourceV3 resv_allocated_res;
+    std::optional<ResourceV3> resv_allocated_res;
     {
       auto reservation = g_meta_container->GetResvMetaPtr(job->reservation);
-      CRANE_ASSERT(reservation);
-      for (const auto& [node, res] : job->AllocatedRes().EachNodeResMap())
-        if (reservation->craned_ids.contains(node))
-          resv_allocated_res.AddResourceInNode(node, res);
+      if (reservation) {
+        resv_allocated_res.emplace();
+        for (const auto& [node, res] : job->AllocatedRes().EachNodeResMap())
+          if (reservation->craned_ids.contains(node))
+            resv_allocated_res->AddResourceInNode(node, res);
+      }
     }
-    g_meta_container->MallocResourceFromResv(job->reservation, job->JobId(),
-                                             resv_allocated_res);
+    if (resv_allocated_res)
+      g_meta_container->MallocResourceFromResv(job->reservation, job->JobId(),
+                                               *resv_allocated_res);
   }
   if (!job->licenses_count.empty())
     g_license_manager->MallocLicenseWhenRecoverRunning(job->licenses_count);
@@ -5226,7 +5222,7 @@ CraneExpectedRich<void> JobScheduler::DeleteResvMeta_(
                         resv_id, *expected_creation_order));
     }
 
-    if (!resv_meta->rn_job_res_map.empty()) {
+    if (!resv_meta->flex && !resv_meta->rn_job_res_map.empty()) {
       g_meta_container->UnlockResReduceEvents();
       return std::unexpected(FormatRichErr(
           CraneErrCode::ERR_EXISTING_JOB,

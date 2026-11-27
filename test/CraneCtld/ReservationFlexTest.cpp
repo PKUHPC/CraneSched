@@ -319,7 +319,7 @@ TEST_F(ReservationFlexTest,
       g_meta_container->CheckReservationEndTime("", outside, At(110), At(141))
           .code(),
       CraneErrCode::SUCCESS);
-  EXPECT_NE(g_meta_container
+  EXPECT_EQ(g_meta_container
                 ->CheckReservationEndTime("missing", outside, At(110), At(120))
                 .code(),
             CraneErrCode::SUCCESS);
