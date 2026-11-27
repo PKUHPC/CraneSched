@@ -1432,6 +1432,8 @@ class JobScheduler {
  private:
   void RequeueRecoveredJobIntoPendingQueueLock_(std::unique_ptr<JobInCtld> job);
 
+  friend class ArrayRequeueCancellationTest;
+
   void PutRecoveredJobIntoRunningQueueLock_(std::unique_ptr<JobInCtld> job);
   void HandleFailToRecoverRngJob_(job_id_t job_id);
 
@@ -1466,7 +1468,18 @@ class JobScheduler {
   static FinalTransferResult PersistAndTransferJobsToMongodb_(
       std::unordered_set<JobInCtld*> const& jobs);
 
-  void PersistAndRequeueJobs_(std::vector<std::unique_ptr<JobInCtld>>& jobs);
+  // Called after archiving the terminal attempts, outside scheduler map locks.
+  std::vector<ArrayManager::FinalizedArrayParent> ResetAndRequeueJobs_(
+      std::vector<std::unique_ptr<JobInCtld>>& jobs);
+  static uint32_t QosSubmitReserveCount_(const JobInCtld& job);
+  // Record the parent result and queue cancellation. For explicit parent
+  // cancellation, also queue Pending children and return all tracked child IDs
+  // so the caller can deduplicate selectors for Pending and running children.
+  std::vector<job_id_t> CancelArrayParentNoLock_(job_id_t parent_job_id,
+                                                 crane::grpc::JobStatus status,
+                                                 uint32_t exit_code,
+                                                 bool terminate_children)
+      ABSL_EXCLUSIVE_LOCKS_REQUIRED(m_pending_job_map_mtx_);
 
   CraneErrCode TerminateRunningStepNoLock_(
       CommonStepInCtld* step, crane::grpc::TerminateSource terminate_source =
@@ -1625,8 +1638,6 @@ class JobScheduler {
 
   struct CancelArrayParentQueueElem {
     job_id_t parent_job_id;
-    uint32_t exit_code;
-    crane::grpc::JobStatus finish_status;
     bool terminate_running_children;
   };
 

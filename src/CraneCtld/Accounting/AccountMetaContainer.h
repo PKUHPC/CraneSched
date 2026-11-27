@@ -172,6 +172,8 @@ class AccountMetaContainer final {
   bool UserHasJob(const std::string& username);
 
  private:
+  friend class ArrayRequeueCancellationTest;
+
   const static int kNumStripes = 128;
   using AccountRawMap =
       std::unordered_map<std::string, std::unique_ptr<Account>>;

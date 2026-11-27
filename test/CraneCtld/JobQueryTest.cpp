@@ -13,7 +13,6 @@
 
 #include "Array.h"
 #include "Database/EmbeddedDbClient.h"
-#include "JobScheduler.h"
 // Test the production helpers without exporting them or replacing dependencies.
 #include "RpcService/CtldGrpcServer.cpp"
 #include "google/protobuf/util/message_differencer.h"
@@ -162,11 +161,15 @@ class ArrayChildQueryTest : public ::testing::Test {
   std::filesystem::path db_dir_;
 };
 
-TEST_F(ArrayChildQueryTest, ReleasedParentDoesNotPassSubmissionHoldToChildren) {
+TEST_F(ArrayChildQueryTest,
+       MaterializedChildDoesNotInheritParentSchedulingGates) {
   crane::grpc::JobToCtld submission;
   submission.set_type(crane::grpc::Batch);
   submission.set_uid(::getuid());
   submission.set_hold(true);
+  auto* dependency = submission.mutable_dependencies()->add_deps();
+  dependency->set_job_id(41);
+  dependency->set_type(crane::grpc::AFTER_OK);
   submission.mutable_time_limit()->set_seconds(300);
   submission.mutable_array_spec()->set_start(1);
   submission.mutable_array_spec()->set_end(2);
@@ -191,19 +194,30 @@ TEST_F(ArrayChildQueryTest, ReleasedParentDoesNotPassSubmissionHoldToChildren) {
     child->SetFieldsOfJobInfo(&info);
     EXPECT_FALSE(info.held());
     EXPECT_FALSE(child->RuntimeAttr().held());
+    EXPECT_FALSE(child->JobToCtld().hold());
+    EXPECT_FALSE(child->JobToCtld().has_array_spec());
     EXPECT_TRUE(parent.JobToCtld().hold());
+    EXPECT_TRUE(child->Dependencies().deps.empty());
+    EXPECT_TRUE(child->JobToCtld().dependencies().deps().empty());
 
     crane::grpc::JobInEmbeddedDb stored;
     ASSERT_TRUE(
         g_embedded_db_client->FetchJobDataInDb(0, child->JobDbId(), &stored));
     EXPECT_FALSE(stored.runtime_attr().held());
+    EXPECT_FALSE(stored.job_to_ctld().hold());
+    EXPECT_FALSE(stored.job_to_ctld().has_array_spec());
     Ctld::JobInCtld recovered;
     recovered.SetFieldsByJobToCtld(stored.job_to_ctld());
     recovered.SetFieldsByRuntimeAttrOfJob(stored.runtime_attr());
     recovered.SetFieldsOfJobInfo(&info);
     EXPECT_FALSE(info.held());
+    EXPECT_TRUE(recovered.IsArrayChild());
+    EXPECT_TRUE(recovered.Dependencies().deps.empty());
+    child->ResetForRequeue();
+    EXPECT_TRUE(child->Dependencies().deps.empty());
   }
 }
+
 #endif
 
 void AddUnknown(google::protobuf::Message* message) {
