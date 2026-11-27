@@ -656,6 +656,8 @@ void ParseConfig(int argc, char** argv) {
         g_config.CranedLogFile =
             g_config.CraneBaseDir /
             YamlValueOr(config["CranedLogFile"], kDefaultCranedLogPath);
+      g_config.CranedLogFile =
+          std::filesystem::absolute(g_config.CranedLogFile);
 
       if (parsed_args.count("debug-level"))
         g_config.CranedDebugLevel =
@@ -678,7 +680,9 @@ void ParseConfig(int argc, char** argv) {
       if (log_level.has_value()) {
         InitLogger(log_level.value(), g_config.CranedLogFile, true,
                    g_config.CranedConf.MaxLogFileSize,
-                   g_config.CranedConf.MaxLogFileNum);
+                   g_config.CranedConf.MaxLogFileNum, kDefaultAsyncLogQueueSize,
+                   kDefaultAsyncLogThreadCount, kDefaultAsyncLogBlockWhenFull,
+                   LogFilePolicy::PRIVATE_ON_CREATE);
         Craned::g_runtime_status.conn_logger =
             AddLogger("conn", log_level.value(), true);
       } else {

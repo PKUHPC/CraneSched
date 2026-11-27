@@ -10,6 +10,10 @@
 
 ## 准备
 
+Craned 新建日志文件时使用 `0600` 权限，包括轮转后创建的新文件。重新打开已有日志时保留
+其属主、属组和权限，包括管理员为日志采集程序授予的访问权限。已有 `0644` 日志不会自动
+收紧权限，管理员可按需调整。Supervisor 的日志权限策略保持不变。
+
 升级前，把目标版本源码中的 `scripts/upgrade_data.py` 单独复制到 v1.1.3
 控制节点，例如保存为 `/root/crane-upgrade/upgrade_data.py`。该脚本不随
 CraneSched RPM/DEB 安装。控制节点需要安装 `python3-pyyaml`（RHEL 系）或

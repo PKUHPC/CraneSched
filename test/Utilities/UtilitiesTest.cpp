@@ -165,18 +165,19 @@ class FilePermissionsTest : public ::testing::Test {
     if (!root_.empty()) std::filesystem::remove_all(root_);
   }
 
-  void Init() {
+  void Init(LogFilePolicy policy = LogFilePolicy::PRIVATE_DIRECTORY) {
     InitLogger(spdlog::level::info, log_, false, 64, 2,
                kDefaultAsyncLogQueueSize, kDefaultAsyncLogThreadCount,
-               kDefaultAsyncLogBlockWhenFull, true);
+               kDefaultAsyncLogBlockWhenFull, policy);
   }
 
-  void Check(const std::filesystem::path& path, mode_t permissions) {
+  void Check(const std::filesystem::path& path, mode_t permissions,
+             uid_t owner = geteuid(), gid_t group = getegid()) {
     struct stat st{};
     ASSERT_EQ(stat(path.c_str(), &st), 0) << path;
     EXPECT_EQ(st.st_mode & 07777, permissions) << path;
-    EXPECT_EQ(st.st_uid, geteuid()) << path;
-    EXPECT_EQ(st.st_gid, getegid()) << path;
+    EXPECT_EQ(st.st_uid, owner) << path;
+    EXPECT_EQ(st.st_gid, group) << path;
   }
 
   std::filesystem::path root_, directory_, log_;
@@ -186,10 +187,23 @@ class FilePermissionsTest : public ::testing::Test {
   std::shared_ptr<spdlog::logger> old_logger_;
 };
 
-TEST_F(FilePermissionsTest,
-       CreationAndRotationStayPrivateWithoutChangingUmask) {
+class PrivateLogFileTest : public FilePermissionsTest,
+                           public ::testing::WithParamInterface<LogFilePolicy> {
+ protected:
+  void Init() { FilePermissionsTest::Init(GetParam()); }
+
+  mode_t DirectoryMode() const {
+    return GetParam() == LogFilePolicy::PRIVATE_DIRECTORY ? 0700 : 0755;
+  }
+};
+
+INSTANTIATE_TEST_SUITE_P(Policies, PrivateLogFileTest,
+                         ::testing::Values(LogFilePolicy::PRIVATE_ON_CREATE,
+                                           LogFilePolicy::PRIVATE_DIRECTORY));
+
+TEST_P(PrivateLogFileTest, CreationAndRotationStayPrivateWithoutChangingUmask) {
   Init();
-  Check(directory_, 0700);
+  Check(directory_, DirectoryMode());
   Check(log_, 0600);
   // Exercise the production sink synchronously so rotation has completed
   // before inspecting files, without sleeps or asynchronous flush assumptions.
@@ -206,26 +220,75 @@ TEST_F(FilePermissionsTest,
   Check(output, 0666);
 }
 
-TEST_F(FilePermissionsTest, RepairsExistingDirectoryAndRetainedLogs) {
+TEST_P(PrivateLogFileTest, ExistingLogsFollowPolicyOnReopenAndRotation) {
   ASSERT_TRUE(std::filesystem::create_directory(directory_));
   auto rotated = directory_ / "1.0.1.log";
   std::ofstream(log_) << "old log";
   std::ofstream(rotated) << "old rotated log";
-  ASSERT_EQ(chmod(directory_.c_str(), 0777), 0);
+  ASSERT_EQ(chmod(log_.c_str(), 0640), 0);
+  ASSERT_EQ(chmod(rotated.c_str(), 0644), 0);
+  ASSERT_EQ(chmod(directory_.c_str(), 0755), 0);
+  uid_t owner = geteuid();
+  gid_t group = getegid();
   if (geteuid() == 0) {
-    ASSERT_EQ(chown(directory_.c_str(), 65534, 65534), 0);
-    ASSERT_EQ(chown(log_.c_str(), 65534, 65534), 0);
-    ASSERT_EQ(chown(rotated.c_str(), 65534, 65534), 0);
+    owner = group = 65534;
+    ASSERT_EQ(chown(log_.c_str(), owner, group), 0);
+    ASSERT_EQ(chown(rotated.c_str(), owner, group), 0);
   }
-  Init();
-  Check(directory_, 0700);
+  const bool repair = GetParam() == LogFilePolicy::PRIVATE_DIRECTORY;
+  if (repair) {
+    owner = geteuid();
+    group = getegid();
+  }
+  for (int i = 0; i < 2; ++i) {
+    Init();
+    Check(directory_, DirectoryMode());
+    Check(log_, repair ? 0600 : 0640, owner, group);
+    Check(rotated, repair ? 0600 : 0644, owner, group);
+    std::ifstream input(log_);
+    EXPECT_EQ(std::string(std::istreambuf_iterator<char>(input), {}),
+              "old log");
+  }
+  spdlog::logger logger("rotation-test",
+                        spdlog::default_logger()->sinks().front());
+  logger.info("{}", std::string(80, 'x'));
+  logger.flush();
   Check(log_, 0600);
-  Check(rotated, 0600);
-  std::ifstream input(log_);
-  EXPECT_EQ(std::string(std::istreambuf_iterator<char>(input), {}), "old log");
+  Check(rotated, repair ? 0600 : 0640, owner, group);
+  Check(directory_ / "1.0.2.log", repair ? 0600 : 0644, owner, group);
 }
 
-TEST_F(FilePermissionsTest, OrdinaryUserCannotReadLogEvenInServiceGroup) {
+TEST_F(FilePermissionsTest, NonRootCreationAndRotationWithOwnerWriteMasked) {
+  ASSERT_TRUE(std::filesystem::create_directory(directory_));
+  if (geteuid() == 0) ASSERT_EQ(chown(directory_.c_str(), 65534, 65534), 0);
+
+  EXPECT_EXIT(
+      {
+        if (geteuid() == 0 && (setgroups(0, nullptr) != 0 ||
+                               setgid(65534) != 0 || setuid(65534) != 0))
+          _exit(2);
+        umask(0200);
+        Init(LogFilePolicy::PRIVATE_ON_CREATE);
+        Check(log_, 0600);
+        spdlog::logger logger("rotation-test",
+                              spdlog::default_logger()->sinks().front());
+        for (int i = 0; i < 2; ++i)
+          logger.info("{} {}", i, std::string(80, 'x'));
+        logger.flush();
+        Check(log_, 0600);
+        Check(directory_ / "1.0.1.log", 0600);
+        std::ifstream input(log_);
+        const std::string contents(std::istreambuf_iterator<char>(input), {});
+        EXPECT_NE(contents.find("1 " + std::string(80, 'x')),
+                  std::string::npos);
+        EXPECT_EQ(umask(0200), 0200);
+        spdlog::shutdown();
+        _exit(::testing::Test::HasFailure() ? 1 : 0);
+      },
+      ::testing::ExitedWithCode(0), "");
+}
+
+TEST_P(PrivateLogFileTest, OrdinaryUserCannotReadLogEvenInServiceGroup) {
   if (geteuid() != 0) GTEST_SKIP() << "Requires root to test another UID";
   Init();
   const pid_t pid = fork();
@@ -241,13 +304,60 @@ TEST_F(FilePermissionsTest, OrdinaryUserCannotReadLogEvenInServiceGroup) {
   EXPECT_EQ(WEXITSTATUS(status), 0);
 }
 
-TEST_F(FilePermissionsTest, RejectsLinkedLogWithoutChangingTarget) {
+TEST_P(PrivateLogFileTest, RejectsLinkedLogWithoutChangingTarget) {
   ASSERT_TRUE(std::filesystem::create_directory(directory_));
   auto other = root_ / "other";
   std::ofstream(other) << "unchanged";
-  std::filesystem::create_symlink(other, log_);
-  EXPECT_THROW(Init(), spdlog::spdlog_ex);
+  std::vector<std::filesystem::path> paths{log_};
+  if (GetParam() == LogFilePolicy::PRIVATE_DIRECTORY)
+    paths.emplace_back(directory_ / "1.0.1.log");
+  for (const auto& path : paths) {
+    SCOPED_TRACE(path.string());
+    for (bool hard_link : {false, true}) {
+      SCOPED_TRACE(hard_link ? "hard link" : "symbolic link");
+      if (hard_link)
+        std::filesystem::create_hard_link(other, path);
+      else
+        std::filesystem::create_symlink(other, path);
+      EXPECT_THROW(Init(), spdlog::spdlog_ex);
+      Check(other, 0666);
+      EXPECT_TRUE(std::filesystem::remove(path));
+    }
+  }
+}
+
+TEST_F(FilePermissionsTest, RepairsExistingPrivateDirectoryOwnership) {
+  ASSERT_TRUE(std::filesystem::create_directory(directory_));
+  if (geteuid() == 0) ASSERT_EQ(chown(directory_.c_str(), 65534, 65534), 0);
+  Init();
+  Check(directory_, 0700);
+}
+
+TEST_F(FilePermissionsTest, PrivateFilesPreserveSharedDirectoryAndOtherFiles) {
+  ASSERT_TRUE(std::filesystem::create_directory(directory_));
+  ASSERT_EQ(chmod(directory_.c_str(), 0751), 0);
+  auto other = directory_ / "1.0.notes.log";
+  auto script = directory_ / "job.sh";
+  std::ofstream(other) << "another file";
+  std::ofstream(script) << "#!/bin/sh\nexit 0\n";
+  ASSERT_EQ(chmod(script.c_str(), 0755), 0);
+  Init(LogFilePolicy::PRIVATE_ON_CREATE);
+  Check(directory_, 0751);
+  Check(log_, 0600);
   Check(other, 0666);
+  Check(script, 0755);
+  if (geteuid() != 0) return;
+  const pid_t pid = fork();
+  ASSERT_GE(pid, 0);
+  if (pid == 0) {
+    if (setgroups(0, nullptr) != 0 || setuid(65534) != 0) _exit(2);
+    execl(script.c_str(), script.c_str(), nullptr);
+    _exit(1);
+  }
+  int status{};
+  ASSERT_EQ(waitpid(pid, &status, 0), pid);
+  ASSERT_TRUE(WIFEXITED(status));
+  EXPECT_EQ(WEXITSTATUS(status), 0);
 }
 
 TEST_F(FilePermissionsTest, RejectsLinkedDirectory) {

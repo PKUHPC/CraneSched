@@ -13,6 +13,11 @@ to the current release.
 
 ## Preparation
 
+Craned creates new log files with mode `0600`, including new files after rotation.
+Reopening existing logs preserves their owner, group, and permissions, including
+access granted to log collectors. Existing `0644` logs are not tightened automatically;
+administrators can restrict them as needed. Supervisor log permissions are unchanged.
+
 Before the maintenance window, copy `scripts/upgrade_data.py` from the
 target release source tree to the v1.1.3 control node, for example as
 `/root/crane-upgrade/upgrade_data.py`. The script is not installed by the

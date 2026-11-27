@@ -279,7 +279,7 @@ int InitFromStdin(int argc, char** argv) {
                  g_config.SupervisorMaxLogFileSize,
                  g_config.SupervisorMaxLogFileNum, kDefaultAsyncLogQueueSize,
                  kDefaultAsyncLogThreadCount, kDefaultAsyncLogBlockWhenFull,
-                 /*private_file=*/true);
+                 LogFilePolicy::PRIVATE_DIRECTORY);
     } catch (const spdlog::spdlog_ex& e) {
       fmt::print(stderr, "[Supervisor #{}.{}] Failed to initialize log: {}\n",
                  g_config.JobId, g_config.StepId, e.what());
