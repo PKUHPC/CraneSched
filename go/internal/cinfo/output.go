@@ -238,10 +238,6 @@ func BuildStateString(cranedList FlattenedData) string {
 	if !cranedList.HasNodes {
 		return "n/a"
 	}
-	if util.IsSlurmOutputMode() {
-		return util.FormatSlurmNodeState(
-			cranedList.ResourceState, cranedList.ControlState, cranedList.PowerState)
-	}
 	stateStr := strings.ToLower(strings.TrimPrefix(cranedList.ResourceState.String(), "CRANE_"))
 
 	if cranedList.ControlState != protos.CranedControlState_CRANE_NONE {
@@ -373,15 +369,7 @@ func QueryTableOutput(reply *protos.QueryClusterInfoReply, aliases map[string]st
 }
 
 func JsonOutput(reply *protos.QueryClusterInfoReply) error {
-	if util.IsSlurmOutputMode() {
-		output, err := formatSlurmClusterJSON(reply)
-		if err != nil {
-			return util.WrapCraneErr(util.ErrorInvalidFormat, "%v", err)
-		}
-		fmt.Println(output)
-	} else {
-		fmt.Println(util.FmtJson.FormatReply(reply))
-	}
+	fmt.Println(util.FmtJson.FormatReply(reply))
 	if reply.GetOk() {
 		return nil
 	} else {

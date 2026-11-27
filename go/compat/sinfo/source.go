@@ -64,12 +64,7 @@ func adaptSnapshot(reply *protos.QueryClusterInfoReply, q query) (*snapshot, err
 	if reply == nil || !reply.Ok {
 		return nil, fmt.Errorf("controller returned no successful cluster query reply")
 	}
-	s := &snapshot{Cluster: reply.ClusterName, UnsupportedFields: map[string]string{}}
-	for _, field := range fieldSpecs {
-		if field.Capability != "" {
-			s.UnsupportedFields[field.Name] = field.Capability
-		}
-	}
+	s := &snapshot{Cluster: reply.ClusterName}
 	if reply.ObservedAt == nil || reply.ObservedAt.CheckValid() != nil {
 		return nil, fmt.Errorf("controller returned no valid observation time")
 	}

@@ -137,9 +137,7 @@ struct PdJobInScheduler {
   std::vector<std::variant<PdJobInScheduler*, RnJobInScheduler*>>
       preempted_jobs;
 
-  google::protobuf::RepeatedPtrField<crane::grpc::JobToCtld::License>
-      req_licenses;
-  bool is_license_or;
+  crane::grpc::LicenseRequest requested_licenses;
   std::unordered_map<LicenseId, uint32_t> actual_licenses;
 
   std::string reason;
@@ -172,8 +170,7 @@ struct PdJobInScheduler {
         qos_priority(job->qos_priority),
         account(job->account),
         priority(job->mandated_priority),
-        req_licenses(job->JobToCtld().licenses_count()),
-        is_license_or(job->JobToCtld().is_licenses_or()),
+        requested_licenses(job->JobToCtld().requested_licenses()),
         qos(job->qos),
         username(job->Username()),
         account_chain(job->account_chain) {}
@@ -1446,9 +1443,7 @@ class JobScheduler {
   };
 
   static FinalTransferResult ProcessFinalSteps_(
-      std::unordered_set<StepInCtld*> const& steps);
-  static FinalTransferResult PersistAndTransferStepsToMongodb_(
-      std::unordered_set<StepInCtld*> const& steps);
+      std::unordered_set<StepInCtld*> const& steps, bool purge = true);
 
   static FinalTransferResult ProcessFinalJobs_(
       const std::unordered_set<JobInCtld*>& jobs);

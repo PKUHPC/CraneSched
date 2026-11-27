@@ -132,13 +132,11 @@ void LicenseManager::GetLicensesInfo(
 }
 
 std::expected<void, std::string> LicenseManager::CheckLicensesLegal(
-    const google::protobuf::RepeatedPtrField<crane::grpc::JobToCtld::License>&
-        lic_id_to_count,
-    bool is_license_or) {
+    const crane::grpc::LicenseRequest& request) {
   auto licenses_map = m_licenses_map_.GetMapConstSharedPtr();
-  if (is_license_or) {
-    for (const auto& license : lic_id_to_count) {
-      const auto& lic_id = license.key();
+  if (request.any_of()) {
+    for (const auto& license : request.entries()) {
+      const auto& lic_id = license.name();
       auto count = license.count();
       auto iter = licenses_map->find(lic_id);
       if (iter != licenses_map->end()) {
@@ -150,8 +148,8 @@ std::expected<void, std::string> LicenseManager::CheckLicensesLegal(
     return std::unexpected("Invalid license specification");
   }
 
-  for (const auto& license : lic_id_to_count) {
-    const auto& lic_id = license.key();
+  for (const auto& license : request.entries()) {
+    const auto& lic_id = license.name();
     auto count = license.count();
     auto iter = licenses_map->find(lic_id);
     if (iter == licenses_map->end())
@@ -176,25 +174,25 @@ void LicenseManager::CheckLicenseCountSufficient(
   }
 
   for (const auto& job_ptr : *job_ptr_vec) {
-    if (job_ptr->req_licenses.empty()) continue;
+    if (job_ptr->requested_licenses.entries().empty()) continue;
 
     job_ptr->actual_licenses.clear();
 
-    if (job_ptr->is_license_or) {
-      for (const auto& license : job_ptr->req_licenses) {
-        auto iter = avail_license_map.find(license.key());
+    if (job_ptr->requested_licenses.any_of()) {
+      for (const auto& license : job_ptr->requested_licenses.entries()) {
+        auto iter = avail_license_map.find(license.name());
         if (iter != avail_license_map.end()) {
           auto lic = iter->second;
           if (license.count() + lic.reserved + lic.used + lic.last_deficit <=
               lic.total) {
-            job_ptr->actual_licenses.emplace(license.key(), license.count());
+            job_ptr->actual_licenses.emplace(license.name(), license.count());
             break;
           }
         }
       }
     } else {
-      for (const auto& license : job_ptr->req_licenses) {
-        auto iter = avail_license_map.find(license.key());
+      for (const auto& license : job_ptr->requested_licenses.entries()) {
+        auto iter = avail_license_map.find(license.name());
         if (iter == avail_license_map.end()) {
           job_ptr->actual_licenses.clear();
           break;
@@ -205,7 +203,7 @@ void LicenseManager::CheckLicenseCountSufficient(
           job_ptr->actual_licenses.clear();
           break;
         }
-        job_ptr->actual_licenses.emplace(license.key(), license.count());
+        job_ptr->actual_licenses.emplace(license.name(), license.count());
       }
     }
 

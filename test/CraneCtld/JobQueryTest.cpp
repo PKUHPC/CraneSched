@@ -239,7 +239,14 @@ JobInfo MakeJob(uint32_t id = 71, uint32_t owner = 1001,
   job.add_exclude_nodes("node2");
   job.add_execution_node("node1");
   job.set_craned_list("node1");
-  (*job.mutable_licenses_count())["test-license"] = 2;
+  auto* request = job.mutable_requested_licenses();
+  request->set_any_of(true);
+  auto* entry = request->add_entries();
+  entry->set_name("first-license");
+  entry->set_count(1);
+  entry = request->add_entries();
+  entry->set_name("test-license");
+  entry->set_count(2);
   job.mutable_time_limit()->set_seconds(3600);
   job.mutable_start_time()->set_seconds(100);
   job.mutable_end_time()->set_seconds(200);
@@ -267,6 +274,13 @@ JobInfo MakeJob(uint32_t id = 71, uint32_t owner = 1001,
   condition->set_job_id(69);
   condition->set_type(crane::grpc::AFTER_OK);
   condition->set_delay_seconds(60);
+  job.mutable_io_meta()->set_output_file_pattern(kPrivate);
+  job.set_max_nodes(4);
+  job.mutable_submitted_size()->set_tasks_per_node(2);
+  job.set_memory_per_cpu(128);
+  job.add_scheduled_nodes("node2");
+  *job.mutable_gres_per_node() = res->gres_map();
+  (*job.mutable_allocated_licenses())["test-license"] = 2;
   job.set_cmd_line(kPrivate);
   job.set_cwd(kPrivate);
   job.set_extra_attr(kPrivate);
@@ -297,6 +311,8 @@ JobInfo MakeJob(uint32_t id = 71, uint32_t owner = 1001,
   *step->mutable_submit_time() = job.submit_time();
   *step->mutable_elapsed_time() = job.elapsed_time();
   *step->mutable_deadline_time() = job.deadline_time();
+  *step->mutable_io_meta() = job.io_meta();
+  *step->mutable_gres_per_node() = job.gres_per_node();
   step->set_cmd_line(kPrivate);
   step->set_cwd(kPrivate);
   step->set_extra_attr(kPrivate);
@@ -322,11 +338,13 @@ TEST(JobQuery, PublicViewPreservesEveryKnownSummaryField) {
   expected.clear_env();
   expected.clear_extra_attr();
   expected.clear_pod_meta();
+  expected.clear_io_meta();
   expected.set_query_visibility(QUERY_VISIBILITY_PUBLIC);
   for (auto& step : *expected.mutable_step_info_list()) {
     step.clear_cmd_line();
     step.clear_cwd();
     step.clear_extra_attr();
+    step.clear_io_meta();
     step.mutable_container_meta()->Clear();
     step.set_query_visibility(QUERY_VISIBILITY_PUBLIC);
   }
@@ -334,6 +352,37 @@ TEST(JobQuery, PublicViewPreservesEveryKnownSummaryField) {
   EXPECT_TRUE(
       google::protobuf::util::MessageDifferencer::Equals(expected, result));
   EXPECT_EQ(result.SerializeAsString().find(kPrivate), std::string::npos);
+}
+
+TEST(JobQuery, PublicQueueExposesOnlyQueueFields) {
+  auto source = MakeJob();
+  source.set_script_path("/tmp/script.sh");
+  source.set_requeue_eligible(false);
+  source.set_extra_attr(R"({"comment":"public","other":"private"})");
+  for (auto caller :
+       {std::optional<uint32_t>(1002), std::optional<uint32_t>()}) {
+    auto result = ProjectJobForQuery(source, caller, false, true);
+    EXPECT_EQ(result.script_path(), "/tmp/script.sh");
+    EXPECT_EQ(result.cwd(), source.cwd());
+    EXPECT_EQ(result.cmd_line(), source.cmd_line());
+    EXPECT_EQ(result.extra_attr(), R"({"comment":"public"})");
+    EXPECT_EQ(result.io_meta().output_file_pattern(),
+              source.io_meta().output_file_pattern());
+    EXPECT_TRUE(result.has_requeue_eligible());
+    EXPECT_FALSE(result.requeue_eligible());
+    EXPECT_TRUE(result.env().empty());
+    EXPECT_FALSE(result.has_pod_meta());
+    const auto& step = result.step_info_list(0);
+    EXPECT_TRUE(step.cmd_line().empty());
+    EXPECT_EQ(step.cwd(), source.step_info_list(0).cwd());
+    EXPECT_EQ(step.io_meta().output_file_pattern(),
+              source.step_info_list(0).io_meta().output_file_pattern());
+    EXPECT_FALSE(step.container_meta().has_image());
+    auto native = ProjectJobForQuery(source, caller, false);
+    EXPECT_FALSE(native.has_script_path());
+    EXPECT_TRUE(native.cwd().empty());
+    EXPECT_TRUE(native.extra_attr().empty());
+  }
 }
 
 TEST(JobQuery, OwnerAndAdministratorRetainDetailsExceptPassword) {
@@ -393,8 +442,13 @@ TEST(JobQuery, UnknownNestedFieldsCannotLeakOrAlterSource) {
   AddUnknown(&(*source.mutable_req_total_res_view()
                     ->mutable_gres_map()
                     ->mutable_name_gres_map())["gpu"]);
+  AddUnknown(source.mutable_gres_per_node());
+  AddUnknown(source.mutable_step_info_list(0)->mutable_gres_per_node());
   AddUnknown(source.mutable_array_spec());
   AddUnknown(source.mutable_array_task());
+  AddUnknown(source.mutable_submitted_size());
+  AddUnknown(source.mutable_requested_licenses());
+  AddUnknown(source.mutable_requested_licenses()->mutable_entries(0));
   AddUnknown(source.mutable_dependency_status()->mutable_pending(0));
   AddUnknown(source.mutable_dependency_status()->mutable_ready_time());
   AddUnknown(source.mutable_step_info_list(0));
@@ -549,6 +603,25 @@ TEST(JobQuery, RpcRejectsNotReadyAndMissingUidWithoutReturningStaleData) {
   g_runtime_status.srv_ready = was_ready;
 }
 
+TEST(JobQuery, PublicQueueDetailsRequireLiveQueue) {
+  Ctld::CraneCtldServiceImpl service(nullptr);
+  grpc::ServerContext context;
+  crane::grpc::QueryJobsInfoRequest request;
+  crane::grpc::QueryJobsInfoReply reply;
+  request.set_uid(1001);
+  request.set_include_public_queue_details(true);
+  const bool was_ready = g_runtime_status.srv_ready.exchange(true);
+  for (auto mode : {crane::grpc::QUERY_JOBS_INFO_QUEUE,
+                    crane::grpc::QUERY_JOBS_INFO_ACCOUNTING}) {
+    request.set_mode(mode);
+    request.set_option_include_completed_jobs(
+        mode == crane::grpc::QUERY_JOBS_INFO_QUEUE);
+    EXPECT_EQ(service.QueryJobsInfo(&context, &request, &reply).error_code(),
+              grpc::StatusCode::INVALID_ARGUMENT);
+  }
+  g_runtime_status.srv_ready = was_ready;
+}
+
 void ExpectFields(const google::protobuf::Descriptor* descriptor,
                   std::initializer_list<const char*> classified) {
   std::set<std::string> actual;
@@ -578,7 +651,7 @@ TEST(JobQuery, QuerySchemaRequiresExplicitFieldClassification) {
                                        "username",
                                        "qos",
                                        "req_total_res_view",
-                                       "licenses_count",
+                                       "requested_licenses",
                                        "req_nodes",
                                        "exclude_nodes",
                                        "extra_attr",
@@ -605,6 +678,17 @@ TEST(JobQuery, QuerySchemaRequiresExplicitFieldClassification) {
                                        "requeue_if_failed",
                                        "array_spec",
                                        "array_task",
+                                       "io_meta",
+                                       "max_nodes",
+                                       "memory_per_cpu",
+                                       "gres_per_node",
+                                       "scheduled_nodes",
+                                       "allocated_licenses",
+                                       "requeue_eligible",
+                                       "script_path",
+                                       "cpus_per_task",
+                                       "max_step_wait_status",
+                                       "submitted_size",
                                        "query_visibility"});
   ExpectFields(crane::grpc::StepInfo::descriptor(), {"type",
                                                      "step_type",
@@ -634,9 +718,18 @@ TEST(JobQuery, QuerySchemaRequiresExplicitFieldClassification) {
                                                      "execution_node",
                                                      "allocated_res_view",
                                                      "deadline_time",
+                                                     "io_meta",
+                                                     "cpus_per_task",
+                                                     "gres_per_node",
                                                      "query_visibility"});
   ExpectFields(crane::grpc::ResourceView::descriptor(),
                {"cpu_count", "memory_bytes", "memory_sw_bytes", "gres_map"});
+  ExpectFields(crane::grpc::SubmittedJobSize::descriptor(),
+               {"max_nodes", "tasks", "tasks_per_node"});
+  ExpectFields(crane::grpc::LicenseRequest::descriptor(),
+               {"entries", "any_of"});
+  ExpectFields(crane::grpc::LicenseRequest::Entry::descriptor(),
+               {"name", "count"});
   ExpectFields(crane::grpc::GresMap::descriptor(), {"name_gres_map"});
   ExpectFields(crane::grpc::GresCount::descriptor(), {"total", "specified"});
   ExpectFields(crane::grpc::ArraySpec::descriptor(),

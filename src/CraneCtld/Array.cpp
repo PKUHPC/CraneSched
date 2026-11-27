@@ -166,6 +166,7 @@ std::unique_ptr<JobInCtld> ArrayMeta::BuildChild(
   child->account_chain = parent_job_->account_chain;
   child->req_node_res_view = parent_job_->req_node_res_view;
   child->req_task_res_view = parent_job_->req_task_res_view;
+  child->effective_memory_per_cpu = parent_job_->effective_memory_per_cpu;
   child->SetReqTotalResView(parent_job_->req_total_res_view);
 
   {

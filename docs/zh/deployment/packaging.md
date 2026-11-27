@@ -203,8 +203,10 @@ ls build/dist/*.rpm build/dist/*.deb
 ```
 cranesched-client_2.0.0_amd64.rpm
 cranesched-plugin_2.0.0_amd64.rpm
+cranesched-slurm-compat_2.0.0_amd64.rpm
 cranesched-client_2.0.0_amd64.deb
 cranesched-plugin_2.0.0_amd64.deb
+cranesched-slurm-compat_2.0.0_amd64.deb
 ```
 
 软件包版本由仓库根目录中的 `VERSION` 文件确定。
@@ -232,6 +234,12 @@ cranesched-plugin_2.0.0_amd64.deb
     - `powerControl.so` - 电源管理
 
 - `/usr/lib/systemd/system/cplugind.service` - 插件守护进程服务
+
+#### cranesched-slurm-compat 软件包
+
+在需要通过 Slurm 命令查询鹤思集群的节点上，可单独安装 `cranesched-slurm-compat`（RPM 或 DEB）。该包提供 `/usr/bin/sinfo` 和 `/usr/bin/squeue` 两个独立命令，版本与同次构建的 `cranesched-client` 一致。
+
+如果升级的节点曾在 `/etc/profile.d/cwrapper.sh` 中配置 `alias squeue='cwrapper squeue'`，请删除该行。重新登录，或在现有 shell 中执行 `unalias squeue`，即可使用 `/usr/bin/squeue`。
 
 生成软件包后，请按照[前端组件部署指南](./frontend/frontend.md)将软件包安装到相应节点，并启用 `cfored` 和 `cplugind` 服务。
 

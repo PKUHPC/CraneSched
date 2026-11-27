@@ -39,10 +39,11 @@ type Option struct {
 // OptionScanner scans lazily so that commands can stop on help/version before
 // later arguments are inspected. It never decides a command's option semantics.
 type OptionScanner struct {
-	args  []string
-	specs []OptionSpec
-	posix bool
-	short string
+	args     []string
+	specs    []OptionSpec
+	posix    bool
+	short    string
+	operands []string
 }
 
 // NewOptionScanner takes arguments excluding argv[0]. The caller owns process
@@ -50,6 +51,9 @@ type OptionScanner struct {
 func NewOptionScanner(args []string, specs []OptionSpec, posix bool) *OptionScanner {
 	return &OptionScanner{args: args, specs: specs, posix: posix}
 }
+
+// Operands returns non-option arguments in input order after scanning.
+func (s *OptionScanner) Operands() []string { return s.operands }
 
 // Next returns io.EOF at the end of options. Errors contain only the GNU
 // diagnostic body; callers add their command's prefix and help hint.
@@ -61,11 +65,14 @@ func (s *OptionScanner) Next() (Option, error) {
 		arg := s.args[0]
 		s.args = s.args[1:]
 		if arg == "--" {
+			s.operands = append(s.operands, s.args...)
 			s.args = nil
 			return Option{}, io.EOF
 		}
 		if arg == "-" || !strings.HasPrefix(arg, "-") {
+			s.operands = append(s.operands, arg)
 			if s.posix {
+				s.operands = append(s.operands, s.args...)
 				s.args = nil
 				return Option{}, io.EOF
 			}
@@ -138,4 +145,37 @@ func (s *OptionScanner) longOption(name, arg string) (OptionSpec, error) {
 		return OptionSpec{}, fmt.Errorf("option '%s' is ambiguous; possibilities: %s", arg, strings.Join(names, " "))
 	}
 	return OptionSpec{}, fmt.Errorf("unrecognized option '%s'", arg)
+}
+
+// CompleteOptions lists matching public options in declaration order.
+func CompleteOptions(specs []OptionSpec, query string) string {
+	var output strings.Builder
+	if query == "" {
+		return ""
+	}
+	alpha := query[0] >= 'a' && query[0] <= 'z' || query[0] >= 'A' && query[0] <= 'Z'
+	for _, spec := range specs {
+		if spec.Short != 0 && (query[0] == '-' || alpha) {
+			flag := "-" + string(spec.Short)
+			if strings.Contains(flag, query) {
+				output.WriteString(flag + "\n")
+			}
+		}
+		flag := "--" + spec.Name
+		if (len(query) > 1 || alpha) && strings.Contains(flag, query) {
+			if spec.Argument != NoArgument {
+				output.WriteString(flag + "=\n")
+			}
+			if spec.Argument == OptionalArgument {
+				output.WriteString(flag + " \n")
+			}
+			if spec.Argument == NoArgument {
+				output.WriteString(flag + "\n")
+			}
+		}
+	}
+	if output.Len() != 0 {
+		output.WriteByte('\n')
+	}
+	return output.String()
 }

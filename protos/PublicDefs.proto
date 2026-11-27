@@ -188,6 +188,23 @@ message Signal {
   SignalFlag signal_flag = 3;
 }
 
+// Counts before task layout normalization; zero means the user omitted a bound.
+message SubmittedJobSize {
+  uint32 max_nodes = 1;
+  uint32 tasks = 2;
+  uint32 tasks_per_node = 3;
+}
+
+message LicenseRequest {
+  message Entry {
+    string name = 1;
+    uint32 count = 2;
+  }
+  // Preserve submission order: the scheduler tries alternatives from the front.
+  repeated Entry entries = 1;
+  bool any_of = 2;
+}
+
 message JobToCtld {
   /* -------- Fields that are set at the submission time. ------- */
   google.protobuf.Duration time_limit = 1;
@@ -240,12 +257,9 @@ message JobToCtld {
   bool hold = 38;
   google.protobuf.Timestamp begin_time = 39;
 
-  message License {
-    string key = 1;
-    uint32 count = 2;
-  }
-  repeated License licenses_count = 40;
-  bool is_licenses_or = 41;
+  // Read only to recover job submissions persisted before LicenseRequest.
+  repeated LicenseRequest.Entry legacy_licenses = 40;
+  bool legacy_licenses_or = 41;
   optional string wckey = 42;
   string submit_hostname = 43;
   string submit_dir = 44;
@@ -263,6 +277,8 @@ message JobToCtld {
 
   // Array submission spec for this job. Child identity is runtime-only.
   ArraySpec array_spec = 58;
+  SubmittedJobSize submitted_size = 60;
+  LicenseRequest requested_licenses = 61;
 }
 
 message JobInEmbeddedDb {
@@ -312,6 +328,8 @@ message RuntimeAttrOfJob {
   // Normalized query request, retained for recovery archival.
   GresMap requested_gres = 30;
   bool held_by_admin = 31;
+  // POSIX wait status aggregated over completed application steps.
+  optional uint32 max_step_wait_status = 32;
 }
 
 message StepToCtld {
@@ -521,6 +539,8 @@ message IoMeta {
 
 message BatchJobAdditionalMeta {
   string interpreter = 1;
+  // Empty for --wrap; absent on submissions predating this field.
+  optional string script_path = 2;
 }
 
 message X11Meta {
@@ -667,7 +687,7 @@ message JobInfo {
   string username = 15;
   string qos = 16;
   ResourceView req_total_res_view = 17;
-  map<string, uint32> licenses_count = 18;
+  map<string, uint32> allocated_licenses = 18;
   repeated string req_nodes = 19;
   repeated string exclude_nodes = 20;
 
@@ -712,6 +732,17 @@ message JobInfo {
   ArraySpec array_spec = 50;
   ArrayTaskIdentity array_task = 51;
   QueryVisibility query_visibility = 52;
+  IoMeta io_meta = 53;
+  optional uint32 max_nodes = 54;
+  optional uint64 memory_per_cpu = 56;
+  GresMap gres_per_node = 57;
+  repeated string scheduled_nodes = 58;
+  LicenseRequest requested_licenses = 59;
+  optional bool requeue_eligible = 60;
+  optional string script_path = 61;
+  optional double cpus_per_task = 62;
+  optional uint32 max_step_wait_status = 63;
+  SubmittedJobSize submitted_size = 64;
 }
 
 message StepInfo {
@@ -761,6 +792,9 @@ message StepInfo {
   ResourceView allocated_res_view = 40;
   google.protobuf.Timestamp deadline_time = 41;
   QueryVisibility query_visibility = 42;
+  IoMeta io_meta = 43;
+  GresMap gres_per_node = 44;
+  optional double cpus_per_task = 45;
 }
 
 // Physical CPU topology of a node or job topology constraint.

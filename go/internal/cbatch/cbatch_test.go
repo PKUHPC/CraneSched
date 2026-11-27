@@ -110,3 +110,32 @@ func TestBuildCbatchJobResolvesWorkingDirectory(t *testing.T) {
 		})
 	}
 }
+
+func TestBuildCbatchJobPreservesSubmittedLayout(t *testing.T) {
+	for _, tc := range []struct {
+		name                 string
+		directive            string
+		submitted, effective uint32
+	}{
+		{"implicit tasks per node", "", 0, 4},
+		{"explicit tasks per node", "#CBATCH --ntasks-per-node=2\n", 2, 2},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			script := filepath.Join(t.TempDir(), "job.sh")
+			if err := os.WriteFile(script, []byte("#!/bin/sh\n#CBATCH --ntasks=4\n"+tc.directive+"true\n"), 0600); err != nil {
+				t.Fatal(err)
+			}
+			job, err := BuildCbatchJob(&cobra.Command{}, []string{script}, &util.Config{})
+			if err != nil {
+				t.Fatal(err)
+			}
+			size := job.SubmittedSize
+			if size == nil || size.MaxNodes != 0 || size.Tasks != 4 || size.TasksPerNode != tc.submitted {
+				t.Fatalf("submitted_size = %v, want max_nodes=0 tasks=4 tasks_per_node=%d", size, tc.submitted)
+			}
+			if job.NtasksPerNode != tc.effective {
+				t.Errorf("normalized tasks per node = %d, want %d", job.NtasksPerNode, tc.effective)
+			}
+		})
+	}
+}

@@ -114,7 +114,7 @@ func (r runner) run(ctx context.Context, argv []string, env map[string]string, s
 		return 1
 	}
 	defer source.Close()
-	r.renderer.TimeFormat = timeFormatter(env["SLURM_TIME_FORMAT"], r.now(), stderr)
+	r.renderer.TimeFormat = utils.TimeFormatter("sinfo", env["SLURM_TIME_FORMAT"], r.now(), stderr)
 	for {
 		if ctx.Err() != nil {
 			return rc
@@ -163,6 +163,9 @@ func (r runner) run(ctx context.Context, argv []string, env map[string]string, s
 func (r runner) render(w, stderr io.Writer, argv []string, s *snapshot, o *plan) error {
 	if o.Reservations {
 		return r.renderer.reservations(w, s.Reservations, o.NoHeader, r.now())
+	}
+	if o.Parser.SpecOnly || strings.EqualFold(o.DataParser, "list") {
+		return renderStructured(w, stderr, argv, nil, s, o, r.renderer.UserName)
 	}
 	rows := buildRows(s, o)
 	sortRows(rows, o)

@@ -931,6 +931,7 @@ struct JobInCtld {
 
   PartitionId partition_id;
 
+  std::optional<uint64_t> effective_memory_per_cpu;
   ResourceView req_node_res_view;
   ResourceView req_task_res_view;
   ResourceView req_total_res_view;
@@ -1117,6 +1118,7 @@ struct JobInCtld {
   std::vector<CranedId> executing_craned_ids;
   std::string allocated_craneds_regex;
   std::string pending_reason;
+  std::vector<CranedId> scheduled_nodes;
 
   double mandated_priority{0.0};
 
@@ -1244,6 +1246,8 @@ struct JobInCtld {
 
   int32_t RequeueCount() const { return requeue_count; }
 
+  bool RecordStepExitStatus(crane::grpc::JobStatus step_status, uint32_t code);
+  bool RequeueEligible() const;
   bool ShouldRequeue() const;
   void ResetForRequeue();
 
@@ -1353,6 +1357,7 @@ struct JobInCtld {
                                absl::Time event_time);
   void TriggerTerminalDependencyEvents(absl::Time end_time);
 
+  void SetMemoryPerCpu(uint64_t bytes, uint64_t partition_max = 0);
   void SetFieldsByJobToCtld(crane::grpc::JobToCtld const& val);
 
   // Must be called after SetFieldsByJobToCtld!

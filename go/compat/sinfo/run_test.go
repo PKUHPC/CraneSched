@@ -7,15 +7,18 @@ package sinfo
 import (
 	"bytes"
 	"context"
+	"encoding/json"
 	"errors"
 	"io"
 	"os"
+	"slices"
 	"strings"
 	"testing"
 	"time"
 
 	"github.com/pkg/term/termios"
 	"golang.org/x/sys/unix"
+	"gopkg.in/yaml.v3"
 )
 
 type memorySource struct {
@@ -63,6 +66,83 @@ func TestRunRepeatedStateFilters(t *testing.T) {
 				t.Fatalf("code=%d stdout=%q stderr=%q closed=%t; want stdout=%q", code, out.String(), diagnostic.String(), source.closed, tc.want)
 			}
 		})
+	}
+}
+
+func TestRunSortWithMissingTelemetry(t *testing.T) {
+	s := testSnapshot()
+	for i := range s.Nodes {
+		s.Nodes[i].TelemetryExpected = true
+	}
+	s.Nodes[0].FreeMemory = new(uint64(48))
+	s.Nodes[1].CPULoad = new(uint64(50))
+	s.Nodes[1].FreeMemory = new(uint64(0))
+	s.Nodes[2].CPULoad = new(uint64(0))
+
+	for _, tc := range []struct {
+		key, column           string
+		wantNodes, wantValues []string
+	}{
+		{"O", "%O", []string{"n03", "n02", "n01"}, []string{"0.00", "0.50", "N/A"}},
+		{"-O", "%O", []string{"n01", "n02", "n03"}, []string{"N/A", "0.50", "0.00"}},
+		{"e", "%e", []string{"n02", "n01", "n03"}, []string{"0", "48", "N/A"}},
+		{"-e", "%e", []string{"n03", "n01", "n02"}, []string{"N/A", "48", "0"}},
+	} {
+		for _, format := range []string{"text", "json", "yaml"} {
+			t.Run(tc.key+"/"+format, func(t *testing.T) {
+				args := []string{"sinfo", "-N", "-h", "-p", "compute", "-S", tc.key}
+				if format == "text" {
+					args = append(args, "-o", "%N|"+tc.column)
+				} else {
+					args = append(args, "--"+format)
+				}
+				source := &memorySource{load: func(context.Context, query) (*snapshot, error) { return s, nil }}
+				var out, diag bytes.Buffer
+				if code := testRunner(source).run(t.Context(), args, nil, &out, &diag); code != 0 || diag.Len() != 0 {
+					t.Fatalf("exit %d, stderr %q", code, &diag)
+				}
+				if format == "text" {
+					var want []string
+					for i, name := range tc.wantNodes {
+						want = append(want, name+"|"+tc.wantValues[i])
+					}
+					if got := strings.Fields(out.String()); !slices.Equal(got, want) {
+						t.Fatalf("rows = %v, want %v", got, want)
+					}
+					return
+				}
+				var doc struct {
+					Sinfo []struct {
+						Nodes  struct{ Nodes []string }
+						CPUs   map[string]any
+						Memory map[string]any
+					}
+				}
+				decode := json.Unmarshal
+				if format == "yaml" {
+					decode = yaml.Unmarshal
+				}
+				if err := decode(out.Bytes(), &doc); err != nil {
+					t.Fatal(err)
+				}
+				var nodes []string
+				for _, row := range doc.Sinfo {
+					if len(row.Nodes.Nodes) != 1 {
+						t.Fatalf("expected one node per row, got %v", row.Nodes.Nodes)
+					}
+					name := row.Nodes.Nodes[0]
+					nodes = append(nodes, name)
+					_, hasLoad := row.CPUs["load"]
+					_, hasFree := row.Memory["free"]
+					if hasLoad != (name != "n01") || hasFree != (name != "n03") {
+						t.Errorf("node %s: load present %t, free memory present %t", name, hasLoad, hasFree)
+					}
+				}
+				if !slices.Equal(nodes, tc.wantNodes) {
+					t.Fatalf("nodes = %v, want %v", nodes, tc.wantNodes)
+				}
+			})
+		}
 	}
 }
 
@@ -116,7 +196,7 @@ func TestRunNodeSelection(t *testing.T) {
 		{"missing_with_state", "missing", []string{"-t", "idle"}, ""},
 		{"existing_filtered", "n01", []string{"-t", "down"}, ""},
 		{"mixed_names", "missing,n01", nil, "1\n"},
-		{"existing", "n01", nil, "1\n"},
+		{"local_overrides_federation", "n01", []string{"--federation", "--local"}, "1\n"},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			source := &memorySource{load: func(context.Context, query) (*snapshot, error) { return testSnapshot(), nil }}
@@ -124,6 +204,39 @@ func TestRunNodeSelection(t *testing.T) {
 			var out, diagnostic bytes.Buffer
 			if code := testRunner(source).run(t.Context(), args, nil, &out, &diagnostic); code != 0 || out.String() != tc.want || diagnostic.Len() != 0 || !source.closed {
 				t.Fatalf("code=%d stdout=%q stderr=%q closed=%t; want stdout=%q", code, &out, &diagnostic, source.closed, tc.want)
+			}
+		})
+	}
+}
+
+func TestRunUsesTZForHeadingAndReason(t *testing.T) {
+	s := testSnapshot()
+	s.Nodes[0].ReasonTime = time.Date(2026, 6, 4, 12, 0, 0, 0, time.UTC)
+	source := &memorySource{load: func(context.Context, query) (*snapshot, error) { return s, nil }}
+	r := testRunner(source)
+	var out, diagnostic bytes.Buffer
+	code := r.run(t.Context(), []string{"sinfo", "-v", "-n", "n01", "-o", "%H"}, map[string]string{"TZ": "UTC-8"}, &out, &diagnostic)
+	if code != 0 || !strings.Contains(out.String(), "Thu Jun 04 20:34:56 2026\n") || !strings.Contains(out.String(), "2026-06-04T20:00:00") {
+		t.Fatalf("code=%d out=%q err=%q", code, &out, &diagnostic)
+	}
+}
+
+func TestStructuredParserScope(t *testing.T) {
+	source := &memorySource{load: func(context.Context, query) (*snapshot, error) { return testSnapshot(), nil }}
+	r := testRunner(source)
+	t.Run("list", func(t *testing.T) {
+		var out, diag bytes.Buffer
+		code := r.run(t.Context(), []string{"sinfo", "--json=list"}, nil, &out, &diag)
+		if code != 0 || out.String() != "data_parser/v0.0.45\n" || diag.String() != "Possible data_parser plugins:\n" {
+			t.Fatalf("exit=%d stdout=%q stderr=%q", code, &out, &diag)
+		}
+	})
+	for _, flag := range []string{"--yaml=data_parser/v0.0.44+spec_only", "--json=v0.0.46", "--yaml=", "--json=notreal"} {
+		t.Run(flag, func(t *testing.T) {
+			var out, diag bytes.Buffer
+			code := r.run(t.Context(), []string{"sinfo", flag}, nil, &out, &diag)
+			if code != 1 || out.Len() != 0 || !strings.Contains(diag.String(), "supported: v0.0.45") {
+				t.Fatalf("exit=%d stdout=%q stderr=%q", code, &out, &diag)
 			}
 		})
 	}
@@ -140,6 +253,7 @@ func TestRunActionsAndCapabilityPrecedence(t *testing.T) {
 		{[]string{"--version"}, map[string]string{"SINFO_ALL": "", "SINFO_PARTITION": "batch"}, 1, "", "Conflicting options"},
 		{[]string{"--json", "--version"}, map[string]string{"SLURM_JSON": "unknown"}, 1, "", "Unable to parse serializer"},
 		{[]string{"--version", "--json"}, map[string]string{"SLURM_JSON": "unknown"}, 0, "slurm 26.05.4\n", ""},
+		{[]string{"--federation"}, nil, 1, "", "federated queries"},
 		{[]string{"--future"}, nil, 1, "", "current Crane version does not support"},
 		{[]string{"--forma"}, nil, 1, "", "sinfo: option '--format' requires an argument\nTry \"sinfo --help\" for more information\n"},
 		{[]string{"-O", "Features"}, nil, 1, "", "field Features"},
@@ -162,36 +276,58 @@ func TestRunActionsAndCapabilityPrecedence(t *testing.T) {
 	}
 }
 
-func TestRunSchemaOnlyIgnoresUnusedProjections(t *testing.T) {
-	for _, kind := range []string{"json", "yaml"} {
-		for _, flags := range [][]string{{"-o", "%f"}, {"-S", "f"}, {"-t", "cloud"}, {"--future"}, {"--long"}} {
-			t.Run(kind+strings.Join(flags, " "), func(t *testing.T) {
-				loads := 0
-				source := &memorySource{load: func(context.Context, query) (*snapshot, error) {
-					loads++
-					return testSnapshot(), nil
-				}}
-				r := testRunner(source)
-				r.renderer.UserName = func(uint32) (string, bool) {
-					t.Fatal("schema-only output must not resolve report identities")
-					return "", false
-				}
-				var want, out, diagnostic bytes.Buffer
-				args := []string{"sinfo", "--" + kind + "=v0.0.45+spec_only"}
-				if code := r.run(t.Context(), args, nil, &want, &diagnostic); code != 0 || diagnostic.Len() != 0 {
-					t.Fatalf("schema baseline: code=%d stderr=%q", code, &diagnostic)
-				}
-				if code := r.run(t.Context(), append(args, flags...), nil, &out, &diagnostic); code != 0 || diagnostic.Len() != 0 || out.String() != want.String() || loads != 2 {
-					t.Fatalf("schema with flags: code=%d loads=%d stderr=%q", code, loads, &diagnostic)
-				}
-				source.load = func(context.Context, query) (*snapshot, error) { return nil, errors.New("controller unavailable") }
-				out.Reset()
-				if code := r.run(t.Context(), append(args, flags...), nil, &out, &diagnostic); code != 1 || out.Len() != 0 || !strings.Contains(diagnostic.String(), "controller unavailable") {
-					t.Fatalf("schema query failure: code=%d stdout=%q stderr=%q", code, &out, &diagnostic)
-				}
-			})
+func TestStructuredExplicitUnsupportedGrouping(t *testing.T) {
+	for _, args := range [][]string{{"--json", "-O", "Features,NodeList"}, {"--yaml", "-o", "%f"}} {
+		source := &memorySource{load: func(context.Context, query) (*snapshot, error) {
+			t.Fatal("unsupported grouping reached controller")
+			return nil, nil
+		}}
+		var out, diag bytes.Buffer
+		rc := testRunner(source).run(t.Context(), append([]string{"sinfo"}, args...), nil, &out, &diag)
+		if rc != 1 || out.Len() != 0 || !strings.Contains(diag.String(), "field Features") {
+			t.Fatalf("%v: %d %q %q", args, rc, &out, &diag)
 		}
 	}
+}
+
+func TestRunSchemaOnlyIgnoresUnusedProjections(t *testing.T) {
+	for _, tc := range []struct {
+		kind  string
+		flags []string
+	}{
+		{"json", []string{"-o", "%f", "-S", "f", "-t", "cloud", "--future"}},
+		{"yaml", []string{"--long"}},
+	} {
+		t.Run(tc.kind, func(t *testing.T) {
+			loads := 0
+			source := &memorySource{load: func(context.Context, query) (*snapshot, error) {
+				loads++
+				return testSnapshot(), nil
+			}}
+			r := testRunner(source)
+			r.renderer.UserName = func(uint32) (string, bool) {
+				t.Fatal("schema-only output must not resolve report identities")
+				return "", false
+			}
+			var want, out, diag bytes.Buffer
+			args := []string{"sinfo", "--" + tc.kind + "=v0.0.45+spec_only"}
+			if code := r.run(t.Context(), args, nil, &want, &diag); code != 0 || want.Len() == 0 || diag.Len() != 0 || loads != 1 {
+				t.Fatalf("schema baseline: code=%d loads=%d stderr=%q", code, loads, &diag)
+			}
+			if code := r.run(t.Context(), append(args, tc.flags...), nil, &out, &diag); code != 0 || diag.Len() != 0 || !bytes.Equal(out.Bytes(), want.Bytes()) || loads != 2 {
+				t.Fatalf("schema with %v: code=%d loads=%d stderr=%q", tc.flags, code, loads, &diag)
+			}
+		})
+	}
+	t.Run("query failure", func(t *testing.T) {
+		source := &memorySource{load: func(context.Context, query) (*snapshot, error) {
+			return nil, errors.New("controller unavailable")
+		}}
+		var out, diag bytes.Buffer
+		if code := testRunner(source).run(t.Context(), []string{"sinfo", "--json=v0.0.45+spec_only"}, nil, &out, &diag); code != 1 || out.Len() != 0 || !strings.Contains(diag.String(), "controller unavailable") {
+			t.Fatalf("schema query failure: code=%d stdout=%q stderr=%q", code, &out, &diag)
+		}
+	})
 }
 
 func TestRunReservationsOverrideUnusedProjections(t *testing.T) {

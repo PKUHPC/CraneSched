@@ -282,6 +282,13 @@ TEST(CtldPublicDefs, HoldSourceSurvivesRecovery) {
     EXPECT_TRUE(recovered.Held());
     EXPECT_EQ(recovered.HoldReason(),
               by_admin ? "JobHeldAdmin" : "JobHeldUser");
+    recovered.pending_reason = "BeginTime";
+    crane::grpc::JobInfo info;
+    recovered.SetFieldsOfJobInfo(&info);
+    EXPECT_EQ(info.pending_reason(), recovered.HoldReason());
+    recovered.SetHeld(false);
+    recovered.SetFieldsOfJobInfo(&info);
+    EXPECT_EQ(info.pending_reason(), "BeginTime");
   }
 
   crane::grpc::JobToCtld request;
@@ -1231,6 +1238,109 @@ TEST(CtldStepStateMachineTest,
 }
 
 // --- ShouldRequeue tests ---
+
+TEST(StepExitStatusTest, RetainsHighestProcessStatusAcrossRecovery) {
+  Ctld::JobInCtld job;
+  crane::grpc::JobToCtld request;
+  request.add_gids(0);
+  job.SetFieldsByJobToCtld(request);
+  EXPECT_EQ(job.RuntimeAttr().max_step_wait_status(), 0U);
+  EXPECT_TRUE(job.RecordStepExitStatus(crane::grpc::Failed, 256 + 15));
+  EXPECT_TRUE(job.RecordStepExitStatus(crane::grpc::Failed, 7));
+  EXPECT_FALSE(job.RecordStepExitStatus(crane::grpc::Failed, 2));
+  Ctld::JobInCtld recovered;
+  recovered.SetFieldsByRuntimeAttrOfJob(job.RuntimeAttr());
+  EXPECT_EQ(recovered.RuntimeAttr().max_step_wait_status(), 7U << 8);
+  EXPECT_TRUE(recovered.RecordStepExitStatus(crane::grpc::Failed,
+                                             ExitCode::EC_RPC_ERR));
+  EXPECT_FALSE(recovered.RuntimeAttr().has_max_step_wait_status());
+  EXPECT_FALSE(recovered.RecordStepExitStatus(crane::grpc::Completed, 0));
+}
+
+TEST(JobInfoTest,
+     RecoversLegacyLicenseAlternativesAndClearsOnlyGrantsOnRequeue) {
+  // Persisted JobToCtld tags 40 (name/count entries) and 41 (OR).
+  const std::string old_fields =
+      "\xc2\x02\x05\x0a\x01"
+      "z"
+      "\x10\x02"
+      "\xc2\x02\x05\x0a\x01"
+      "a"
+      "\x10\x01"
+      "\xc8\x02\x01";
+  crane::grpc::JobToCtld submission;
+  ASSERT_TRUE(submission.ParseFromString(old_fields));
+  submission.add_gids(0);
+  Ctld::JobInCtld job{};
+  job.SetFieldsByJobToCtld(submission);
+  EXPECT_EQ(job.JobToCtld().legacy_licenses_size(), 0);
+  const auto& request = job.JobToCtld().requested_licenses();
+  ASSERT_EQ(request.entries_size(), 2);
+  EXPECT_TRUE(request.any_of());
+  EXPECT_EQ(request.entries(0).name(), "z");
+  EXPECT_EQ(request.entries(0).count(), 2U);
+  EXPECT_EQ(request.entries(1).name(), "a");
+  EXPECT_EQ(request.entries(1).count(), 1U);
+
+  job.SetActualLicenses({{"a", 1}});
+  crane::grpc::JobInfo running;
+  job.SetFieldsOfJobInfo(&running);
+  ASSERT_EQ(running.allocated_licenses_size(), 1);
+  EXPECT_EQ(running.allocated_licenses().at("a"), 1U);
+  job.ResetForRequeue();
+  crane::grpc::JobInfo pending;
+  job.SetFieldsOfJobInfo(&pending);
+  EXPECT_EQ(pending.requested_licenses().SerializeAsString(),
+            request.SerializeAsString());
+  EXPECT_TRUE(pending.allocated_licenses().empty());
+  EXPECT_TRUE(job.licenses_count.empty());
+}
+
+TEST(JobInfoTest, MemoryPerCpuReflectsEffectiveTaskRequest) {
+  constexpr uint64_t gib = 1ULL << 30;
+  Ctld::JobInCtld job{};
+  crane::grpc::JobToCtld request;
+  request.add_gids(0);
+  request.set_cpus_per_task(2);
+  request.set_mem_per_cpu(8 * gib);
+  job.SetFieldsByJobToCtld(request);
+  job.SetMemoryPerCpu(request.mem_per_cpu(), 4 * gib);
+  crane::grpc::JobInfo info;
+  job.SetFieldsOfJobInfo(&info);
+  ASSERT_TRUE(info.has_memory_per_cpu());
+  EXPECT_EQ(info.memory_per_cpu(), 4 * gib);
+  EXPECT_EQ(job.req_task_res_view.GetMemoryBytes(), 8 * gib);
+  EXPECT_EQ(job.JobToCtld().mem_per_cpu(), 8 * gib);
+}
+
+TEST(StepExitStatusTest, SyntheticFailureHasNoProcessExitStatus) {
+  Ctld::JobInCtld job;
+  crane::grpc::JobToCtld request;
+  request.add_gids(0);
+  job.SetFieldsByJobToCtld(request);
+  EXPECT_FALSE(job.RecordStepExitStatus(crane::grpc::Completed, 0));
+  ASSERT_TRUE(job.RuntimeAttr().has_max_step_wait_status());
+  EXPECT_EQ(job.RuntimeAttr().max_step_wait_status(), 0U);
+  EXPECT_TRUE(job.RecordStepExitStatus(crane::grpc::Failed, 0));
+  EXPECT_FALSE(job.RuntimeAttr().has_max_step_wait_status());
+}
+
+TEST(ShouldRequeueTest, EligibilityUsesClusterDefaultAndSubmissionFlags) {
+  const bool old_default = g_config.CtldConf.JobRequeue;
+  Ctld::JobInCtld job;
+  job.type = crane::grpc::Batch;
+  for (bool policy : {false, true}) {
+    g_config.CtldConf.JobRequeue = policy;
+    for (bool enabled : {false, true}) {
+      job.requeue_if_failed = enabled;
+      for (bool disabled : {false, true}) {
+        job.MutableJobToCtld()->set_no_requeue(disabled);
+        EXPECT_EQ(job.RequeueEligible(), !disabled && (enabled || policy));
+      }
+    }
+  }
+  g_config.CtldConf.JobRequeue = old_default;
+}
 
 TEST(ShouldRequeueTest, InteractiveJobNeverRequeues) {
   Ctld::JobInCtld job;

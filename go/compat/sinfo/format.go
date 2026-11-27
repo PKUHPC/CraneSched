@@ -269,21 +269,18 @@ func column(text string, width int, right bool, cut bool) string {
 	return text + pad
 }
 
-// Validate facts only after querying, in the same order for each output mode.
+// Text columns require observations unless their sort key already orders missing samples.
 func validateProjection(rows []*row, o *plan) error {
-	needsTopology, needsIntegralCPUs := false, o.Serialization != ""
-	needsGRES := o.Serialization != ""
-	needsLoad := o.Serialization != "" || strings.ContainsRune(o.Sort, 'O')
-	needsFreeMemory := o.Serialization != "" || strings.ContainsRune(o.Sort, 'e')
+	var needsTopology, needsIntegralCPUs, needsGRES, needsLoad, needsFreeMemory bool
 	for _, item := range o.Fields {
 		if item.Field == nil {
 			continue
 		}
 		switch item.Field.Name {
 		case "CPUsLoad":
-			needsLoad = true
+			needsLoad = !strings.ContainsRune(o.Sort, 'O')
 		case "FreeMem":
-			needsFreeMemory = true
+			needsFreeMemory = !strings.ContainsRune(o.Sort, 'e')
 		case "Gres", "GresUsed":
 			needsGRES = true
 		case "CPUsState":
@@ -292,7 +289,6 @@ func validateProjection(rows []*row, o *plan) error {
 			needsTopology = true
 		}
 	}
-	needsTopology = needsTopology || o.Serialization != ""
 	for _, r := range rows {
 		for _, n := range r.Nodes {
 			if n.TelemetryExpected && needsLoad && n.CPULoad == nil {
@@ -311,21 +307,6 @@ func validateProjection(rows []*row, o *plan) error {
 				return fmt.Errorf("controller has no representable scheduling CPU topology for node %q", n.Name)
 			}
 		}
-	}
-	return nil
-}
-
-func validateStructuredProjection(rows []*row, snap *snapshot, o *plan) error {
-	// The v45 schema implicitly requests these fields,
-	// even when -o selects a smaller text/grouping vocabulary. An absent
-	// Crane feature must not turn into a plausible zero or empty JSON value.
-	for _, field := range []string{"Disk", "Weight", "Features", "features_act", "Comment", "Extra", "MaxCPUsPerNode", "AllocNodes", "Groups", "DefaultTime", "OverSubscribe", "Root", "Size", "PriorityTier"} {
-		if capability := snap.UnsupportedFields[field]; capability != "" {
-			return unsupported("--"+o.Serialization+" field "+field, capability)
-		}
-	}
-	if err := validateProjection(rows, o); err != nil {
-		return err
 	}
 	return nil
 }

@@ -19,6 +19,67 @@ import (
 // SerializerOptions controls encoding independently of data-parser complex values.
 type SerializerOptions struct{ Compact, NoTag, Complex bool }
 
+// ParseSerializerOptions validates the serializer environment when the CLI
+// encounters an output option. Slurm initializes both serializer plugins.
+func ParseSerializerOptions(kind string, env map[string]string) (SerializerOptions, error) {
+	var selected SerializerOptions
+	for _, plugin := range []string{"json", "yaml"} {
+		raw := env["SLURM_"+strings.ToUpper(plugin)]
+		options := SerializerOptions{Compact: raw != ""}
+		for flag := range strings.SplitSeq(strings.ToLower(raw), ",") {
+			switch flag {
+			case "":
+			case "compact":
+				options.Compact = true
+			case "pretty":
+				options.Compact = false
+			case "complex":
+				options.Complex = true
+			case "no_tag":
+				options.NoTag = true
+			default:
+				return selected, fmt.Errorf("Unable to parse serializer %q flags: Invalid argument", raw)
+			}
+		}
+		if kind == plugin {
+			selected = options
+		}
+	}
+	return selected, nil
+}
+
+type DataParserOptions struct {
+	Plugin            string
+	SpecOnly, Complex bool
+}
+
+// ParseDataParser recognizes the v45 parser and emits its flag diagnostics.
+func ParseDataParser(command, raw string, attached bool, diag io.Writer) (DataParserOptions, error) {
+	if !attached {
+		raw = "v0.0.45"
+	}
+	raw = strings.TrimPrefix(raw, "data_parser/")
+	version, flags, _ := strings.Cut(raw, "+")
+	result := DataParserOptions{Plugin: "data_parser/" + raw}
+	if version != "v0.0.45" {
+		return result, fmt.Errorf("data parser %q (supported: v0.0.45)", version)
+	}
+	for flag := range strings.SplitSeq(flags, "+") {
+		switch strings.ToLower(flag) {
+		case "", "fast", "minimize_refs":
+		case "spec_only":
+			result.SpecOnly = true
+		case "complex":
+			result.Complex = true
+		case "prefer_refs":
+			fmt.Fprintf(diag, "%s: data_parser/v0.0.45 ignoring default flag FLAG_PREFER_REFS\n", command)
+		default:
+			fmt.Fprintf(diag, "%s: warning: data_parser/v0.0.45 ignoring unknown flag %s\n", command, flag)
+		}
+	}
+	return result, nil
+}
+
 // WriteSchema emits a report type's ordered schema without a second definition.
 func WriteSchema[T any](w io.Writer, format string, options SerializerOptions) error {
 	return writeOutput(w, reportSchema(reflect.TypeFor[T](), "", ""), format, options)
@@ -66,6 +127,9 @@ func stringsArray(values []string) array {
 // declaration order, inline types and explicit empty required arrays used by
 // the CLI's spec_only response. The same types also carry the actual data.
 func reportSchema(t reflect.Type, description, enum string) object {
+	if t.Kind() == reflect.Pointer {
+		t = t.Elem()
+	}
 	var kind, format string
 	switch t.Kind() {
 	case reflect.Struct:
@@ -76,6 +140,8 @@ func reportSchema(t reflect.Type, description, enum string) object {
 		kind = "string"
 	case reflect.Bool:
 		kind = "boolean"
+	case reflect.Float64:
+		kind, format = "number", "double"
 	case reflect.Uint64, reflect.Int64:
 		kind, format = "integer", "int64"
 		if annotated, ok := reflect.Zero(t).Interface().(interface{ SchemaFormat() string }); ok {
@@ -116,6 +182,9 @@ func reportSchema(t reflect.Type, description, enum string) object {
 // optional scalar values, but leaves string array elements (including argv)
 // intact. Numeric wrappers own their unset/infinite representation.
 func reportValue(v reflect.Value, complex, keepEmpty bool) any {
+	if v.Kind() == reflect.Pointer {
+		v = v.Elem()
+	}
 	if complex {
 		if number, ok := v.Interface().(interface{ ComplexValue() any }); ok {
 			return number.ComplexValue()
@@ -126,6 +195,10 @@ func reportValue(v reflect.Value, complex, keepEmpty bool) any {
 		result := object{}
 		for i := 0; i < v.NumField(); i++ {
 			field := v.Type().Field(i)
+			// Schema-only fields and absent observations have no data value.
+			if field.Tag.Get("report") == "-" || v.Field(i).Kind() == reflect.Pointer && v.Field(i).IsNil() {
+				continue
+			}
 			result = append(result, member{field.Tag.Get("json"), reportValue(v.Field(i), complex, field.Tag.Get("complex") == "keep_empty")})
 		}
 		return result
@@ -142,6 +215,8 @@ func reportValue(v reflect.Value, complex, keepEmpty bool) any {
 		return v.String()
 	case reflect.Bool:
 		return v.Bool()
+	case reflect.Float64:
+		return v.Float()
 	case reflect.Uint64:
 		return v.Uint()
 	case reflect.Int64:

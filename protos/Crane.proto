@@ -714,6 +714,8 @@ message QueryJobsInfoRequest {
   QueryJobsInfoMode mode = 17;
   bool option_query_steps_only = 18;
   repeated string filter_reservations = 19;
+  // Public CLI fields for the live queue only.
+  bool include_public_queue_details = 20;
 }
 
 message QueryJobsInfoReply {

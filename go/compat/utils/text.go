@@ -6,6 +6,7 @@ package utils
 
 import (
 	"fmt"
+	"io"
 	"os"
 	"path/filepath"
 	"strconv"
@@ -246,4 +247,53 @@ func CommandTimezone(env map[string]string) *time.Location {
 		return time.UTC
 	}
 	return location
+}
+
+// TimeFormatter formats Slurm timestamps against the date at command startup.
+func TimeFormatter(command, format string, now time.Time, diagnostics io.Writer) func(time.Time) string {
+	return func(t time.Time) string {
+		switch t.Unix() {
+		case 0, 0xffffffff:
+			return "Unknown"
+		case 0xfffffffe:
+			return "None"
+		}
+		if t.IsZero() {
+			return "Unknown"
+		}
+		t = t.In(now.Location())
+		pattern := "%FT%T"
+		switch format {
+		case "", "standard":
+		case "relative":
+			// The reference uses a year/day-of-year key, including its deliberate
+			// year-boundary discontinuity. now is fixed at command startup.
+			distance := (t.Year()-now.Year())*1000 + t.YearDay() - now.YearDay()
+			switch {
+			case distance == -1:
+				pattern = "Ystday %H:%M"
+			case distance == 0:
+				pattern = "%H:%M:%S"
+			case distance == 1:
+				pattern = "Tomorr %H:%M"
+			case distance < -365 || distance > 365:
+				pattern = "%-d %b %Y"
+			case distance < -1 || distance > 6:
+				pattern = "%-d %b %H:%M"
+			default:
+				pattern = "%a %H:%M"
+			}
+		default:
+			if !strings.Contains(format, "%") || len(format) >= 32 {
+				fmt.Fprintf(diagnostics, "%s: error: invalid SLURM_TIME_FORMAT = '%s'\n", command, format)
+			} else {
+				pattern = format
+			}
+		}
+		value := Strftime(pattern, t)
+		if len(value) >= 256 || value == "" {
+			return strings.Repeat("#", 255)
+		}
+		return value
+	}
 }

@@ -1181,7 +1181,7 @@ bool MongodbClient::FetchJobRecords(
         wckey_info += ViewValueOr_(view["wckey"], std::string(""));
         job_info.set_wckey(wckey_info);
 
-        auto* mutable_licenses = job_info.mutable_licenses_count();
+        auto* mutable_licenses = job_info.mutable_allocated_licenses();
         for (auto&& elem :
              ViewValueOr_(view["licenses_alloc"],
                           bsoncxx::builder::basic::make_document().view())) {
@@ -1421,7 +1421,7 @@ bool MongodbClient::FetchJobStepRecords(
         }
       }
 
-      auto* mutable_licenses = job_info_ptr->mutable_licenses_count();
+      auto* mutable_licenses = job_info_ptr->mutable_allocated_licenses();
       for (auto&& elem :
            ViewValueOr_(view["licenses_alloc"],
                         bsoncxx::builder::basic::make_document().view())) {

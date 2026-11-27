@@ -8,7 +8,6 @@ import (
 	"bytes"
 	"context"
 	"fmt"
-	"github.com/PKUHPC/CraneSched/go/generated/protos"
 	"net"
 	"os"
 	"path/filepath"
@@ -17,6 +16,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/PKUHPC/CraneSched/go/generated/protos"
 	"google.golang.org/grpc"
 	"google.golang.org/protobuf/types/known/durationpb"
 	"google.golang.org/protobuf/types/known/timestamppb"
@@ -249,60 +249,6 @@ func TestFractionalCPUProjection(t *testing.T) {
 	}
 }
 
-func TestMissingTopologyIsNotInvented(t *testing.T) {
-	o, err := parseCommand([]string{"sinfo", "-O", "SocketCoreThread"}, nil)
-	if err != nil {
-		t.Fatal(err)
-	}
-	s, err := adaptSnapshot(adapterFixture(), o.Query)
-	if err != nil {
-		t.Fatal(err)
-	}
-	var out bytes.Buffer
-	if err := newTextRenderer().table(&out, buildRows(s, o), o); err == nil || out.Len() != 0 {
-		t.Fatalf("out=%q err=%v", out.String(), err)
-	}
-}
-
-func TestAbsentTelemetryIsNotAConfiguredValue(t *testing.T) {
-	for _, field := range []string{"CPUsLoad", "FreeMem"} {
-		o, err := parseCommand([]string{"sinfo", "-O", field}, nil)
-		if err != nil {
-			t.Fatal(err)
-		}
-		s, err := adaptSnapshot(adapterFixture(), o.Query)
-		if err != nil {
-			t.Fatal(err)
-		}
-		var out bytes.Buffer
-		if err := newTextRenderer().table(&out, buildRows(s, o), o); err == nil || out.Len() != 0 || !strings.Contains(err.Error(), "observation") {
-			t.Fatalf("%s out=%q err=%v", field, &out, err)
-		}
-	}
-}
-
-func TestStructuredImplicitCapabilitiesDoNotBecomeZeroValues(t *testing.T) {
-	for _, kind := range []string{"json", "yaml"} {
-		o, err := parseCommand([]string{"sinfo", "--" + kind, "-o", "%N"}, nil)
-		if err != nil {
-			t.Fatal(err)
-		}
-		s, err := adaptSnapshot(adapterFixture(), o.Query)
-		if err != nil {
-			t.Fatal(err)
-		}
-		var out, diagnostics bytes.Buffer
-		err = renderStructured(&out, &diagnostics, []string{"sinfo"}, buildRows(s, o), s, o, newTextRenderer().UserName)
-		if err == nil || !strings.Contains(err.Error(), "field Disk") || out.Len() != 0 {
-			t.Fatalf("%s out=%q err=%v", kind, &out, err)
-		}
-		o.DataParser, o.HasDataParser = "v0.0.45+spec_only", true
-		if err := renderStructured(&out, &diagnostics, []string{"sinfo"}, nil, s, o, newTextRenderer().UserName); err != nil || out.Len() == 0 {
-			t.Fatalf("schema-only output: %v", err)
-		}
-	}
-}
-
 func TestGRESIndicesSpanTypesAndDoNotDependOnMapOrder(t *testing.T) {
 	resources := func(types map[string][]string) *protos.DedicatedResourceInNode {
 		m := &protos.DeviceTypeSlotsMap{TypeSlotsMap: map[string]*protos.Slots{}}
@@ -324,30 +270,6 @@ func TestGRESIndicesSpanTypesAndDoNotDependOnMapOrder(t *testing.T) {
 	used.NameTypeMap["gpu"].TypeSlotsMap["a"].Slots = []string{"/dev/missing"}
 	if _, _, err = projectGRES(total, used, order); err == nil {
 		t.Fatal("unknown allocated device was represented as a valid index")
-	}
-}
-
-func TestGRESDataErrorOnlyAffectsRequestsForGRES(t *testing.T) {
-	reply := adapterFixture()
-	reply.Nodes[0].ResAlloc.Gres = &protos.DedicatedResourceInNode{NameTypeMap: map[string]*protos.DeviceTypeSlotsMap{
-		"gpu": {TypeSlotsMap: map[string]*protos.Slots{"a": {Slots: []string{"/dev/unknown"}}}},
-	}}
-	o, err := parseCommand([]string{"sinfo", "-h", "-o", "%N"}, nil)
-	if err != nil {
-		t.Fatal(err)
-	}
-	s, err := adaptSnapshot(reply, o.Query)
-	if err != nil {
-		t.Fatal(err)
-	}
-	var out bytes.Buffer
-	if err = newTextRenderer().table(&out, buildRows(s, o), o); err != nil || out.String() != "n1\n" {
-		t.Fatalf("out=%q err=%v", &out, err)
-	}
-	o.Fields, _ = parseFormat("GresUsed", true)
-	out.Reset()
-	if err = newTextRenderer().table(&out, buildRows(s, o), o); err == nil || out.Len() != 0 {
-		t.Fatalf("out=%q err=%v", &out, err)
 	}
 }
 

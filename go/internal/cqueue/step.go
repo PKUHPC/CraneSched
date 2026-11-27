@@ -165,9 +165,6 @@ func ProcessStepNodeList(stepData StepData) string {
 }
 
 func ProcessStepState(stepData StepData) string {
-	if util.IsSlurmOutputMode() {
-		return FormatSlurmJobState(stepData.stepInfo.GetStatus())
-	}
 	return stepData.stepInfo.GetStatus().String()
 }
 

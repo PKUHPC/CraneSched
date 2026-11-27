@@ -85,6 +85,15 @@ func BuildCbatchJob(cmd *cobra.Command, args []string, config *util.Config) (*pr
 	job.Payload = &protos.JobToCtld_BatchMeta{
 		BatchMeta: &protos.BatchJobAdditionalMeta{},
 	}
+	var scriptPath string
+	if len(args) > 0 {
+		var err error
+		scriptPath, err = filepath.Abs(args[0])
+		if err != nil {
+			return nil, err
+		}
+	}
+	job.GetBatchMeta().ScriptPath = &scriptPath
 	job.IoMeta = &protos.IoMeta{}
 	job.ShScript = shScript
 
@@ -217,12 +226,11 @@ func BuildCbatchJob(cmd *cobra.Command, args []string, config *util.Config) (*pr
 		job.Qos = FlagQos
 	}
 	if cmd.Flags().Changed("licenses") {
-		licCount, isLicenseOr, err := util.ParseLicensesString(FlagLicenses)
+		licenses, err := util.ParseLicensesString(FlagLicenses)
 		if err != nil {
 			return nil, fmt.Errorf("invalid argument: --licenses value '%s'", FlagLicenses)
 		}
-		job.LicensesCount = licCount
-		job.IsLicensesOr = isLicenseOr
+		job.RequestedLicenses = licenses
 	}
 	if cmd.Flags().Changed("chdir") {
 		job.Cwd = FlagCwd
@@ -455,12 +463,11 @@ func applyScriptArgs(cmd *cobra.Command, cbatchArgs []CbatchArg, job *protos.Job
 		case "--qos", "-q":
 			job.Qos = arg.val
 		case "--licenses", "-L":
-			licCount, isLicenseOr, err := util.ParseLicensesString(arg.val)
+			licenses, err := util.ParseLicensesString(arg.val)
 			if err != nil {
 				return fmt.Errorf("invalid argument: %s value '%s' in script", arg.name, arg.val)
 			}
-			job.LicensesCount = licCount
-			job.IsLicensesOr = isLicenseOr
+			job.RequestedLicenses = licenses
 		case "-D", "--chdir":
 			job.Cwd = arg.val
 		case "--exclude", "-x":

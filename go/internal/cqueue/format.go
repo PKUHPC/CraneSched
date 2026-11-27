@@ -175,7 +175,7 @@ func ProcessStartTime(job *protos.JobInfo) string {
 
 // 't' group
 func ProcessState(job *protos.JobInfo) string {
-	return FormatQueueState(job)
+	return job.GetStatus().String()
 }
 
 func ProcessStateCompact(job *protos.JobInfo) string {

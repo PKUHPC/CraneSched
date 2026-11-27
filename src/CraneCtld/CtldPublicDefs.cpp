@@ -437,6 +437,12 @@ void StepInCtld::SetFieldsOfStepInfo(
   step_info->set_job_id(job_id);
   step_info->set_step_id(m_step_id_);
 
+  if (StepToCtld().has_io_meta())
+    *step_info->mutable_io_meta() = StepToCtld().io_meta();
+  if (StepToCtld().has_cpus_per_task())
+    step_info->set_cpus_per_task(StepToCtld().cpus_per_task());
+  if (StepToCtld().has_gres_per_node())
+    *step_info->mutable_gres_per_node() = StepToCtld().gres_per_node();
   step_info->set_name(name);
   step_info->set_cwd(cwd);
   step_info->set_extra_attr(extra_attr);
@@ -1687,6 +1693,12 @@ CommonStepInCtld::StepStatusChange(crane::grpc::JobStatus new_status,
       }
     }
 
+    // A crun step leaves the live query as soon as it finishes. Keep its
+    // process outcome on the allocation before releasing the step.
+    if ((!IsPrimaryStep() || job->IsCrun()) &&
+        job->RecordStepExitStatus(Status(), ExitCode()))
+      context->rn_job_raw_ptrs.insert(job);
+
     // Release step
     context->step_raw_ptrs.insert(this);
     if (this->IsPrimaryStep()) {
@@ -1916,6 +1928,7 @@ void JobInCtld::SetSuspendTime(absl::Time const& val) {
 void JobInCtld::SetActualLicenses(
     std::unordered_map<LicenseId, uint32_t>&& actual_licenses) {
   auto* mutable_map = runtime_attr.mutable_actual_licenses();
+  mutable_map->clear();
   for (const auto& [id, count] : actual_licenses) {
     mutable_map->insert({id, count});
   }
@@ -1933,18 +1946,41 @@ std::string_view JobInCtld::HoldReason() const {
   return runtime_attr.held_by_admin() ? "JobHeldAdmin" : "JobHeldUser";
 }
 
-bool JobInCtld::ShouldRequeue() const {
-  if (type != crane::grpc::Batch) return false;
-  if (job_to_ctld.no_requeue()) return false;
+bool JobInCtld::RecordStepExitStatus(crane::grpc::JobStatus step_status,
+                                     uint32_t code) {
+  if (!runtime_attr.has_max_step_wait_status()) return false;
 
-  bool requeue_allowed = g_config.CtldConf.JobRequeue || requeue_if_failed;
-  if (requeue_requested) return requeue_allowed;
+  // Scheduler failures have no process wait status. Recovery of old jobs
+  // likewise cannot reconstruct outcomes for previously removed steps.
+  if ((step_status == crane::grpc::Failed && code == 0) ||
+      step_status == crane::grpc::JobStatus::OutOfMemory ||
+      code == ExitCode::kTerminationSignalBase ||
+      code >= ExitCode::kCraneExitCodeBase) {
+    runtime_attr.clear_max_step_wait_status();
+    return true;
+  }
+  const uint32_t wait_status = code < ExitCode::kExitStatusNum
+                                   ? code << 8
+                                   : code - ExitCode::kTerminationSignalBase;
+  if (wait_status <= runtime_attr.max_step_wait_status()) return false;
+  runtime_attr.set_max_step_wait_status(wait_status);
+  return true;
+}
+
+bool JobInCtld::RequeueEligible() const {
+  return type == crane::grpc::Batch && !job_to_ctld.no_requeue() &&
+         (g_config.CtldConf.JobRequeue || requeue_if_failed);
+}
+
+bool JobInCtld::ShouldRequeue() const {
+  if (!RequeueEligible()) return false;
+  if (requeue_requested) return true;
 
   // System-level failures trigger requeue if the cluster default allows
   // requeue or the job explicitly requested it.
   if (exit_code == ExitCode::EC_CRANED_DOWN ||
       exit_code == ExitCode::EC_RPC_ERR)
-    return requeue_allowed;
+    return true;
 
   return requeue_if_failed && status != crane::grpc::Completed &&
          status != crane::grpc::Cancelled;
@@ -1972,6 +2008,7 @@ void JobInCtld::ResetForRequeue() {
   allocated_res_view = ResourceView{};
   pending_reason.clear();
 
+  licenses_count.clear();
   runtime_attr.mutable_actual_licenses()->clear();
   runtime_attr.mutable_task_node_list()->Clear();
 
@@ -2115,8 +2152,25 @@ void JobInCtld::TriggerTerminalDependencyEvents(absl::Time end_time) {
                           exit_code != 0 ? end_time : absl::InfiniteFuture());
 }
 
+void JobInCtld::SetMemoryPerCpu(uint64_t bytes, uint64_t partition_max) {
+  if (partition_max != 0) bytes = std::min(bytes, partition_max);
+  effective_memory_per_cpu = bytes;
+  uint64_t per_task = req_task_res_view.CpuCountDouble() * bytes;
+  req_task_res_view.SetMemoryBytes(per_task);
+  req_task_res_view.SetMemorySwBytes(per_task);
+}
+
 void JobInCtld::SetFieldsByJobToCtld(crane::grpc::JobToCtld const& val) {
   job_to_ctld = val;
+  if (!job_to_ctld.has_requested_licenses() &&
+      !job_to_ctld.legacy_licenses().empty()) {
+    auto* request = job_to_ctld.mutable_requested_licenses();
+    request->mutable_entries()->Swap(job_to_ctld.mutable_legacy_licenses());
+    request->set_any_of(job_to_ctld.legacy_licenses_or());
+  }
+  job_to_ctld.clear_legacy_licenses();
+  job_to_ctld.clear_legacy_licenses_or();
+  runtime_attr.set_max_step_wait_status(0);
 
   partition_id = (val.partition_name().empty()) ? g_config.DefaultPartition
                                                 : val.partition_name();
@@ -2158,13 +2212,8 @@ void JobInCtld::SetFieldsByJobToCtld(crane::grpc::JobToCtld const& val) {
     req_task_res_view.SetCpuCount(cpu_t(1));
   }
 
-  if (val.has_mem_per_cpu()) {
-    uint64_t mem_per_task =
-        static_cast<double>(req_task_res_view.GetCpuCount()) *
-        val.mem_per_cpu();
-    req_task_res_view.SetMemoryBytes(mem_per_task);
-    req_task_res_view.SetMemorySwBytes(mem_per_task);
-  }
+  effective_memory_per_cpu.reset();
+  if (val.has_mem_per_cpu()) SetMemoryPerCpu(val.mem_per_cpu());
 
   uid = val.uid();
   password_entry = std::make_unique<PasswordEntry>(uid);
@@ -2297,6 +2346,28 @@ void JobInCtld::SetFieldsOfJobInfo(crane::grpc::JobInfo* job_info) const {
   job_info->set_reservation(reservation);
 
   job_info->set_submit_hostname(submit_hostname);
+  if (job_to_ctld.has_io_meta())
+    *job_info->mutable_io_meta() = job_to_ctld.io_meta();
+  if (job_to_ctld.has_cpus_per_task())
+    job_info->set_cpus_per_task(job_to_ctld.cpus_per_task());
+  job_info->set_max_nodes(node_num_max);
+  if (job_to_ctld.has_submitted_size())
+    *job_info->mutable_submitted_size() = job_to_ctld.submitted_size();
+  if (job_to_ctld.batch_meta().has_script_path())
+    job_info->set_script_path(job_to_ctld.batch_meta().script_path());
+  job_info->set_requeue_eligible(RequeueEligible());
+  if (runtime_attr.has_max_step_wait_status())
+    job_info->set_max_step_wait_status(runtime_attr.max_step_wait_status());
+  if (effective_memory_per_cpu)
+    job_info->set_memory_per_cpu(*effective_memory_per_cpu);
+  if (job_to_ctld.has_gres_per_node())
+    *job_info->mutable_gres_per_node() = job_to_ctld.gres_per_node();
+  if (Status() == crane::grpc::Pending)
+    job_info->mutable_scheduled_nodes()->Assign(scheduled_nodes.begin(),
+                                                scheduled_nodes.end());
+  if (job_to_ctld.has_requested_licenses())
+    *job_info->mutable_requested_licenses() = job_to_ctld.requested_licenses();
+  *job_info->mutable_allocated_licenses() = runtime_attr.actual_licenses();
 
   if (const auto* array_spec = GetArraySpec(); array_spec != nullptr) {
     *job_info->mutable_array_spec() = *array_spec;
@@ -2356,7 +2427,7 @@ void JobInCtld::SetFieldsOfJobInfo(crane::grpc::JobInfo* job_info) const {
   auto job_status = Status();
   job_info->set_status(job_status);
   if (job_status == crane::grpc::Pending) {
-    job_info->set_pending_reason(pending_reason);
+    *job_info->mutable_pending_reason() = held ? HoldReason() : pending_reason;
   } else {
     job_info->set_craned_list(allocated_craneds_regex);
   }
@@ -2369,9 +2440,6 @@ void JobInCtld::SetFieldsOfJobInfo(crane::grpc::JobInfo* job_info) const {
   if (using_default_wckey) wckey_info += "*";
   if (!wckey.empty()) wckey_info += wckey;
   job_info->set_wckey(wckey_info);
-
-  job_info->mutable_licenses_count()->insert(licenses_count.begin(),
-                                             licenses_count.end());
 
   auto* mutable_env = job_info->mutable_env();
   for (auto const& [k, v] : env) {
