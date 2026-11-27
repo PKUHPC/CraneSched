@@ -91,6 +91,9 @@ func (s *referenceQueue) QueryJobsInfo(_ context.Context, req *pb.QueryJobsInfoR
 		if len(req.FilterPartitions) > 0 && !slices.Contains(req.FilterPartitions, j.Partition) {
 			continue
 		}
+		if len(req.FilterReservations) > 0 && !slices.Contains(req.FilterReservations, j.Reservation) {
+			continue
+		}
 		reply.JobInfoList = append(reply.JobInfoList, j)
 	}
 	return reply, nil
@@ -122,7 +125,7 @@ func TestQueueTextOutput(t *testing.T) {
 		IoMeta: &pb.IoMeta{OutputFilePattern: "/tmp/build-%j.log"},
 	}
 	active := &pb.JobInfo{
-		JobId: 8, Type: pb.JobType_Batch, Status: pb.JobStatus_Running, Partition: "cpu", Uid: 1001, Username: "alice",
+		JobId: 8, Type: pb.JobType_Batch, Status: pb.JobStatus_Running, Reservation: "Maint", Partition: "cpu", Uid: 1001, Username: "alice",
 		PendingReasonOrCranedList: &pb.JobInfo_CranedList{CranedList: "slurm[02-03]"}, ExecutionNode: []string{"slurm02"},
 		QueryVisibility: visibility,
 		StepInfoList: []*pb.StepInfo{
@@ -152,6 +155,11 @@ func TestQueueTextOutput(t *testing.T) {
 		{"step nodelist width", []string{"-s8.0", "-o", "%.4N|%4N"}, nil, "NODELIST|NODE\nslurm[02-03]|slur\n", ""},
 		{"job filter matches secondary node alias", []string{"-hj8", "-w", "host03", "-o", "%i"}, nil, "8\n", ""},
 		{"step filter matches secondary node alias", []string{"-hs8.0", "-w", "host03", "-o", "%i"}, nil, "8.0\n", ""},
+		{"reservation list", []string{"-h", "-R", "other,Maint", "-o", "%i|%v"}, nil, "8|Maint\n", ""},
+		{"empty reservation selects no jobs", []string{"-h", "--reservation=", "-o", "%i"}, nil, "", ""},
+		{"single job in reservation", []string{"-hj8", "-R", "Maint", "-o", "%i"}, nil, "8\n", ""},
+		{"reservation case mismatch on single job", []string{"-hj8", "-R", "maint", "-o", "%i"}, nil, "", ""},
+		{"steps ignore job reservation", []string{"-hs8.0", "-R", "other", "-o", "%i"}, nil, "8.0\n", ""},
 		{"job exists outside node filter", []string{"-hj8", "-w", "slurm01", "-o", "%i"}, nil, "", ""},
 		{"job numeric UID with leading zeros", []string{"-hj8", "-u", "01001", "-o", "%U"}, nil, "1001\n", ""},
 		{"step owner differs from job owner", []string{"-hs8.0", "-u", "0000", "-o", "%U|%u"}, nil, "0|root\n", ""},
@@ -168,6 +176,31 @@ func TestQueueTextOutput(t *testing.T) {
 				t.Errorf("exit %d, stdout %q, stderr %q; want 0, %q, %q", rc, &out, &diag, tc.stdout, tc.stderr)
 			}
 		})
+	}
+	var out, diag bytes.Buffer
+	rc := execute(t.Context(), config, []string{"squeue", "-hj999", "-R", "Maint"}, nil, &out, &diag)
+	if rc != 1 || out.Len() != 0 || diag.String() != "slurm_load_jobs error: Invalid job id specified\n" {
+		t.Errorf("missing job: exit %d, stdout %q, stderr %q", rc, &out, &diag)
+	}
+}
+
+func TestReservationQueryScope(t *testing.T) {
+	for _, tc := range []struct {
+		args []string
+		want []string
+	}{
+		{[]string{"-R", "old", "--reservation=Maint, other"}, []string{"Maint", "other"}},
+		{[]string{"-R", "Maint", "-j7,8", "--json"}, []string{"Maint"}},
+		{[]string{"-R", "Maint", "-j8"}, nil},
+		{[]string{"-R", "Maint", "-s"}, nil},
+	} {
+		o, err := parse(tc.args, nil, io.Discard)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if got := o.queueRequest().FilterReservations; !slices.Equal(got, tc.want) {
+			t.Errorf("%v sent reservations %q, want %q", tc.args, got, tc.want)
+		}
 	}
 }
 

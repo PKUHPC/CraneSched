@@ -350,6 +350,10 @@ func (o *options) rows(reply *pb.QueryJobsInfoReply) ([]row, error) {
 	if o.onlyState && o.serializer != "" {
 		return o.stateRows(reply), nil
 	}
+	// An explicitly empty list matches no jobs; the RPC treats an empty list as unrestricted.
+	if !o.steps && assigned(o.raw, "reservation") && len(o.req.FilterReservations) == 0 {
+		return nil, nil
+	}
 	var result []row
 	for _, j := range reply.JobInfoList {
 		if o.steps {
@@ -378,6 +382,10 @@ func (o *options) rows(reply *pb.QueryJobsInfoReply) ([]row, error) {
 				continue
 			}
 		}
+		// Single-job lookup must distinguish a missing ID from a reservation mismatch.
+		if len(o.req.FilterJobIds) == 1 && len(o.req.FilterReservations) > 0 && !slices.Contains(o.req.FilterReservations, j.Reservation) {
+			continue
+		}
 		if len(o.req.FilterPartitions) > 0 && !slices.Contains(o.req.FilterPartitions, j.Partition) {
 			continue
 		}
@@ -387,7 +395,7 @@ func (o *options) rows(reply *pb.QueryJobsInfoReply) ([]row, error) {
 		if !matchesFold(o.accounts, j.Account) || !matchesFold(o.qos, j.Qos) || !matchesFold(o.names, j.Name) {
 			continue
 		}
-		if o.users != nil && !slices.Contains(o.users, num(j.Uid)) || o.notUser == num(j.Uid) || !matchesFold(o.reservations, j.Reservation) {
+		if o.users != nil && !slices.Contains(o.users, num(j.Uid)) || o.notUser == num(j.Uid) {
 			continue
 		}
 		if len(o.states) > 0 && !slices.Contains(o.states, j.Status) {

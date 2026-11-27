@@ -73,7 +73,7 @@ type options struct {
 	parserAttached, customFormat, customLong, customSort bool
 	iterate, verbose                                     int
 	under, over                                          int64
-	licenses, reservations, users, names, accounts, qos  []string
+	licenses, users, names, accounts, qos                []string
 	nodes                                                *utils.HostList
 	states                                               []pb.JobStatus
 	raw                                                  map[string]string
@@ -175,8 +175,6 @@ func parse(args []string, env map[string]string, diag io.Writer) (*options, erro
 		case "partitions":
 			values[op.Name] = v
 			o.all = true
-		case "reservation":
-			o.reservations = list(v)
 		case "iterate":
 			o.iterate = 0
 			_, _ = fmt.Sscanf(strings.TrimSpace(v), "%d", &o.iterate)
@@ -258,6 +256,13 @@ func parse(args []string, env map[string]string, diag io.Writer) (*options, erro
 	}
 	o.qos = list(values["qos"])
 	o.licenses = list(values["licenses"])
+	if raw, ok := values["reservation"]; ok && !o.steps {
+		for name := range strings.SplitSeq(raw, ",") {
+			if name = strings.TrimSpace(name); name != "" {
+				o.req.FilterReservations = append(o.req.FilterReservations, name)
+			}
+		}
+	}
 	o.names = list(values["name"])
 	if values["users"] != "" {
 		o.users = []string{}
@@ -281,7 +286,7 @@ func parse(args []string, env map[string]string, diag io.Writer) (*options, erro
 	if err := o.selectStates(values["states"]); err != nil {
 		return nil, err
 	}
-	if o.onlyState && (o.notUser != "" || o.all || o.long || o.steps || o.start || len(o.accounts)+len(o.req.FilterPartitions)+len(o.qos)+len(o.names)+len(o.licenses)+len(o.users)+len(o.reservations) > 0 || o.nodes != nil || o.priority || o.over > 0 || o.under > 0) {
+	if o.onlyState && (o.notUser != "" || o.all || o.long || o.steps || o.start || len(o.accounts)+len(o.req.FilterPartitions)+len(o.qos)+len(o.names)+len(o.licenses)+len(o.users)+len(o.req.FilterReservations) > 0 || o.nodes != nil || o.priority || o.over > 0 || o.under > 0) {
 		return nil, fmt.Errorf("squeue: fatal: Option --only-job-state only works alone, with -j (--jobs) and/or -t (--states) parameters, parameters for cluster/federation selection, and the printing options.")
 	}
 	if o.under > 0 && o.over > o.under {
@@ -393,7 +398,7 @@ func (o *options) printOptions(out io.Writer) error {
 		k string
 		v any
 	}{
-		{"all", o.all}, {"array", o.array}, {"federation", o.federation}, {"format", nullable(format)}, {"iterate", o.iterate}, {"job_flag", bit(o.jobs && !o.steps)}, {"jobs", nullable(o.jobIDs)}, {"licenses", nullable(o.raw["licenses"])}, {"local", o.local}, {"names", nullable(o.raw["name"])}, {"nodes", o.nodeText}, {"only_job_state", o.onlyState}, {"partitions", nullable(o.raw["partitions"])}, {"priority", o.priority}, {"reservation", nullable(strings.Join(o.reservations, ","))}, {"sibling ", o.sibling}, {"sort", nullable(sortOrder)}, {"start_flag", bit(o.start)}, {"states", nullable(states)}, {"step_flag", bit(o.steps)}, {"steps", nullable(o.stepIDs)}, {"users", nullable(o.raw["users"])}, {"verbose", o.verbose},
+		{"all", o.all}, {"array", o.array}, {"federation", o.federation}, {"format", nullable(format)}, {"iterate", o.iterate}, {"job_flag", bit(o.jobs && !o.steps)}, {"jobs", nullable(o.jobIDs)}, {"licenses", nullable(o.raw["licenses"])}, {"local", o.local}, {"names", nullable(o.raw["name"])}, {"nodes", o.nodeText}, {"only_job_state", o.onlyState}, {"partitions", nullable(o.raw["partitions"])}, {"priority", o.priority}, {"reservation", nullable(o.raw["reservation"])}, {"sibling ", o.sibling}, {"sort", nullable(sortOrder)}, {"start_flag", bit(o.start)}, {"states", nullable(states)}, {"step_flag", bit(o.steps)}, {"steps", nullable(o.stepIDs)}, {"users", nullable(o.raw["users"])}, {"verbose", o.verbose},
 	} {
 		if v.k == "sibling " {
 			fmt.Fprintf(&b, "sibling      = %v\n", v.v)
