@@ -6345,7 +6345,7 @@ void JobScheduler::CleanJobStatusChangeQueueCb_() {
             g_license_manager->FreeLicense(job->licenses_count);
 
           // Collect raw ptr for batch EmbeddedDB write (first write:
-          // terminal status). PersistAndRequeueJobs_ handles the rest.
+          // terminal status). ResetAndRequeueJobs_ handles the reset afterward.
           context.rn_job_raw_ptrs.insert(job.get());
           context.requeue_jobs.emplace_back(std::move(job));
           m_running_job_map_.erase(iter);
@@ -6866,7 +6866,13 @@ void JobScheduler::CleanJobStatusChangeQueueCb_() {
   // Requeue jobs: archive to MongoDB then reset to Pending in EmbeddedDB.
   // Must run after the batch EmbeddedDB write (first write with terminal
   // status) and outside of running_guard scope.
-  PersistAndRequeueJobs_(context.requeue_jobs);
+  for (const auto& job : context.requeue_jobs)
+    g_db_client->InsertJob(job.get());
+  auto requeue_final_parents = ResetAndRequeueJobs_(context.requeue_jobs);
+  final_array_parents.insert(
+      final_array_parents.end(),
+      std::make_move_iterator(requeue_final_parents.begin()),
+      std::make_move_iterator(requeue_final_parents.end()));
   now = std::chrono::steady_clock::now();
   ArrayManager::ProcessFinalParents(final_array_parents);
   duration = std::chrono::steady_clock::now() - now;
@@ -8562,24 +8568,29 @@ JobScheduler::PersistAndTransferJobsToMongodb_(
   return result;
 }
 
-void JobScheduler::PersistAndRequeueJobs_(
+std::vector<ArrayManager::FinalizedArrayParent>
+JobScheduler::ResetAndRequeueJobs_(
     std::vector<std::unique_ptr<JobInCtld>>& jobs) {
-  if (jobs.empty()) return;
+  if (jobs.empty()) return {};
 
   std::vector<std::unique_ptr<JobInCtld>> requeued;
   std::unordered_map<job_id_t, job_db_id_t> drop_ids;
+  std::unordered_set<JobInCtld*> dropped_children;
+  std::vector<ArrayManager::FinalizedArrayParent> final_parents;
 
   for (auto& job : jobs) {
     job_id_t job_id = job->JobId();
     job_db_id_t job_db_id = job->JobDbId();
 
-    g_db_client->InsertJob(job.get());
-
     bool ok = g_embedded_db_client->ResetJobStepIdCounter(job_id);
     if (ok) {
+      const auto terminal_attr = job->RuntimeAttr();
       job->ResetForRequeue();
       ok = g_embedded_db_client->UpdateRuntimeAttrOfJob(0, job_db_id,
                                                         job->RuntimeAttr());
+      // No new attempt was admitted. Aggregate the archived child's result.
+      if (!ok && job->IsArrayChild())
+        job->SetFieldsByRuntimeAttrOfJob(terminal_attr);
     }
     if (ok) {
       if (job->RequeueCount() >= g_config.CtldConf.MaxRequeueCount) {
@@ -8593,8 +8604,20 @@ void JobScheduler::PersistAndRequeueJobs_(
       requeued.emplace_back(std::move(job));
     } else {
       CRANE_ERROR("[Job #{}] Requeue DB ops failed, dropping.", job_id);
+      if (job->IsArrayChild()) dropped_children.insert(job.get());
       drop_ids[job_id] = job_db_id;
     }
+  }
+
+  if (!dropped_children.empty()) {
+    LockGuard pending_guard(&m_pending_job_map_mtx_);
+    for (auto* child : dropped_children) {
+      auto parents = m_array_manager_->OnChildTerminal(child, dropped_children);
+      final_parents.insert(final_parents.end(),
+                           std::make_move_iterator(parents.begin()),
+                           std::make_move_iterator(parents.end()));
+    }
+    SpliceFinalArrayParentsFromPendingMapNoLock_(final_parents);
   }
 
   if (!drop_ids.empty()) g_embedded_db_client->PurgeEndedJobs(drop_ids);
@@ -8616,6 +8639,7 @@ void JobScheduler::PersistAndRequeueJobs_(
     for (auto& job : requeued)
       m_pending_job_map_.emplace(job->JobId(), std::move(job));
   }
+  return final_parents;
 }
 
 CraneExpected<void> JobScheduler::HandleUnsetOptionalInJobToCtld(

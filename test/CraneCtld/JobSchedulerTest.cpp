@@ -13,6 +13,7 @@
 #include "Accounting/AccountMetaContainer.h"
 #include "Array.h"
 #include "Database/EmbeddedDbClient.h"
+#include "Database/LegacyEmbeddedDbClient.h"
 #include "JobScheduler.h"
 
 namespace {
@@ -305,6 +306,125 @@ TEST_F(JobSchedulerTest, ChecksCapacityWithinNodeFilters) {
 namespace Ctld {
 class ArrayRequeueCancellationTest : public ::testing::Test {
  protected:
+  class FailingStore : public IEmbeddedDb {
+   public:
+    FailingStore(std::unique_ptr<IEmbeddedDb> store, bool fail_delete)
+        : store_(std::move(store)), fail_delete_(fail_delete) {}
+    std::expected<void, DbErrorCode> Init(const std::string& path) override {
+      return store_->Init(path);
+    }
+    std::expected<void, DbErrorCode> Close() override {
+      return store_->Close();
+    }
+    std::expected<void, DbErrorCode> Store(txn_id_t txn, const std::string& key,
+                                           const void* data,
+                                           size_t len) override {
+      if (!fail_delete_ && !failed) {
+        failed = true;
+        return std::unexpected(DbErrorCode::OTHER);
+      }
+      return store_->Store(txn, key, data, len);
+    }
+    std::expected<size_t, DbErrorCode> Fetch(txn_id_t txn,
+                                             const std::string& key, void* buf,
+                                             size_t* len) override {
+      return store_->Fetch(txn, key, buf, len);
+    }
+    std::expected<void, DbErrorCode> Delete(txn_id_t txn,
+                                            const std::string& key) override {
+      if (fail_delete_ && !failed) {
+        failed = true;
+        return std::unexpected(DbErrorCode::OTHER);
+      }
+      return store_->Delete(txn, key);
+    }
+    std::expected<txn_id_t, DbErrorCode> Begin() override {
+      return store_->Begin();
+    }
+    std::expected<void, DbErrorCode> Commit(txn_id_t txn) override {
+      return store_->Commit(txn);
+    }
+    std::expected<void, DbErrorCode> Abort(txn_id_t txn) override {
+      return store_->Abort(txn);
+    }
+    std::expected<void, DbErrorCode> IterateAllKv(KvIterFunc fn) override {
+      return store_->IterateAllKv(std::move(fn));
+    }
+    const std::string& DbPath() override { return store_->DbPath(); }
+    bool failed{false};
+
+   private:
+    std::unique_ptr<IEmbeddedDb> store_;
+    bool fail_delete_;
+  };
+
+  void ExerciseFailedRequeue(bool fail_counter_reset) {
+    auto& scheduler = *g_job_scheduler;
+    auto* parent = MakeParent(scheduler);
+    const auto parent_id = parent->JobId();
+    auto& arrays = *scheduler.m_array_manager_;
+    auto child = arrays.MaterializeChildForAllocation(parent, absl::Now());
+    ASSERT_NE(child, nullptr);
+    const auto child_id = child->JobId();
+    const auto child_db_id = child->JobDbId();
+    child->SetCranedIds({"node0"});
+    child->SetStatus(crane::grpc::Failed);
+    child->SetExitCode(17);
+    child->SetStartTime(absl::FromUnixSeconds(100));
+    child->SetEndTime(absl::FromUnixSeconds(120));
+    ASSERT_TRUE(g_embedded_db_client->UpdateRuntimeAttrOfJob(
+        0, child_db_id, child->RuntimeAttr()));
+    const auto terminal_attr = child->RuntimeAttr();
+
+    auto step = std::make_unique<CommonStepInCtld>();
+    step->job = child.get();
+    step->job_id = child_id;
+    ASSERT_TRUE(g_embedded_db_client->AppendSteps({step.get()}));
+    auto& db = static_cast<LegacyEmbeddedDbClient&>(*g_embedded_db_client);
+    auto& store = fail_counter_reset ? db.m_step_var_db_ : db.m_variable_db_;
+    auto failing =
+        std::make_unique<FailingStore>(std::move(store), fail_counter_reset);
+    auto* fault = failing.get();
+    store = std::move(failing);
+
+    // Cover a recorded result before the drop and a later explicit cancel.
+    if (!fail_counter_reset)
+      arrays.RecordParentTerminalResult(parent_id, crane::grpc::Deadline,
+                                        ExitCode::EC_REACHED_DEADLINE);
+    std::vector<std::unique_ptr<JobInCtld>> jobs;
+    jobs.emplace_back(std::move(child));
+    auto final_parents = scheduler.ResetAndRequeueJobs_(jobs);
+    EXPECT_TRUE(fault->failed);
+    ASSERT_NE(jobs.front(), nullptr);
+    EXPECT_EQ(jobs.front()->RuntimeAttr().SerializeAsString(),
+              terminal_attr.SerializeAsString());
+    EXPECT_TRUE(arrays.UnfinishedChildJobIdsForParent(parent_id).empty());
+    EXPECT_FALSE(scheduler.m_pending_job_map_.contains(child_id));
+    crane::grpc::JobInEmbeddedDb stored;
+    EXPECT_FALSE(
+        g_embedded_db_client->FetchJobDataInDb(0, child_db_id, &stored));
+    if (fail_counter_reset) {
+      EXPECT_TRUE(final_parents.empty());
+      EXPECT_TRUE(arrays.IsRegisteredParent(parent_id));
+      ExpectSubmitSlots(*parent, 1);
+      arrays.RecordParentTerminalResult(parent_id, crane::grpc::Cancelled,
+                                        ExitCode::EC_TERMINATED);
+      auto result = arrays.ApplyParentTerminalResult(parent_id, absl::Now());
+      final_parents = std::move(result.final_parents);
+      absl::MutexLock guard(&scheduler.m_pending_job_map_mtx_);
+      scheduler.SpliceFinalArrayParentsFromPendingMapNoLock_(final_parents);
+    }
+    ASSERT_EQ(final_parents.size(), 1U);
+    ASSERT_NE(final_parents.front().parent_job, nullptr);
+    EXPECT_EQ(final_parents.front().array_job_id, parent_id);
+    EXPECT_EQ(parent->Status(), fail_counter_reset ? crane::grpc::Cancelled
+                                                   : crane::grpc::Deadline);
+    EXPECT_FALSE(arrays.IsRegisteredParent(parent_id));
+    EXPECT_FALSE(scheduler.m_pending_job_map_.contains(parent_id));
+    ExpectSubmitSlots(*parent, 0);
+    EXPECT_FALSE(g_account_meta_container->UserHasJob(parent->Username()));
+  }
+
   void ExercisePendingChildCancellation() {
     auto& scheduler = *g_job_scheduler;
     auto* parent = MakeParent(scheduler);
@@ -452,13 +572,20 @@ class ArrayRequeueCancellationTest : public ::testing::Test {
         arrays.MaterializeChildForAllocation(parent, absl::Now());
     ASSERT_NE(other_child, nullptr);
     child->ResetForRequeue();
-    other_child->SetStatus(crane::grpc::Running);
+    const auto child_id = child->JobId();
+    scheduler.m_pending_job_map_.emplace(child_id, std::move(child));
+    other_child->SetStatus(crane::grpc::Configuring);
+    auto* configuring_child = other_child.get();
+    scheduler.m_running_job_map_.emplace(other_child->JobId(),
+                                         std::move(other_child));
 
     AddParentDependents(parent);
     scheduler.m_job_deadline_timer_queue_.enqueue(parent->JobId());
     scheduler.CancelDeadlineJobCb_();
     scheduler.CleanCancelJobQueueCb_();
     EXPECT_EQ(parent->Status(), crane::grpc::Deadline);
+    EXPECT_TRUE(scheduler.m_pending_job_map_.contains(child_id));
+    EXPECT_FALSE(configuring_child->CancelRequested());
     const auto first_end_time = parent->EndTime();
     crane::grpc::JobInEmbeddedDb stored;
     ASSERT_TRUE(
@@ -472,30 +599,51 @@ class ArrayRequeueCancellationTest : public ::testing::Test {
                                          crane::grpc::Cancelled,
                                          ExitCode::EC_TERMINATED, true);
     }
+    EXPECT_FALSE(scheduler.m_pending_job_map_.contains(child_id));
+    // Inspect Pending dispatch without invoking external history storage.
+    JobScheduler::CancelJobQueueElem queued{
+        JobScheduler::CancelArrayParentQueueElem{}};
+    ASSERT_TRUE(scheduler.m_cancel_job_queue_.try_dequeue(queued));
+    ASSERT_TRUE(
+        std::holds_alternative<JobScheduler::CancelArrayParentQueueElem>(
+            queued));
+    auto parent_cancel = std::move(queued);
+    ASSERT_TRUE(scheduler.m_cancel_job_queue_.try_dequeue(queued));
+    auto* pending =
+        std::get_if<JobScheduler::CancelPendingJobQueueElem>(&queued);
+    ASSERT_NE(pending, nullptr);
+    ASSERT_NE(pending->job, nullptr);
+    EXPECT_EQ(pending->job->JobId(), child_id);
+    EXPECT_EQ(pending->finish_status, crane::grpc::Cancelled);
+    scheduler.m_cancel_job_queue_.enqueue(std::move(parent_cancel));
     scheduler.CleanCancelJobQueueCb_();
+    EXPECT_TRUE(configuring_child->CancelRequested());
     EXPECT_EQ(parent->Status(), crane::grpc::Deadline);
     EXPECT_EQ(parent->EndTime(), first_end_time);
     EXPECT_EQ(arrays.UnfinishedChildJobIdsForParent(parent->JobId()).size(),
               2U);
     EXPECT_TRUE(arrays.IsRegisteredParent(parent->JobId()));
     EXPECT_TRUE(g_account_meta_container->UserHasJob(parent->Username()));
+    ExpectSubmitSlots(*parent, 2);
 
-    child->SetStatus(crane::grpc::Cancelled);
-    EXPECT_TRUE(arrays.OnChildTerminal(child.get(), {}).empty());
+    pending->job->SetStatus(pending->finish_status);
+    EXPECT_TRUE(arrays.OnChildTerminal(pending->job.get(), {}).empty());
     EXPECT_TRUE(arrays.IsRegisteredParent(parent->JobId()));
     EXPECT_TRUE(g_account_meta_container->UserHasJob(parent->Username()));
+    ExpectSubmitSlots(*parent, 2);
 
-    other_child->SetStatus(crane::grpc::Cancelled);
-    other_child->SetExitCode(ExitCode::EC_TERMINATED);
-    auto final_parents = arrays.OnChildTerminal(other_child.get(), {});
+    configuring_child->SetStatus(crane::grpc::Cancelled);
+    configuring_child->SetExitCode(ExitCode::EC_TERMINATED);
+    auto final_parents = arrays.OnChildTerminal(configuring_child, {});
     ASSERT_EQ(final_parents.size(), 1U);
     EXPECT_EQ(final_parents.front().array_job_id, parent->JobId());
     EXPECT_EQ(parent->Status(), crane::grpc::Deadline);
     EXPECT_EQ(parent->ExitCode(), ExitCode::EC_REACHED_DEADLINE);
     EXPECT_FALSE(arrays.IsRegisteredParent(parent->JobId()));
     EXPECT_FALSE(g_account_meta_container->UserHasJob(parent->Username()));
+    ExpectSubmitSlots(*parent, 0);
     ExpectParentEvents(scheduler, *parent);
-    EXPECT_TRUE(arrays.OnChildTerminal(other_child.get(), {}).empty());
+    EXPECT_TRUE(arrays.OnChildTerminal(configuring_child, {}).empty());
   }
 
   JobInCtld* MakeParent(JobScheduler& scheduler, uint32_t concurrency = 1) {
@@ -579,6 +727,13 @@ class ArrayRequeueCancellationTest : public ::testing::Test {
 };
 
 #ifdef CRANE_HAVE_UNQLITE
+TEST_F(ArrayRequeueCancellationTest, FailedStepCounterResetAllowsLaterCancel) {
+  ExerciseFailedRequeue(true);
+}
+TEST_F(ArrayRequeueCancellationTest,
+       FailedPendingWriteFinalizesRecordedDeadline) {
+  ExerciseFailedRequeue(false);
+}
 TEST_F(ArrayRequeueCancellationTest, CancelAfterChildIsRequeued) {
   ExercisePendingChildCancellation();
 }

@@ -1468,7 +1468,9 @@ class JobScheduler {
   static FinalTransferResult PersistAndTransferJobsToMongodb_(
       std::unordered_set<JobInCtld*> const& jobs);
 
-  void PersistAndRequeueJobs_(std::vector<std::unique_ptr<JobInCtld>>& jobs);
+  // Called after archiving the terminal attempts, outside scheduler map locks.
+  std::vector<ArrayManager::FinalizedArrayParent> ResetAndRequeueJobs_(
+      std::vector<std::unique_ptr<JobInCtld>>& jobs);
   static uint32_t QosSubmitReserveCount_(const JobInCtld& job);
   // Record the parent result and queue cancellation. For explicit parent
   // cancellation, also queue Pending children and return all tracked child IDs

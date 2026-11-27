@@ -163,6 +163,8 @@ enum class LegacyEmbeddedDbBackend : uint8_t {
 };
 
 class LegacyEmbeddedDbClient final : public EmbeddedDbClient {
+  friend class ArrayRequeueCancellationTest;
+
  public:
   explicit LegacyEmbeddedDbClient(LegacyEmbeddedDbBackend backend);
   ~LegacyEmbeddedDbClient() override;
