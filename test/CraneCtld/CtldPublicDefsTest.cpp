@@ -1300,6 +1300,7 @@ TEST(ResetForRequeueTest, CheckpointRetainsTerminalAttemptAcrossRestart) {
   request.set_type(crane::grpc::Batch);
   request.set_requeue_if_failed(true);
   job.SetFieldsByJobToCtld(request);
+  job.SetCranedIds({"node-a"});
   job.SetStatus(crane::grpc::Failed);
   job.BeginRequeueArchive();
   crane::grpc::StepInEmbeddedDb final_step;

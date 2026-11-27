@@ -333,6 +333,7 @@ void StepInCtld::RecoverFromDb(
   const auto& runtime_attr = step_in_db.runtime_attr();
 
   this->job = const_cast<JobInCtld*>(&job);
+  job_db_id = job.JobDbId();
 
   type = step_to_ctld.type();
   job_id = step_to_ctld.job_id();
@@ -482,6 +483,7 @@ void StepInCtld::SetFieldsOfStepInfo(
 void DaemonStepInCtld::InitFromJob(const JobInCtld& job) {
   /* Fields in StepInCtld */
   this->job = const_cast<JobInCtld*>(&job);
+  job_db_id = job.JobDbId();
   type = job.type;
 
   job_id = job.JobId();
@@ -1004,6 +1006,7 @@ void CommonStepInCtld::InitPrimaryStepFromJob(JobInCtld& job) {
 
   /* Fields in StepInCtld */
   this->job = const_cast<JobInCtld*>(&job);
+  job_db_id = job.JobDbId();
   type = job.type;
   job_id = job.JobId();
   name = job.name;
@@ -2252,7 +2255,7 @@ void JobInCtld::SetFieldsByRuntimeAttrOfJob(
     if (ShouldLaunchOnAllNodes()) {
       for (auto const& craned_id : craned_ids)
         executing_craned_ids.emplace_back(craned_id);
-    } else {
+    } else if (!craned_ids.empty()) {
       executing_craned_ids.emplace_back(craned_ids.front());
     }
 

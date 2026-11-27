@@ -188,7 +188,7 @@ class MongodbClient {
       const crane::grpc::QueryJobsInfoRequest* request,
       std::unordered_map<job_id_t, crane::grpc::JobInfo>* job_info_map);
 
-  bool CheckJobDbIdExisted(int64_t job_db_id);
+  bool HasArchivedJob(job_id_t job_id, job_db_id_t db_id, int32_t attempt);
 
   // Fetch job status (state, exit_code, time_end, time_start)
   std::unordered_map<

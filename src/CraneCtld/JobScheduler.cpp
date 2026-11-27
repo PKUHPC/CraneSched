@@ -260,10 +260,13 @@ bool JobScheduler::Init() {
       checkpointed.insert(step.runtime_attr().step_db_id());
     if (auto it = step_snapshot.steps.find(job->JobId());
         it != step_snapshot.steps.end()) {
-      for (const auto& step : it->second) {
-        if (step.runtime_attr().requeue_count() == job->RequeueCount() &&
-            !checkpointed.contains(step.runtime_attr().step_db_id()))
-          job->RetainRequeueStep(step);
+      for (auto& step : it->second) {
+        if (checkpointed.contains(step.runtime_attr().step_db_id())) continue;
+        // A pre-checkpoint release may leave only the last observed running
+        // state. Preserve the identity with an explicitly unknown outcome.
+        if (!IsFinishedStepStatus(step.runtime_attr().status()))
+          step.mutable_runtime_attr()->set_status(crane::grpc::Invalid);
+        job->RetainRequeueStep(step);
       }
       step_snapshot.steps.erase(it);
     }
@@ -539,13 +542,15 @@ bool JobScheduler::Init() {
         continue;
       }
 
-      ok = g_db_client->CheckJobDbIdExisted(db_id);
+      ok = g_db_client->HasArchivedJob(
+          job_id, db_id, job_in_embedded_db.runtime_attr().requeue_count());
       if (!ok) {
         if (!g_db_client->InsertRecoveredJob(job_in_embedded_db)) {
           CRANE_ERROR(
               "Failed to call g_db_client->InsertRecoveredJob() "
               "for job #{}",
               job_id);
+          return false;
         }
       }
 
@@ -5797,6 +5802,7 @@ void JobScheduler::CleanStepSubmitQueueCb_() {
     auto it = m_running_job_map_.find(step->job_id);
     if (it != m_running_job_map_.end()) {
       step->job = it->second.get();
+      step->job_db_id = it->second->JobDbId();
       step->SetRequeueCount(it->second->RequeueCount());
       step->SetSubmitTime(now);
       auto ok = HandleUnsetOptionalInStepToCtld(step.get());

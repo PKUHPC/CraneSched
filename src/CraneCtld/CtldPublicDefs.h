@@ -656,6 +656,7 @@ struct StepInCtld {
 
   JobInCtld* job;
   job_id_t job_id;
+  job_db_id_t job_db_id{};
 
   uid_t uid;
   std::vector<gid_t> gids;

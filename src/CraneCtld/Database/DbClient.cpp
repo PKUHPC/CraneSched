@@ -665,12 +665,8 @@ bool MongodbClient::InsertJobs(const std::unordered_set<JobInCtld*>& jobs) {
     for (const auto& job : jobs) {
       document job_doc = JobInCtldToDocument_(job);
 
-      // Create filter by (job_id, requeue_count) composite key
-      document filter;
-      filter.append(kvp("job_id", static_cast<int32_t>(job->JobId())));
-      filter.append(
-          kvp("requeue_count", static_cast<int32_t>(job->RequeueCount())));
-
+      auto filter =
+          AttemptFilter(job->JobId(), job->JobDbId(), job->RequeueCount());
       // Use $set to update job fields, and $setOnInsert for steps array
       // This ensures job fields are always updated, but steps array is only
       // created if document doesn't exist
@@ -1462,9 +1458,12 @@ bool MongodbClient::FetchJobStepRecords(
   return true;
 }
 
-bool MongodbClient::CheckJobDbIdExisted(int64_t job_db_id) {
+bool MongodbClient::HasArchivedJob(job_id_t job_id, job_db_id_t db_id,
+                                   int32_t attempt) {
   document doc;
-  doc.append(kvp("job_db_id", job_db_id));
+  doc.append(kvp("job_id", static_cast<int32_t>(job_id)),
+             kvp("job_db_id", db_id), kvp("requeue_count", attempt),
+             kvp("has_job_info", true));
 
   try {
     bsoncxx::stdx::optional<bsoncxx::document::value> result =
@@ -1673,8 +1672,8 @@ bool MongodbClient::InsertSteps(const std::unordered_set<StepInCtld*>& steps) {
       }
 
       // Filter by (job_id, requeue_count) composite key
-      auto filter = AttemptFilter(job_id, job_steps.front()->job->JobDbId(),
-                                  requeue_count);
+      auto filter =
+          AttemptFilter(job_id, job_steps.front()->job_db_id, requeue_count);
 
       // Combine $push and $setOnInsert
       // $push: append steps to existing document, sorted by step_id
@@ -1689,8 +1688,7 @@ bool MongodbClient::InsertSteps(const std::unordered_set<StepInCtld*>& steps) {
         }));
       }));
       update_doc.append(kvp("$setOnInsert", [&](sub_document set_on_insert) {
-        set_on_insert.append(
-            kvp("job_db_id", job_steps.front()->job->JobDbId()));
+        set_on_insert.append(kvp("job_db_id", job_steps.front()->job_db_id));
         set_on_insert.append(kvp("job_id", static_cast<int32_t>(job_id)));
         set_on_insert.append(
             kvp("requeue_count", static_cast<int32_t>(requeue_count)));
