@@ -53,6 +53,14 @@ TEST(String, ShortHostnameKeepsTheFirstDnsLabel) {
   EXPECT_EQ(util::ShortHostname("node01"), "node01");
 }
 
+TEST(String, TlsHostnameQualifiesOnlyShortNames) {
+  EXPECT_EQ(util::TlsHostname("node01", "crane.local"), "node01.crane.local");
+  EXPECT_EQ(util::TlsHostname("node01.pku.edu.cn", "crane.local"),
+            "node01.pku.edu.cn");
+  EXPECT_EQ(util::TlsHostname("node01", ""), "node01");
+  EXPECT_EQ(util::TlsHostname("", "crane.local"), "");
+}
+
 TEST(String, ParseHostListKeepsDeterministicOrder) {
   using util::ParseHostList;
 
@@ -142,6 +150,17 @@ TEST(String, HostNameListToStr) {
     EXPECT_EQ(res, host_list);
     GTEST_LOG_(INFO) << "Parsing result: " << res;
   }
+}
+
+TEST(String, HostNameListToStrKeepsLeadingZeros) {
+  using util::HostNameListToStr;
+
+  EXPECT_EQ(HostNameListToStr(std::list<std::string>{"ss1", "ss02"}),
+            "ss[1,02]");
+  EXPECT_EQ(HostNameListToStr(std::list<std::string>{"ss9", "ss10"}),
+            "ss[9-10]");
+  EXPECT_EQ(HostNameListToStr(std::list<std::string>{"ss08", "ss09", "ss10"}),
+            "ss[08-10]");
 }
 
 namespace {

@@ -29,6 +29,7 @@ class JobSchedulerTest : public ::testing::Test {
   }
 
   void TearDown() override {
+    g_meta_container.reset();
     g_config.Partitions = std::move(original_partitions_);
     g_config.Nodes = std::move(original_nodes_);
   }
@@ -66,6 +67,9 @@ class JobSchedulerTest : public ::testing::Test {
       resource.SetMemorySwBytes(memory_per_node);
       allocation.AddResourceInNode(node, resource);
     }
+    // Node filters are validated against the runtime node metadata.
+    g_meta_container = std::make_unique<Ctld::CranedMetaContainer>();
+    g_meta_container->InitFromConfig(g_config);
     job_.SetCranedIds(std::move(craned_ids));
     job_.SetStepResAvail(allocation);
     job_.SetAllocatedRes(std::move(allocation));

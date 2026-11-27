@@ -765,6 +765,7 @@ TEST_F(NodeQueryTest, ClusterQueryScopesPreserveOrderMembershipAndTotals) {
   g_config.Nodes.emplace(
       "n2", std::make_shared<Ctld::Config::Node>(*g_config.Nodes.at("n1")));
   g_config.NodeOrder = {"n2", "n1"};
+  g_config.BuildNodeOrderRanks();
   g_config.CranedIdByAlias.emplace("alias2", "n2");
   g_config.Partitions["batch"].nodes.emplace("n2");
   g_config.Partitions["batch"].nodelist_str = "n[1-2]";

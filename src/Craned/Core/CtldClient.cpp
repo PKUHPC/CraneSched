@@ -67,9 +67,64 @@ int64_t ElapsedMs(std::chrono::steady_clock::time_point begin,
       .count();
 }
 
+bool ApplyFutureNodeDefinition(
+    const crane::grpc::DynamicNodeDefinition& definition) {
+  if (definition.name().empty() ||
+      !IsValidNodeResources(definition.cpu(), definition.memory_bytes(),
+                            definition.sockets()) ||
+      definition.partitions().empty()) {
+    CRANE_ERROR("CraneCtld returned an invalid FUTURE node definition.");
+    return false;
+  }
+
+  const auto old_id = g_config.CranedIdOfThisNode;
+  auto old = g_config.CranedRes.find(old_id);
+  const bool same_resources =
+      old_id == definition.name() && old != g_config.CranedRes.end() &&
+      old->second->GetCpuSet().cpu_count == cpu_t(definition.cpu()) &&
+      old->second->GetMemoryBytes() == definition.memory_bytes() &&
+      g_config.node_topo_info.sockets == definition.sockets();
+  if (!same_resources) {
+    if (!old_id.empty() && !g_job_mgr->GetAllocatedJobSteps().empty()) {
+      CRANE_ERROR(
+          "Cannot change FUTURE node resources while jobs are allocated.");
+      return false;
+    }
+
+    auto resource = std::make_shared<ResourceInNodeV3>();
+    resource->GetCpuSet().cpu_count = cpu_t(definition.cpu());
+    for (uint32_t i = 0; i < definition.cpu(); ++i)
+      resource->GetCpuSet().core_ids.insert(i);
+    resource->SetMemoryBytes(definition.memory_bytes());
+    resource->SetMemorySwBytes(definition.memory_bytes());
+    if (!CgroupManager::InitCpuPool(resource->GetCpuSet().core_ids)) {
+      CRANE_ERROR("Failed to initialize FUTURE CPU pool.");
+      return false;
+    }
+
+    g_config.CranedRes.erase(old_id);
+    g_config.CranedIdOfThisNode = definition.name();
+    g_config.CranedRes[definition.name()] = std::move(resource);
+    g_config.node_topo_info.sockets = definition.sockets();
+  }
+
+  for (auto& [name, partition] : g_config.Partitions)
+    partition.nodes.erase(old_id);
+  for (const auto& partition : definition.partitions())
+    g_config.Partitions[partition].nodes.insert(definition.name());
+  CRANE_INFO("This machine {} is configured as FUTURE node {}.",
+             g_config.Hostname, definition.name());
+  return true;
+}
+
 }  // namespace
 
 CtldClientStateMachine::CtldClientStateMachine() {
+  m_session_.craned_id = g_config.CranedIdOfThisNode;
+  if (!g_config.FutureMode) {
+    m_session_.resource = g_config.CranedRes.at(m_session_.craned_id);
+    m_session_.node_topo_info = g_config.node_topo_info;
+  }
   m_logger_ = g_runtime_status.conn_logger;
   m_uvw_loop_ = uvw::loop::create();
 
@@ -132,73 +187,112 @@ void CtldClientStateMachine::SetActionRegisterCb(
   m_action_register_cb_ = std::move(cb);
 }
 
+CtldClientStateMachine::Session CtldClientStateMachine::GetSession() {
+  absl::MutexLock lk(&m_session_mtx_);
+  return m_session_;
+}
+
 bool CtldClientStateMachine::EvRecvConfigFromCtld(
     const crane::grpc::ConfigureCranedRequest& request) {
-  absl::MutexLock lk(&m_mtx_);
-  m_last_op_time_ = std::chrono::steady_clock::now();
-
-  if (m_state_ != State::REQUESTING_CONFIG) {
-    CRANE_LOGGER_WARN(
-        m_logger_,
-        "EvRecvConfigFromCtld triggered at incorrect state {}. Ignoring.",
-        static_cast<int>(m_state_));
-    return false;
-  }
-
-  if (request.ok() && request.has_token() &&
-      request.token() == m_reg_token_.value()) {
-    m_state_ = State::CONFIGURING;
-    ActionConfigure_(request);
-    return true;
-  } else {
-    if (!request.ok()) {
-      CRANE_LOGGER_WARN(m_logger_, "ConfigureCranedRequest failed from Ctld.");
-      m_state_ = State::REQUESTING_CONFIG;
-      ActionRequestConfig_();
-    } else if (!request.has_token()) {
-      CRANE_LOGGER_DEBUG(m_logger_,
-                         "No token in ConfigureCranedRequest from Ctld.");
-      m_state_ = State::REQUESTING_CONFIG;
-      ActionRequestConfig_();
-
-    } else {
-      CRANE_LOGGER_DEBUG(m_logger_,
-                         "ConfigureCraned failed. Expected to recv token: {} "
-                         "but got {}, waiting for correct reply.",
-                         ProtoTimestampToString(m_reg_token_.value()),
-                         ProtoTimestampToString(request.token()));
+  {
+    absl::MutexLock lk(&m_mtx_);
+    if (m_state_ != State::REQUESTING_CONFIG) {
+      CRANE_LOGGER_WARN(
+          m_logger_,
+          "EvRecvConfigFromCtld triggered at incorrect state {}. Ignoring.",
+          static_cast<int>(m_state_));
+      return false;
     }
 
-    return false;
+    if (request.ok() && request.has_token() &&
+        request.token() == m_reg_token_.value()) {
+      if (m_configure_in_progress_) {
+        CRANE_LOGGER_DEBUG(m_logger_,
+                           "Local recovery is still in progress. Ignoring "
+                           "ConfigureCranedRequest.");
+        return false;
+      }
+      if (g_config.FutureMode &&
+          (request.session_id().empty() || !request.has_definition() ||
+           !ApplyFutureNodeDefinition(request.definition())))
+        return false;
+      {
+        absl::MutexLock session_lock(&m_session_mtx_);
+        m_session_ = {
+            .craned_id = g_config.CranedIdOfThisNode,
+            .token = request.token(),
+            .session_id = request.session_id(),
+            .resource = g_config.CranedRes.at(g_config.CranedIdOfThisNode),
+            .node_topo_info = g_config.node_topo_info};
+      }
+      m_last_op_time_ = std::chrono::steady_clock::now();
+      m_state_ = State::CONFIGURING;
+      m_configure_in_progress_ = true;
+    } else {
+      if (!request.ok()) {
+        CRANE_LOGGER_WARN(m_logger_,
+                          "ConfigureCranedRequest failed from Ctld.");
+        m_state_ = State::REQUESTING_CONFIG;
+        ActionRequestConfig_();
+      } else if (!request.has_token()) {
+        CRANE_LOGGER_DEBUG(m_logger_,
+                           "No token in ConfigureCranedRequest from Ctld.");
+        m_state_ = State::REQUESTING_CONFIG;
+        ActionRequestConfig_();
+
+      } else {
+        CRANE_LOGGER_DEBUG(m_logger_,
+                           "ConfigureCraned failed. Expected to recv token: {} "
+                           "but got {}, waiting for correct reply.",
+                           ProtoTimestampToString(m_reg_token_.value()),
+                           ProtoTimestampToString(request.token()));
+      }
+
+      return false;
+    }
   }
+
+  // Local recovery may block, so let connection and timeout events proceed.
+  ActionConfigure_(request);
+  return true;
 }
 
 bool CtldClientStateMachine::EvConfigurationDone(
-    const RegToken& token, std::optional<std::set<job_id_t>> lost_jobs,
+    const RegToken& token, const std::string& session_id,
+    std::optional<std::set<job_id_t>> lost_jobs,
     std::optional<std::unordered_map<job_id_t, std::set<step_id_t>>>
         lost_steps) {
   absl::MutexLock lk(&m_mtx_);
-  m_last_op_time_ = std::chrono::steady_clock::now();
 
-  if (m_state_ != State::CONFIGURING) {
+  if (!m_configure_in_progress_) {
     CRANE_LOGGER_WARN(
         m_logger_,
-        "EvGetRegisterReply triggered at incorrect state {}. Ignoring.",
+        "EvConfigurationDone triggered at incorrect state {}. Ignoring.",
         StateToString(m_state_));
     return false;
   }
 
-  if (!m_reg_token_.has_value() || token != m_reg_token_.value()) {
+  const auto session = GetSession();
+  if (token != session.token || session_id != session.session_id) {
     CRANE_LOGGER_WARN(
         m_logger_,
         "EvConfigurationDone triggered with stale token {}. Expected {}. "
         "Ignoring.",
-        ProtoTimestampToString(token),
-        m_reg_token_.has_value() ? ProtoTimestampToString(m_reg_token_.value())
-                                 : "<null>");
+        ProtoTimestampToString(token), ProtoTimestampToString(session.token));
     return false;
   }
 
+  m_configure_in_progress_ = false;
+  if (m_state_ != State::CONFIGURING) {
+    if (m_state_ == State::REQUESTING_CONFIG) {
+      m_last_op_time_ = std::chrono::steady_clock::now();
+      ActionRequestConfig_();
+    }
+    return true;
+  }
+
+  m_last_op_time_ = std::chrono::steady_clock::now();
+  m_check_reg_timeout_ = true;
   if (lost_jobs.has_value() && lost_steps.has_value()) {
     m_state_ = State::REGISTERING;
     ActionRegister_(std::move(lost_jobs.value()),
@@ -212,9 +306,8 @@ bool CtldClientStateMachine::EvConfigurationDone(
 }
 
 bool CtldClientStateMachine::EvGetRegisterReply(
-    const crane::grpc::CranedRegisterReply& reply, const RegToken& token) {
+    const crane::grpc::CranedRegisterReply& reply, const Session& session) {
   absl::MutexLock lk(&m_mtx_);
-  m_last_op_time_ = std::chrono::steady_clock::now();
 
   if (m_state_ != State::REGISTERING) {
     CRANE_LOGGER_WARN(
@@ -224,12 +317,14 @@ bool CtldClientStateMachine::EvGetRegisterReply(
     return false;
   }
 
-  if (m_reg_token_ != token) {
+  if (m_reg_token_ != session.token ||
+      GetSession().session_id != session.session_id) {
     CRANE_LOGGER_TRACE(m_logger_,
                        "Register token mismatch when recv register reply.");
     return false;
   }
 
+  m_last_op_time_ = std::chrono::steady_clock::now();
   if (reply.ok()) {
     m_state_ = State::READY;
     ActionReady_();
@@ -281,22 +376,21 @@ void CtldClientStateMachine::EvTimeout_() {
   ActionRequestConfig_();
 }
 
-void CtldClientStateMachine::EvPingFailed() {
+bool CtldClientStateMachine::EvPingReply(bool success,
+                                         const std::string& session_id) {
   absl::MutexLock lk(&m_mtx_);
+  if (m_state_ != State::READY || GetSession().session_id != session_id)
+    return true;
+  m_last_op_time_ = std::chrono::steady_clock::now();
+  if (success) return true;
   CRANE_LOGGER_DEBUG(m_logger_,
                      "Ping failed, current state {}, starting new handshake.",
                      StateToString(m_state_));
-  m_last_op_time_ = std::chrono::steady_clock::now();
 
   g_server->SetGrpcSrvReady(false);
   m_state_ = State::REQUESTING_CONFIG;
   ActionRequestConfig_();
-}
-
-void CtldClientStateMachine::EvPingSuccess() {
-  CRANE_LOGGER_DEBUG(m_logger_, "CtldClient ping success.");
-  absl::MutexLock lk(&m_mtx_);
-  m_last_op_time_ = std::chrono::steady_clock::now();
+  return false;
 }
 
 bool CtldClientStateMachine::IsReadyNow() {
@@ -310,6 +404,7 @@ void CtldClientStateMachine::ActionRequestConfig_() {
                      "check register operation timeout.",
                      StateToString(m_state_));
   m_check_reg_timeout_ = true;
+  g_ctld_client->StopPingCtld();
   if (m_reg_token_.has_value()) CRANE_DEBUG("Reset register token.");
   m_reg_token_ = ToProtoTimestamp(std::chrono::steady_clock::now());
   if (m_action_request_config_cb_)
@@ -320,9 +415,8 @@ void CtldClientStateMachine::ActionRequestConfig_() {
 
 void CtldClientStateMachine::ActionConfigure_(
     const crane::grpc::ConfigureCranedRequest& config_req) {
-  CRANE_LOGGER_DEBUG(m_logger_,
-                     "Ctld client state machine has entered state {}",
-                     StateToString(m_state_));
+  CRANE_LOGGER_DEBUG(m_logger_, "Starting configuration for token {}.",
+                     ProtoTimestampToString(config_req.token()));
 
   absl::MutexLock lk(&m_cb_mutex_);
   auto it = m_action_configure_cb_list_.begin();
@@ -350,9 +444,10 @@ void CtldClientStateMachine::ActionRegister_(
                      StateToString(m_state_));
   if (m_action_register_cb_)
     g_thread_pool->detach_task(
-        [tok = m_reg_token_.value(), lost_jobs, lost_steps, this] mutable {
-          m_action_register_cb_(
-              {.token = tok, .lost_jobs = lost_jobs, .lost_steps = lost_steps});
+        [session = GetSession(), lost_jobs, lost_steps, this] mutable {
+          m_action_register_cb_({.session = session,
+                                 .lost_jobs = lost_jobs,
+                                 .lost_steps = lost_steps});
         });
 }
 
@@ -404,10 +499,7 @@ CtldClient::CtldClient() {
           return true;
 
         const bool success = Ping_();
-        if (!success)
-          m_ping_ctld_ = false;
-        else
-          UpdateLastActiveTime();
+        if (success) UpdateLastActiveTime();
 
         return success;
       });
@@ -522,6 +614,7 @@ void CtldClient::Init() {
       [](CtldClientStateMachine::ConfigureArg const& arg) {
         // FIXME: step recovery
         auto token = arg.req.token();
+        auto session = g_ctld_client_sm->GetSession();
         CRANE_LOGGER_DEBUG(g_runtime_status.conn_logger,
                            "Configuring action for token {}.",
                            ProtoTimestampToString(token));
@@ -734,7 +827,9 @@ void CtldClient::Init() {
           }
         }
 
-        std::thread([token, lost_jobs = std::move(lost_jobs),
+        std::thread([token, session_id = arg.req.session_id(),
+                     craned_id = session.craned_id,
+                     lost_jobs = std::move(lost_jobs),
                      lost_steps = std::move(lost_steps),
                      invalid_steps = std::move(invalid_steps),
                      invalid_jobs = std::move(invalid_jobs),
@@ -825,6 +920,8 @@ void CtldClient::Init() {
             if (cleanup_result != CraneErrCode::SUCCESS) {
               CRANE_ERROR("Invalid step cleanup failed: {}",
                           CraneErrStr(cleanup_result));
+              g_ctld_client_sm->EvConfigurationDone(token, session_id,
+                                                    std::nullopt, std::nullopt);
               return;
             }
           }
@@ -837,13 +934,10 @@ void CtldClient::Init() {
             if (cleanup_result != CraneErrCode::SUCCESS) {
               CRANE_ERROR("Invalid job cleanup failed: {}",
                           CraneErrStr(cleanup_result));
+              g_ctld_client_sm->EvConfigurationDone(token, session_id,
+                                                    std::nullopt, std::nullopt);
               return;
             }
-          }
-
-          if (!g_ctld_client_sm->EvConfigurationDone(token, lost_jobs,
-                                                     lost_steps)) {
-            return;
           }
 
           // Report status changes to Ctld for steps that need synchronization
@@ -862,7 +956,8 @@ void CtldClient::Init() {
                   .new_status = status,
                   .exit_code = exit_code,
                   .reason = "Status synced from Craned during recovery",
-                  .timestamp = end_time};
+                  .timestamp = end_time,
+                  .craned_id = craned_id};
               g_ctld_client->StepStatusChangeAsync(std::move(elem));
             }
           }
@@ -872,13 +967,15 @@ void CtldClient::Init() {
                        util::JobStepsToString(completing_steps));
             g_job_mgr->FreeSteps(std::move(completing_steps));
           }
+          g_ctld_client_sm->EvConfigurationDone(token, session_id, lost_jobs,
+                                                lost_steps);
         }).detach();
       },
       CallbackInvokeMode::ASYNC, false);
 
   g_ctld_client_sm->SetActionRegisterCb(
       [this](CtldClientStateMachine::RegisterArg const& arg) {
-        CranedRegister_(arg.token, arg.lost_jobs, arg.lost_steps);
+        CranedRegister_(arg.session, arg.lost_jobs, arg.lost_steps);
       });
 }
 
@@ -943,6 +1040,8 @@ void CtldClient::SetPingFailedCb(std::function<void()>&& cb) {
 
 void CtldClient::StepStatusChangeAsync(
     StepStatusChangeQueueElem&& step_status_change) {
+  if (step_status_change.craned_id.empty())
+    step_status_change.craned_id = g_ctld_client_sm->GetSession().craned_id;
   const auto enqueue_steady_time = std::chrono::steady_clock::now();
   const auto enqueue_ts_ms = NowUnixMs();
   absl::MutexLock lock(&m_step_status_change_mtx_);
@@ -966,7 +1065,12 @@ void CtldClient::BroadcastPmixPort(
   context.set_deadline(std::chrono::system_clock::now() +
                        std::chrono::seconds(kCranedRpcTimeoutSeconds));
 
-  grpc::Status status = m_stub_->BroadcastPmixPort(&context, request, response);
+  auto session = g_ctld_client_sm->GetSession();
+  if (request.craned_id() != session.craned_id) return;
+  auto authenticated_request = request;
+  authenticated_request.set_session_id(session.session_id);
+  grpc::Status status =
+      m_stub_->BroadcastPmixPort(&context, authenticated_request, response);
   if (!status.ok()) {
     CRANE_ERROR("BroadcastPmixPort failed: {}, {}",
                 static_cast<int>(status.error_code()), status.error_message());
@@ -989,12 +1093,19 @@ void CtldClient::StepStatusChangeAsync(job_id_t job_id, step_id_t step_id,
 
 void CtldClient::UpdateNodeDrainState(bool is_drain,
                                       const std::string& reason) {
+  UpdateNodeDrainState_(g_ctld_client_sm->GetSession(), is_drain, reason);
+}
+
+void CtldClient::UpdateNodeDrainState_(
+    const CtldClientStateMachine::Session& session, bool is_drain,
+    const std::string& reason) {
   grpc::ClientContext context;
   context.set_deadline(std::chrono::system_clock::now() +
                        std::chrono::seconds(kCranedRpcTimeoutSeconds));
   crane::grpc::UpdateNodeDrainStateRequest request;
   crane::grpc::UpdateNodeDrainStateReply reply;
-  request.set_craned_id(g_config.CranedIdOfThisNode);
+  request.set_craned_id(session.craned_id);
+  request.set_session_id(session.session_id);
   request.set_drain(is_drain);
   request.set_reason(reason);
 
@@ -1004,9 +1115,11 @@ void CtldClient::UpdateNodeDrainState(bool is_drain,
 
 std::map<job_id_t, std::map<step_id_t, StepStatus>>
 CtldClient::GetAllStepStatusChange() {
+  const auto craned_id = g_ctld_client_sm->GetSession().craned_id;
   absl::MutexLock lock(&m_step_status_change_mtx_);
   std::map<job_id_t, std::map<step_id_t, StepStatus>> step_status_map;
   for (auto& elem : m_step_status_change_list_) {
+    if (elem.craned_id != craned_id) continue;
     step_status_map[elem.job_id][elem.step_id] = elem.new_status;
   }
   return step_status_map;
@@ -1017,17 +1130,44 @@ bool CtldClient::RequestConfigFromCtld_(RegToken const& token) {
                      "Requesting config from CraneCtld...");
 
   crane::grpc::CranedTriggerReverseConnRequest req;
-  req.set_craned_id(g_config.CranedIdOfThisNode);
+  if (g_config.FutureMode) {
+    NodeSpecInfo node_info;
+    if (!util::os::GetNodeInfo(&node_info)) {
+      CRANE_ERROR("Failed to get node real info.");
+      return false;
+    }
+    auto* candidate = req.mutable_candidate();
+    candidate->set_hostname(g_config.Hostname);
+    candidate->set_cpu(static_cast<uint32_t>(node_info.cpu));
+    candidate->set_memory_bytes(
+        static_cast<uint64_t>(node_info.memory_gb * 1024 * 1024 * 1024));
+    candidate->set_feature(g_config.FutureFeature);
+  } else {
+    req.set_craned_id(g_config.CranedIdOfThisNode);
+  }
   *req.mutable_token() = token;
 
-  grpc::ClientContext context;
-  context.set_deadline(std::chrono::system_clock::now() +
-                       std::chrono::seconds(1));
-
   google::protobuf::Empty reply;
+  grpc::Status status;
 
-  grpc::Status status =
-      m_stub_->CranedTriggerReverseConn(&context, req, &reply);
+  // The FUTURE node may be created shortly after this craned starts, so retry
+  // briefly instead of waiting for the next register timeout.
+  for (int retry = 0;; ++retry) {
+    grpc::ClientContext context;
+    context.set_deadline(std::chrono::system_clock::now() +
+                         std::chrono::seconds(1));
+
+    status = m_stub_->CranedTriggerReverseConn(&context, req, &reply);
+    if (!g_config.FutureMode ||
+        status.error_code() != grpc::StatusCode::FAILED_PRECONDITION ||
+        retry == kFutureConfigRetryTimes || m_stopping_)
+      break;
+    CRANE_LOGGER_INFO(g_runtime_status.conn_logger,
+                      "No matching FUTURE node yet; retrying config request: "
+                      "{}",
+                      status.error_message());
+    std::this_thread::sleep_for(kFutureConfigRetryInterval);
+  }
   if (!status.ok()) {
     CRANE_LOGGER_ERROR(
         g_runtime_status.conn_logger, "Notify CranedConnected failed: {}, {}",
@@ -1038,27 +1178,29 @@ bool CtldClient::RequestConfigFromCtld_(RegToken const& token) {
 }
 
 bool CtldClient::CranedRegister_(
-    RegToken const& token, std::set<job_id_t> const& lost_jobs,
+    CtldClientStateMachine::Session const& session,
+    std::set<job_id_t> const& lost_jobs,
     std::unordered_map<job_id_t, std::set<step_id_t>> const& lost_steps) {
   CRANE_LOGGER_DEBUG(g_runtime_status.conn_logger, "Sending CranedRegister.");
 
   crane::grpc::CranedRegisterRequest ready_request;
-  ready_request.set_craned_id(g_config.CranedIdOfThisNode);
-  *ready_request.mutable_token() = token;
+  ready_request.set_craned_id(session.craned_id);
+  *ready_request.mutable_token() = session.token;
+  ready_request.set_session_id(session.session_id);
 
   auto* grpc_meta = ready_request.mutable_remote_meta();
   if (auto sample = ReadNodeTelemetry()) {
     grpc_meta->set_cpu_load(sample->cpu_load);
     grpc_meta->set_free_memory_mb(sample->free_memory_mb);
   }
-  auto& dres = g_config.CranedRes[g_config.CranedIdOfThisNode]->GetGres();
+  const auto& dres = session.resource->GetGres();
 
   grpc_meta->mutable_dres_in_node()->CopyFrom(
       static_cast<crane::grpc::DedicatedResourceInNode>(dres));
   grpc_meta->set_craned_version(CRANE_VERSION_STRING);
   grpc_meta->set_config_crc(g_config.ConfigCrcVal);
   grpc_meta->mutable_node_topo_info()->set_sockets(
-      g_config.node_topo_info.sockets);
+      session.node_topo_info.sockets);
 
   const SystemRelInfo& sys_info = g_config.CranedMeta.SysInfo;
   auto* grpc_sys_rel_info = grpc_meta->mutable_sys_rel_info();
@@ -1093,7 +1235,7 @@ bool CtldClient::CranedRegister_(
     return false;
   }
 
-  return g_ctld_client_sm->EvGetRegisterReply(ready_reply, token);
+  return g_ctld_client_sm->EvGetRegisterReply(ready_reply, session);
 }
 
 void CtldClient::AsyncSendThread_() {
@@ -1192,6 +1334,11 @@ bool CtldClient::SendStatusChanges_(
     grpc::Status status;
 
     auto status_change = changes.front();
+    auto session = g_ctld_client_sm->GetSession();
+    if (status_change.craned_id != session.craned_id) {
+      changes.pop_front();
+      continue;
+    }
     const auto send_start = std::chrono::steady_clock::now();
     const int64_t queue_wait_ms =
         ElapsedMs(status_change.enqueue_steady_time, send_start);
@@ -1202,7 +1349,7 @@ bool CtldClient::SendStatusChanges_(
     CRANE_TRACE_SCOPE_NAMED(forward_span, "status_change/craned_forward");
     forward_span.SetAttribute("job_id", status_change.job_id);
     forward_span.SetAttribute("step_id", status_change.step_id);
-    forward_span.SetAttribute("craned_id", std::string(m_craned_id_));
+    forward_span.SetAttribute("craned_id", session.craned_id);
     forward_span.SetAttribute("new_status",
                               static_cast<int64_t>(status_change.new_status));
     forward_span.SetAttribute("exit_code",
@@ -1218,7 +1365,8 @@ bool CtldClient::SendStatusChanges_(
     forward_span.SetAttribute("queue_wait_ms", queue_wait_ms);
     forward_span.SetAttribute("enqueue_ts_ms", status_change.enqueue_ts_ms);
 
-    request.set_craned_id(m_craned_id_);
+    request.set_craned_id(session.craned_id);
+    request.set_session_id(session.session_id);
     request.set_job_id(status_change.job_id);
     request.set_step_id(status_change.step_id);
     request.set_new_status(status_change.new_status);
@@ -1353,7 +1501,7 @@ bool CtldClient::NeedHealthCheck_() {
                        std::chrono::seconds(kCranedRpcTimeoutSeconds));
   crane::grpc::QueryCranedInfoRequest req;
   crane::grpc::QueryCranedInfoReply reply;
-  req.set_craned_name(g_config.CranedIdOfThisNode);
+  req.set_craned_name(g_ctld_client_sm->GetSession().craned_id);
   auto result = m_stub_->QueryCranedInfo(&context, req, &reply);
   if (!result.ok() || reply.craned_info_list().empty()) {
     CRANE_ERROR("QueryCranedInfo failed");
@@ -1389,7 +1537,9 @@ bool CtldClient::Ping_() {
                        std::chrono::seconds(kCranedRpcTimeoutSeconds));
 
   crane::grpc::CranedPingRequest req;
-  req.set_craned_id(m_craned_id_);
+  auto session = g_ctld_client_sm->GetSession();
+  req.set_craned_id(session.craned_id);
+  req.set_session_id(session.session_id);
   if (auto sample = ReadNodeTelemetry()) {
     req.set_cpu_load(sample->cpu_load);
     req.set_free_memory_mb(sample->free_memory_mb);
@@ -1401,20 +1551,16 @@ bool CtldClient::Ping_() {
   if (!status.ok()) {
     CRANE_LOGGER_ERROR(g_runtime_status.conn_logger, "Craned Ping failed: {}",
                        status.error_message());
-    g_ctld_client_sm->EvPingFailed();
-    return false;
   }
   CRANE_LOGGER_TRACE(g_runtime_status.conn_logger, "Craned Ping {}.",
                      reply.ok());
-  if (reply.ok()) {
-    g_ctld_client_sm->EvPingSuccess();
-  } else
-    g_ctld_client_sm->EvPingFailed();
-  return reply.ok();
+  return g_ctld_client_sm->EvPingReply(status.ok() && reply.ok(),
+                                       session.session_id);
 }
 
 void CtldClient::NodeHealthCheck_() {
   if (!g_server->ReadyFor(RequestSource::CTLD)) return;
+  auto session = g_ctld_client_sm->GetSession();
 
   NodeSpecInfo node_real;
 
@@ -1423,12 +1569,12 @@ void CtldClient::NodeHealthCheck_() {
     return;
   }
 
-  if (!g_config.CranedRes.contains(g_config.CranedIdOfThisNode)) {
+  if (!session.resource) {
     CRANE_ERROR("Failed to get node config info.");
     return;
   }
 
-  auto node_config = g_config.CranedRes.at(g_config.CranedIdOfThisNode);
+  const auto& node_config = session.resource;
 
   CRANE_DEBUG("Start node health checking....");
 
@@ -1439,7 +1585,7 @@ void CtldClient::NodeHealthCheck_() {
         "Node health check fail. config cpu_count: {}, real cpu_count: {}",
         cpu_count, node_real.cpu);
     CRANE_WARN(reason);
-    UpdateNodeDrainState(true, "CPU count mismatch");
+    UpdateNodeDrainState_(session, true, "CPU count mismatch");
     return;
   }
 
@@ -1447,12 +1593,16 @@ void CtldClient::NodeHealthCheck_() {
   double mem_gb_config =
       static_cast<double>(mem_bytes_config) / (1024 * 1024 * 1024);
 
-  if (std::abs(node_real.memory_gb - mem_gb_config) > kMemoryToleranceGB) {
+  const bool memory_mismatch =
+      g_config.FutureMode
+          ? node_real.memory_gb + kMemoryToleranceGB < mem_gb_config
+          : std::abs(node_real.memory_gb - mem_gb_config) > kMemoryToleranceGB;
+  if (memory_mismatch) {
     reason = fmt::format(
         "Node health check fail. config_mem : {:.3f}, real_mem : {:.3f}",
         mem_gb_config, node_real.memory_gb);
     CRANE_WARN(reason);
-    UpdateNodeDrainState(true, "Mem mismatch");
+    UpdateNodeDrainState_(session, true, "Mem mismatch");
     return;
   }
 
@@ -1464,7 +1614,7 @@ void CtldClient::NodeHealthCheck_() {
             fmt::format("Node health check fail. Device file {} not found.",
                         file_meta.path);
         CRANE_WARN(reason);
-        UpdateNodeDrainState(true, "Device not found");
+        UpdateNodeDrainState_(session, true, "Device not found");
         return;
       }
     }

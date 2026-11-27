@@ -34,6 +34,10 @@ namespace Craned {
 inline constexpr uint64_t kEvSigChldResendMs = 500;
 constexpr uint64_t kCtldClientTimeoutSec = 30;
 constexpr int64_t kCranedRpcTimeoutSeconds = 5;
+// Kept shorter in total than CraneCtldTimeout, so that a retrying config
+// request does not overlap the one issued by the register timeout.
+constexpr int kFutureConfigRetryTimes = 8;
+constexpr std::chrono::milliseconds kFutureConfigRetryInterval{500};
 
 using ::Craned::Common::CgroupInterface;
 using ::Craned::Common::CgroupManager;
@@ -66,6 +70,7 @@ struct StepStatusChangeQueueElem {
   std::chrono::steady_clock::time_point enqueue_steady_time{};
   int64_t enqueue_ts_ms{};
   int64_t queue_len_at_enqueue{};
+  CranedId craned_id;
 };
 
 struct JobInfoOfUid {
@@ -204,10 +209,14 @@ struct Config {
   std::string Hostname;
   CranedId CranedIdOfThisNode;
 
+  // Set by -F/--future: this craned registers as a FUTURE node whose
+  // identity and resources are assigned by CraneCtld through Configure.
+  bool FutureMode{false};
+  std::string FutureFeature;
+
   std::set<CranedId> NodeList;
   std::unordered_map<std::string, CranedId> NodeHostnameToCranedId;
   std::unordered_map<CranedId, std::string> CranedIdToNodeHostname;
-  std::unordered_map<CranedId, std::string> CranedIdToNodeAddr;
 
   struct CranedMeta {
     SystemRelInfo SysInfo;

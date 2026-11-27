@@ -82,6 +82,7 @@ enum CranedResourceState {
   CRANE_MIX = 1;
   CRANE_ALLOC = 2;
   CRANE_DOWN = 3;
+  CRANE_FUTURE = 4;
 }
 
 enum CranedPowerState {
@@ -103,6 +104,7 @@ enum CranedControlState {
   CRANE_WAKE = 4;
   CRANE_POWERON = 5;
   CRANE_UNREGISTER_POWER = 6;
+  CRANE_RESET_TO_FUTURE = 7;
 }
 
 enum JobStatus {
@@ -489,6 +491,15 @@ message StepToD {
 
   optional ArrayTaskIdentity array_task = 39;
   bool external_launcher = 40;
+
+  // Current endpoints of the nodes in nodelist, keyed by craned id. Nodes
+  // bound at runtime are unknown to the craned-side configuration.
+  map<string, NodeEndpoint> node_endpoints = 41;
+}
+
+message NodeEndpoint {
+  string hostname = 1;
+  string addr = 2;
 }
 
 message JobStepsToD {
@@ -852,6 +863,11 @@ message CranedInfo {
   ResourceInNodeV3 cleanup_resources = 31;
   // Unfinished work on this node, distinct from resources awaiting release.
   bool cleanup_pending = 32;
+  repeated string features = 33;
+  // True if this node is a FUTURE node mapped to a running craned.
+  bool dynamic_mapped = 34;
+  // True if the node was created at runtime rather than in config.yaml.
+  bool dynamic = 35;
 }
 
 message ReservationInfo {

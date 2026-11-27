@@ -78,14 +78,15 @@ type RequeueCommand struct {
 type CreateCommand struct {
 	Action        string           `parser:"@'create'"`
 	Entity        *EntityType      `parser:"@@"`
-	ID            string           `parser:"( @String | @Ident | @Number )?"`
+	ID            string           `parser:"( (?! Ident '=') ( @String | @Ident | @Number ) )?"`
 	KeyValueParam []*KeyValueParam `parser:"@@*"`
 }
 
 type DeleteCommand struct {
-	Action string      `parser:"@'delete'"`
-	Entity *EntityType `parser:"@@"`
-	ID     string      `parser:"( @String | @Ident | @Number )?"`
+	Action        string           `parser:"@'delete'"`
+	Entity        *EntityType      `parser:"@@"`
+	ID            string           `parser:"( (?! Ident '=') ( @String | @Ident | @Number ) )?"`
+	KeyValueParam []*KeyValueParam `parser:"@@*"`
 }
 
 type ResetCommand struct {

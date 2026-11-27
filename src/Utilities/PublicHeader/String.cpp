@@ -199,6 +199,14 @@ std::string ShortHostname(const std::string &hostname) {
   return dot_pos == std::string::npos ? hostname : hostname.substr(0, dot_pos);
 }
 
+std::string TlsHostname(const std::string &hostname,
+                        const std::string &domain_suffix) {
+  if (!hostname.empty() && hostname.find('.') == std::string::npos &&
+      !domain_suffix.empty())
+    return fmt::format("{}.{}", hostname, domain_suffix);
+  return hostname;
+}
+
 bool ParseHostList(const std::string &host_str,
                    std::list<std::string> *host_list) {
   std::string name_str;
@@ -333,7 +341,11 @@ bool HostNameListToStr_(std::list<std::string> &host_list,
         first_str = last_str = num_str;
         continue;
       }
-      if (num == last + 1) {  // update the tail
+      // A range is expanded with the width of its head, so a zero-padded
+      // number of a different width must not be merged into it.
+      if (num == last + 1 &&
+          (num_str.front() != '0' ||
+           num_str.length() == first_str.length())) {  // update the tail
         last++;
         last_str = num_str;
       } else {
