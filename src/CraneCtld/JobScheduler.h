@@ -1466,7 +1466,8 @@ class JobScheduler {
   static FinalTransferResult PersistAndTransferJobsToMongodb_(
       std::unordered_set<JobInCtld*> const& jobs);
 
-  bool FinishRequeue_(JobInCtld* job);
+  bool FinishRequeue_(std::unique_ptr<JobInCtld>& job);
+  std::unordered_set<job_id_t> m_recovered_requeues_;
   void PersistAndRequeueJobs_(std::vector<std::unique_ptr<JobInCtld>>& jobs);
   // Owned by the status-change loop after startup recovery.
   std::vector<std::unique_ptr<JobInCtld>> m_requeue_retries_;

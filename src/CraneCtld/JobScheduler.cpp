@@ -270,17 +270,15 @@ bool JobScheduler::Init() {
       }
       step_snapshot.steps.erase(it);
     }
-    if (!FinishRequeue_(job.get())) {
-      // Account for the recovered submission exactly once, including while
-      // MongoDB is unavailable. The retry path only inserts it into pending.
-      g_account_meta_container->MallocMetaSubmitResource(*job);
+    m_recovered_requeues_.insert(job->JobId());
+    if (!FinishRequeue_(job)) {
       m_requeue_retries_.emplace_back(std::move(job));
       return;
     }
     if (job->deadline_time != infiniteFuture)
       deadline_timer_vec.emplace_back(job->JobId(),
                                       absl::ToUnixSeconds(job->deadline_time));
-    RequeueRecoveredJobIntoPendingQueueLock_(std::move(job));
+    m_pending_job_map_.emplace(job->JobId(), std::move(job));
   };
   auto& running_queue = snapshot.running_queue;
   std::unordered_map<job_id_t, std::unique_ptr<JobInCtld>>
@@ -8584,13 +8582,13 @@ JobScheduler::PersistAndTransferJobsToMongodb_(
   return result;
 }
 
-bool JobScheduler::FinishRequeue_(JobInCtld* job) {
+bool JobScheduler::FinishRequeue_(std::unique_ptr<JobInCtld>& job) {
   // Keep the terminal record until the replacement Pending write succeeds.
   // Reset a copy so repeated attempts always start at the same generation.
   const auto& terminal = job->RuntimeAttr();
   if (!g_embedded_db_client->UpdateRuntimeAttrOfJob(0, job->JobDbId(),
                                                     terminal) ||
-      !g_db_client->ArchiveRequeueAttempt(job))
+      !g_db_client->ArchiveRequeueAttempt(job.get()))
     return false;
   std::vector<step_db_id_t> ids;
   for (const auto& step : terminal.requeue_final_steps())
@@ -8598,17 +8596,33 @@ bool JobScheduler::FinishRequeue_(JobInCtld* job) {
   if ((!ids.empty() && !g_embedded_db_client->PurgeEndedSteps(ids)) ||
       !g_embedded_db_client->ResetJobStepIdCounter(job->JobId()))
     return false;
-  JobInCtld pending;
-  pending.SetFieldsByJobToCtld(job->JobToCtld());
-  pending.SetFieldsByRuntimeAttrOfJob(terminal);
-  pending.ResetForRequeue();
-  if (pending.RequeueCount() >= g_config.CtldConf.MaxRequeueCount)
-    pending.SetHeld(true);
-  if (!g_embedded_db_client->UpdateRuntimeAttrOfJob(0, job->JobDbId(),
-                                                    pending.RuntimeAttr()))
+  auto pending = std::make_unique<JobInCtld>();
+  pending->SetFieldsByJobToCtld(job->JobToCtld());
+  pending->SetFieldsByRuntimeAttrOfJob(terminal);
+  pending->ResetForRequeue();
+  if (pending->RequeueCount() >= g_config.CtldConf.MaxRequeueCount)
+    pending->SetHeld(true);
+  const bool recovered = m_recovered_requeues_.contains(job->JobId());
+  if (recovered && (!AcquireJobAttributes(pending.get()) ||
+                    !CheckJobValidity(pending.get()))) {
+    CRANE_ERROR("[Job #{}] Cannot restore pending attributes after requeue.",
+                job->JobId());
     return false;
-  job->ResetForRequeue();
-  job->SetFieldsByRuntimeAttrOfJob(pending.RuntimeAttr());
+  }
+  if (!g_embedded_db_client->UpdateRuntimeAttrOfJob(0, job->JobDbId(),
+                                                    pending->RuntimeAttr()))
+    return false;
+  if (recovered) {
+    m_recovered_requeues_.erase(job->JobId());
+    if (!pending->IsArrayChild()) {
+      g_account_meta_container->UserAddJob(pending->Username());
+      g_account_meta_container->MallocMetaSubmitResource(*pending);
+    }
+    job = std::move(pending);
+  } else {
+    job->ResetForRequeue();
+    job->SetFieldsByRuntimeAttrOfJob(pending->RuntimeAttr());
+  }
   return true;
 }
 
@@ -8616,7 +8630,7 @@ void JobScheduler::PersistAndRequeueJobs_(
     std::vector<std::unique_ptr<JobInCtld>>& jobs) {
   std::vector<std::unique_ptr<JobInCtld>> requeued;
   for (auto& job : jobs) {
-    if (FinishRequeue_(job.get())) {
+    if (FinishRequeue_(job)) {
       requeued.emplace_back(std::move(job));
     } else {
       CRANE_WARN("[Job #{}] Retaining attempt {} for archive retry.",
