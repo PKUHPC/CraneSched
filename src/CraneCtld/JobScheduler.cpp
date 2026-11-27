@@ -4060,11 +4060,12 @@ CraneErrCode JobScheduler::TerminateRunningStepNoLock_(
 void JobScheduler::CancelRunningJobNoLock_(
     JobInCtld* job, crane::grpc::TerminateSource terminate_source) {
   job_id_t job_id = job->JobId();
+  job->SetCancelRequested(true);
+  job->SetRequeueRequested(false);
   if (job->Status() == crane::grpc::JobStatus::Configuring) {
     // Daemon step is still being configured on Craned nodes.
     // Record the cancel intent; DaemonStepInCtld::StepStatusChange will
     // act on it once all nodes have reported their configuring status.
-    job->SetCancelRequested(true);
     CRANE_INFO(
         "[Job #{}] Cancel requested during Configuring state. Deferring until "
         "all nodes finish configuring.",
@@ -4092,6 +4093,25 @@ void JobScheduler::CancelRunningJobNoLock_(
   }
 
   TerminateRunningStepNoLock_(primary_step, terminate_source);
+}
+
+bool JobScheduler::CancelPendingJobNoLock_(job_id_t job_id) {
+  m_pending_job_map_mtx_.AssertHeld();
+  if (auto it = m_requeueing_jobs_.find(job_id);
+      it != m_requeueing_jobs_.end()) {
+    it->second.cancel_requested = true;
+    return true;
+  }
+  auto it = m_pending_job_map_.find(job_id);
+  if (it == m_pending_job_map_.end()) return false;
+  m_cancel_job_queue_.enqueue(
+      CancelPendingJobQueueElem{.job = std::move(it->second),
+                                .finish_status = crane::grpc::Cancelled});
+  m_pending_job_map_.erase(it);
+  m_pending_map_cached_size_.store(m_pending_job_map_.size(),
+                                   std::memory_order_release);
+  m_cancel_job_async_handle_->send();
+  return true;
 }
 
 crane::grpc::CancelJobReply JobScheduler::CancelPendingOrRunningJob(
@@ -4255,12 +4275,7 @@ crane::grpc::CancelJobReply JobScheduler::CancelPendingOrRunningJob(
 
     add_cancelled(job_id);
 
-    m_cancel_job_queue_.enqueue(CancelPendingJobQueueElem{
-        .job = std::move(it->second),
-        .finish_status = crane::grpc::JobStatus::Cancelled});
-    m_cancel_job_async_handle_->send();
-
-    m_pending_job_map_.erase(it);
+    CancelPendingJobNoLock_(job_id);
   };
 
   auto fn_cancel_running_job = [&](JobInCtld* job) {
@@ -4396,6 +4411,31 @@ crane::grpc::CancelJobReply JobScheduler::CancelPendingOrRunningJob(
 
     auto running_job_rng = rn_input_rng | joined_filters;
     ranges::for_each(running_job_rng, fn_cancel_running_job);
+
+    auto requeueing_jobs =
+        m_requeueing_jobs_ | ranges::views::values |
+        ranges::views::transform([](auto& entry) { return entry.job; }) |
+        ranges::views::filter([&](JobInCtld* job) {
+          if (has_explicit_job_filter && !job_steps.contains(job->JobId()))
+            return false;
+          not_found_job_ids.erase(job->JobId());
+          return true;
+        });
+    for (auto* job : requeueing_jobs | joined_filters) {
+      const auto job_id = job->JobId();
+      auto permission = g_account_manager->CheckIfUidHasPermOnUser(
+          operator_uid, job->Username(), false);
+      if (!permission) {
+        add_not_cancelled(job_id, "Permission Denied");
+      } else if (auto it = job_steps.find(job_id);
+                 it != job_steps.end() && !it->second.empty()) {
+        for (auto step_id : it->second)
+          add_not_cancelled_step(job_id, step_id, "Step not found");
+      } else {
+        CancelPendingJobNoLock_(job_id);
+        add_cancelled(job_id);
+      }
+    }
   }  // release m_pending_job_map_mtx_ and m_running_job_map_mtx_
 
   if (has_explicit_job_filter) {
@@ -4435,6 +4475,12 @@ crane::grpc::RequeueJobReply JobScheduler::RequeueJob(
         (*reply.mutable_not_requeued_jobs())[job_id] = "Permission denied";
         continue;
       }
+    }
+
+    if (job->CancelRequested() && !job->RequeueRequested()) {
+      (*reply.mutable_not_requeued_jobs())[job_id] =
+          "Job cancellation requested";
+      continue;
     }
 
     // Interactive jobs cannot be requeued
@@ -6335,6 +6381,7 @@ void JobScheduler::CleanJobStatusChangeQueueCb_() {
           // Collect raw ptr for batch EmbeddedDB write (first write:
           // terminal status). PersistAndRequeueJobs_ handles the rest.
           context.rn_job_raw_ptrs.insert(job.get());
+          m_requeueing_jobs_.emplace(job_id, RequeueingJob{job.get()});
           context.requeue_jobs.emplace_back(std::move(job));
           m_running_job_map_.erase(iter);
         } else {
@@ -8574,7 +8621,10 @@ void JobScheduler::PersistAndRequeueJobs_(
 
     bool ok = g_embedded_db_client->ResetJobStepIdCounter(job_id);
     if (ok) {
-      job->ResetForRequeue();
+      {
+        LockGuard pending_guard(&m_pending_job_map_mtx_);
+        job->ResetForRequeue();
+      }
       ok = g_embedded_db_client->UpdateRuntimeAttrOfJob(0, job_db_id,
                                                         job->RuntimeAttr());
     }
@@ -8591,17 +8641,34 @@ void JobScheduler::PersistAndRequeueJobs_(
     } else {
       CRANE_ERROR("[Job #{}] Requeue DB ops failed, dropping.", job_id);
       drop_ids[job_id] = job_db_id;
+      LockGuard pending_guard(&m_pending_job_map_mtx_);
+      m_requeueing_jobs_.erase(job_id);
     }
   }
 
   if (!drop_ids.empty()) g_embedded_db_client->PurgeEndedJobs(drop_ids);
+  EnqueueRequeuedJobs_(requeued);
+}
 
+void JobScheduler::EnqueueRequeuedJobs_(
+    std::vector<std::unique_ptr<JobInCtld>>& requeued) {
   if (!requeued.empty()) {
+    LockGuard pending_guard(&m_pending_job_map_mtx_);
     std::vector<DeadlineTimerQueueElem> deadline_timer_vec;
     for (auto& job : requeued) {
-      if (job->deadline_time != absl::FromUnixSeconds(kJobMaxTimeStampSec))
+      const auto job_id = job->JobId();
+      const bool cancelled = m_requeueing_jobs_.at(job_id).cancel_requested;
+      m_requeueing_jobs_.erase(job_id);
+      m_pending_job_map_.emplace(job_id, std::move(job));
+      if (cancelled) {
+        CancelPendingJobNoLock_(job_id);
+        continue;
+      }
+      const auto& pending_job = m_pending_job_map_.at(job_id);
+      if (pending_job->deadline_time !=
+          absl::FromUnixSeconds(kJobMaxTimeStampSec))
         deadline_timer_vec.emplace_back(
-            job->JobId(), absl::ToUnixSeconds(job->deadline_time));
+            job_id, absl::ToUnixSeconds(pending_job->deadline_time));
     }
     if (!deadline_timer_vec.empty()) {
       m_job_deadline_timer_create_queue_.enqueue_bulk(
@@ -8609,9 +8676,8 @@ void JobScheduler::PersistAndRequeueJobs_(
       m_job_deadline_timer_create_async_handle_->send();
     }
 
-    LockGuard pending_guard(&m_pending_job_map_mtx_);
-    for (auto& job : requeued)
-      m_pending_job_map_.emplace(job->JobId(), std::move(job));
+    m_pending_map_cached_size_.store(m_pending_job_map_.size(),
+                                     std::memory_order_release);
   }
 }
 

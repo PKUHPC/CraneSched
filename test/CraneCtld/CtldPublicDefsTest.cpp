@@ -1247,6 +1247,25 @@ TEST(ShouldRequeueTest, BatchRequeueRequestedAlwaysRequeues) {
   EXPECT_TRUE(job.ShouldRequeue());
 }
 
+TEST(ShouldRequeueTest, ConfiguringRequeueCleanupStillRequeues) {
+  Ctld::JobInCtld job;
+  job.type = crane::grpc::Batch;
+  job.requeue_if_failed = true;
+  job.SetRequeueRequested(true);
+  job.SetCancelRequested(true);
+  job.SetStatus(crane::grpc::Cancelled);
+  EXPECT_TRUE(job.ShouldRequeue());
+}
+
+TEST(ShouldRequeueTest, UserCancellationSuppressesSystemFailureRequeue) {
+  Ctld::JobInCtld job;
+  job.type = crane::grpc::Batch;
+  job.requeue_if_failed = true;
+  job.SetCancelRequested(true);
+  job.SetExitCode(ExitCode::EC_RPC_ERR);
+  EXPECT_FALSE(job.ShouldRequeue());
+}
+
 TEST(ShouldRequeueTest, NoRequeueFlagPreventsRequeue) {
   Ctld::JobInCtld job;
   job.type = crane::grpc::Batch;

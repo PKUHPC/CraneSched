@@ -1936,6 +1936,8 @@ std::string_view JobInCtld::HoldReason() const {
 bool JobInCtld::ShouldRequeue() const {
   if (type != crane::grpc::Batch) return false;
   if (job_to_ctld.no_requeue()) return false;
+  // Configuring requeue also requests cleanup; only user cancellation wins.
+  if (cancel_requested && !requeue_requested) return false;
 
   bool requeue_allowed = g_config.CtldConf.JobRequeue || requeue_if_failed;
   if (requeue_requested) return requeue_allowed;

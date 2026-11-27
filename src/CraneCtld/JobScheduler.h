@@ -1466,7 +1466,11 @@ class JobScheduler {
   static FinalTransferResult PersistAndTransferJobsToMongodb_(
       std::unordered_set<JobInCtld*> const& jobs);
 
+  friend class RequeueCancellationTest;
   void PersistAndRequeueJobs_(std::vector<std::unique_ptr<JobInCtld>>& jobs);
+  void EnqueueRequeuedJobs_(std::vector<std::unique_ptr<JobInCtld>>& jobs);
+  bool CancelPendingJobNoLock_(job_id_t job_id)
+      ABSL_EXCLUSIVE_LOCKS_REQUIRED(m_pending_job_map_mtx_);
 
   CraneErrCode TerminateRunningStepNoLock_(
       CommonStepInCtld* step, crane::grpc::TerminateSource terminate_source =
@@ -1508,6 +1512,15 @@ class JobScheduler {
   Mutex m_pending_job_map_mtx_;
 
   std::atomic_uint32_t m_pending_map_cached_size_;
+
+  // The status-change callback owns these jobs until requeue persistence ends.
+  // Cancellation only changes this entry, never the job being archived.
+  struct RequeueingJob {
+    JobInCtld* job;
+    bool cancel_requested{false};
+  };
+  std::unordered_map<job_id_t, RequeueingJob> m_requeueing_jobs_
+      ABSL_GUARDED_BY(m_pending_job_map_mtx_);
 
   HashMap<job_id_t, std::unique_ptr<JobInCtld>> m_running_job_map_
       ABSL_GUARDED_BY(m_running_job_map_mtx_);
