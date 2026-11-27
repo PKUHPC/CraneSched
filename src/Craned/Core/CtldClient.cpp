@@ -139,7 +139,7 @@ void CtldClientStateMachine::TrackAction_(std::future<void> action) {
 }
 
 void CtldClientStateMachine::SetInitialRestore(
-    std::function<void(const ConfigureRequest&)> restore) {
+    std::function<bool(const ConfigureRequest&)> restore) {
   m_initial_restore_ = std::move(restore);
 }
 
@@ -338,7 +338,7 @@ void CtldClientStateMachine::ActionRequestConfig_() {
 
 void CtldClientStateMachine::ActionConfigure_(const ConfigureRequest& request) {
   if (m_initial_restore_) {
-    m_initial_restore_(request);
+    if (!m_initial_restore_(request)) return;
     m_initial_restore_ = {};
   }
   m_pending_config_ = request;
@@ -541,7 +541,7 @@ void CtldClient::Wait() {
     m_node_health_check_thread_.join();
 }
 
-void CtldClient::Init(std::function<void(const ConfigureRequest&)> restore) {
+void CtldClient::Init(std::function<bool(const ConfigureRequest&)> restore) {
   m_state_machine_.SetInitialRestore(std::move(restore));
 }
 
@@ -612,7 +612,6 @@ void CtldClient::Reconcile_(const ConfigureRequest& request) {
       completing_steps{};
   std::unordered_map<job_id_t, std::unordered_map<step_id_t, StepStatus>>
       steps_to_sync{};
-  std::unordered_set<job_id_t> refrozen_jobs{};
 
   // Define status priority for intelligent merging
   // Ctld valid status:
@@ -651,6 +650,40 @@ void CtldClient::Reconcile_(const ConfigureRequest& request) {
       return 0;
     }
   };
+
+  // Request all freezes before waiting for the kernel. A frozen parent
+  // covers its descendants, including supervisors.
+  std::vector<std::filesystem::path> freezing;
+  bool freeze_failed = false;
+  for (const auto& [job_id, steps] : valid_job_steps) {
+    if (!JobConfigIsSuspended(request.job_steps().at(job_id))) continue;
+    if (!m_state_machine_.WithCurrentConfig(token, [&] {
+          auto path = g_job_mgr->RefreezeJobForRecovery(job_id);
+          if (path) {
+            freezing.emplace_back(std::move(*path));
+          } else {
+            CRANE_WARN("[Job #{}] Failed to request recovery freeze: {}",
+                       job_id, CraneErrStr(path.error()));
+            freeze_failed = true;
+          }
+        }))
+      return;
+  }
+  if (freeze_failed) return;
+  const auto freeze_deadline = std::chrono::steady_clock::now() + 1s;
+  while (!freezing.empty()) {
+    std::erase_if(freezing, [](const auto& path) {
+      return CgroupManager::IsFullyFrozen(path).value_or(false);
+    });
+    if (freezing.empty()) break;
+    if (std::chrono::steady_clock::now() >= freeze_deadline) {
+      CRANE_WARN(
+          "Waiting for {} job cgroups to finish freezing before registration",
+          freezing.size());
+      return;
+    }
+    std::this_thread::sleep_for(10ms);
+  }
 
   // Intelligent status synchronization for valid steps
   for (const auto& [job_id, steps] : valid_job_steps) {
@@ -700,32 +733,7 @@ void CtldClient::Reconcile_(const ConfigureRequest& request) {
         continue;
       }
 
-      // Handle Suspended status from Ctld: re-freeze cgroup to ensure
-      // consistency after Craned restart
-      if (ctld_status == StepStatus::Suspended) {
-        if (refrozen_jobs.insert(job_id).second) {
-          CRANE_INFO(
-              "[Job #{}] Ctld reports Suspended, re-freezing by "
-              "job cgroup during recovery.",
-              job_id);
-          CraneErrCode err;
-          if (!m_state_machine_.WithCurrentConfig(
-                  token, [&] { err = g_job_mgr->SuspendJobByCgroup(job_id); }))
-            return;
-          if (err != CraneErrCode::SUCCESS) {
-            CRANE_WARN(
-                "[Job #{}] Failed to re-freeze job cgroup during "
-                "recovery: {}",
-                job_id, CraneErrStr(err));
-            // Leave this configuration pending; the handshake timer requests
-            // a fresh snapshot for retry. Registration requires a complete
-            // freeze.
-            return;
-          }
-        }
-        continue;
-      }
-
+      if (ctld_status == StepStatus::Suspended) continue;
       if (craned_status == ctld_status) {
         continue;
       }

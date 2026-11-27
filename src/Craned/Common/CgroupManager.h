@@ -632,6 +632,10 @@ class CgroupManager {
   // Freeze/Thaw cgroup by absolute cgroup path.
   // For cgroup v1: writes "FROZEN"/"THAWED" to freezer.state
   // For cgroup v2: writes "1"/"0" to cgroup.freeze
+  static std::filesystem::path FreezerPath(
+      const std::filesystem::path& cg_path);
+  static std::optional<bool> IsFullyFrozen(
+      const std::filesystem::path& cg_path);
   static bool FreezeCgroupByPath(const std::string& cg_path);
   static bool ThawCgroupByPath(const std::string& cg_path);
 

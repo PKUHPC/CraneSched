@@ -2868,6 +2868,13 @@ std::vector<CraneErrCode> JobScheduler::SuspendRunningJobs(
   std::vector<CraneErrCode> results;
   results.reserve(job_ids.size());
   for (task_id_t job_id : job_ids) {
+    bool transition_started = false;
+    absl::Cleanup finish_transition = [&] {
+      if (transition_started) {
+        LockGuard lock(&m_running_job_map_mtx_);
+        m_suspend_transitions_.erase(job_id);
+      }
+    };
     std::vector<CranedId> executing_nodes;
 
     auto persist_status = [&](crane::grpc::JobStatus status,
@@ -2959,6 +2966,11 @@ std::vector<CraneErrCode> JobScheduler::SuspendRunningJobs(
         continue;
       }
 
+      transition_started = m_suspend_transitions_.insert(job_id).second;
+      if (!transition_started) {
+        results.emplace_back(CraneErrCode::ERR_INVALID_PARAM);
+        continue;
+      }
       executing_nodes = job->executing_craned_ids;
     }
 
@@ -3134,6 +3146,13 @@ std::vector<CraneErrCode> JobScheduler::ResumeSuspendedJobs(
   std::vector<CraneErrCode> results;
   results.reserve(job_ids.size());
   for (task_id_t job_id : job_ids) {
+    bool transition_started = false;
+    absl::Cleanup finish_transition = [&] {
+      if (transition_started) {
+        LockGuard lock(&m_running_job_map_mtx_);
+        m_suspend_transitions_.erase(job_id);
+      }
+    };
     std::vector<CranedId> executing_nodes;
     int64_t new_time_limit_secs = 0;
     std::optional<int64_t> new_deadline_secs;
@@ -3219,6 +3238,11 @@ std::vector<CraneErrCode> JobScheduler::ResumeSuspendedJobs(
         continue;
       }
 
+      transition_started = m_suspend_transitions_.insert(job_id).second;
+      if (!transition_started) {
+        results.emplace_back(CraneErrCode::ERR_INVALID_PARAM);
+        continue;
+      }
       executing_nodes = job->executing_craned_ids;
       if (executing_nodes.empty()) {
         CRANE_WARN("Job #{} has no executing craned when resuming", job_id);
@@ -7382,13 +7406,13 @@ void JobScheduler::QueryQueueStateSummary(
   }
 }
 
-void JobScheduler::QueryRnJobOnCtldForNodeConfig(
+bool JobScheduler::QueryRnJobOnCtldForNodeConfig(
     const CranedId& craned_id, crane::grpc::ConfigureCranedRequest* req) {
   LockGuard running_job_guard(&m_running_job_map_mtx_);
   LockGuard indexes_guard(&m_job_indexes_mtx_);
 
   auto it = m_node_to_jobs_map_.find(craned_id);
-  if (it == m_node_to_jobs_map_.end()) return;
+  if (it == m_node_to_jobs_map_.end()) return true;
 
   auto& job_steps = *req->mutable_job_steps();
   absl::Time now = absl::Now();
@@ -7420,6 +7444,10 @@ void JobScheduler::QueryRnJobOnCtldForNodeConfig(
     }
 
     if (!daemon_step->ExpectsSupervisorOn(craned_id)) continue;
+    if (std::ranges::contains(job->executing_craned_ids, craned_id)) {
+      if (m_suspend_transitions_.contains(job_id)) return false;
+      job_steps[job_id].set_suspended(job->Status() == crane::grpc::Suspended);
+    }
     *job_steps[job_id].mutable_job() = daemon_step->GetJobToD(craned_id);
     auto& steps = *job_steps[job_id].mutable_steps();
     auto& step_status = *job_steps[job_id].mutable_step_status();
@@ -7440,6 +7468,7 @@ void JobScheduler::QueryRnJobOnCtldForNodeConfig(
         step_status[step->StepId()] = step->Status();
       }
   }
+  return true;
 }
 
 void JobScheduler::ReportLostStepsAsync(

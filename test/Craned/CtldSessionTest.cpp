@@ -165,7 +165,10 @@ class CtldSessionTest : public ::testing::Test {
     g_ctld_client = std::make_unique<CtldClient>();
     g_ctld_client->SetCranedId("session-test");
     supervisor_endpoint = "127.0.0.1:" + std::to_string(port);
-    g_ctld_client->Init([this](const ConfigureRequest&) { RestoreJob(42); });
+    g_ctld_client->Init([this](const ConfigureRequest&) {
+      RestoreJob(42);
+      return true;
+    });
     g_ctld_client->InitGrpcChannel("127.0.0.1", "localhost");
     g_ctld_client->StartGrpcCtldConnection();
     ASSERT_TRUE(
@@ -283,18 +286,32 @@ TEST_F(ReconnectTest, SupersededCleanupPreservesJobInNewSnapshot) {
 
 TEST_F(ReconnectTest, FailedRefreezeRequiresNewConfiguration) {
   auto suspended = controller.config;
-  (*(*suspended.mutable_job_steps())[42].mutable_step_status())[kDaemonStepId] =
-      StepStatus::Suspended;
+  auto& job = (*suspended.mutable_job_steps())[42];
+  job.set_suspended(true);
+  (*job.mutable_step_status())[kDaemonStepId] = StepStatus::Running;
   // The recovered job has no cgroup, so the requested suspend cannot succeed.
   ASSERT_TRUE(g_ctld_client->Configure(suspended));
   auto running = controller.WaitForRetry(1);
   ASSERT_TRUE(running);
   EXPECT_FALSE(controller.registered.HasBeenNotified());
+  EXPECT_FALSE(g_ctld_client->Configure(suspended));
   (*(*running->mutable_job_steps())[42].mutable_step_status())[kDaemonStepId] =
       StepStatus::Running;
+  (*running->mutable_job_steps())[42].set_suspended(false);
   ASSERT_TRUE(g_ctld_client->Configure(*running));
   ASSERT_TRUE(
       controller.registered.WaitForNotificationWithTimeout(absl::Seconds(5)));
+}
+
+TEST_F(ReconnectTest, LegacySuspendedStepStatusRequestsRefreeze) {
+  auto request = controller.config;
+  auto& job = (*request.mutable_job_steps())[42];
+  job.set_suspended(false);
+  (*job.mutable_step_status())[kDaemonStepId] = StepStatus::Suspended;
+  const int retry_count = controller.retries;
+  ASSERT_TRUE(g_ctld_client->Configure(request));
+  ASSERT_TRUE(controller.WaitForRetry(retry_count + 1).has_value());
+  EXPECT_FALSE(controller.registered.HasBeenNotified());
 }
 
 TEST_F(CtldSessionTest, RemovesInvalidJobBeforeRegisteringWithOneWorker) {

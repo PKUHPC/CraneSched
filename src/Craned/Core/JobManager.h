@@ -152,6 +152,7 @@ class JobManager {
 
   std::vector<step_id_t> GetAllocatedJobSteps(job_id_t job_id);
 
+  CraneExpected<std::filesystem::path> RefreezeJobForRecovery(job_id_t job_id);
   CraneErrCode SuspendJobByCgroup(job_id_t job_id);
 
   CraneErrCode ResumeJobByCgroup(job_id_t job_id);

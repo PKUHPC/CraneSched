@@ -52,7 +52,11 @@ void CranedStub::ConfigureCraned(const CranedId &craned_id,
   *request.mutable_token() = token;
   crane::FillRuntimeTraceConfigProto(request.mutable_trace_config());
 
-  g_job_scheduler->QueryRnJobOnCtldForNodeConfig(craned_id, &request);
+  if (!g_job_scheduler->QueryRnJobOnCtldForNodeConfig(craned_id, &request)) {
+    CRANE_DEBUG("Deferring configuration for {} during suspend/resume.",
+                craned_id);
+    return;
+  }
 
   ClientContext context;
   google::protobuf::Empty reply;

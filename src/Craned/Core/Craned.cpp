@@ -1431,7 +1431,7 @@ void CreateRequiredDirectories() {
   if (!ok) std::exit(1);
 }
 
-void Recover(const crane::grpc::ConfigureCranedRequest& config_from_ctld) {
+bool Recover(const crane::grpc::ConfigureCranedRequest& config_from_ctld) {
   // FIXME: Ctld cancel job after Configure Request sent, will keep invalid jobs
   // FIXME: Add API InitAndRetryToRecoverJobs(Expected Job List) -> Result
   using Craned::SupervisorStub;
@@ -1445,14 +1445,14 @@ void Recover(const crane::grpc::ConfigureCranedRequest& config_from_ctld) {
   CRANE_DEBUG("CraneCtld claimed [{}] are running on this node.",
               util::JobStepsToString(ctld_step_ids));
 
-  CraneExpected<absl::flat_hash_map<std::pair<job_id_t, step_id_t>,
-                                    SupervisorStub::SupervisorRecoverInfo>>
-      steps = SupervisorStub::InitAndGetRecoveredMap();
-
-  absl::flat_hash_map<std::pair<job_id_t, step_id_t>,
-                      SupervisorStub::SupervisorRecoverInfo>
-      step_supv_map;
-  if (steps.has_value()) step_supv_map = steps.value();
+  auto supervisors = SupervisorStub::InitAndGetRecoveredMap(config_from_ctld);
+  if (!supervisors) {
+    CRANE_WARN(
+        "Supervisor discovery incomplete, waiting for a new configuration: {}",
+        CraneErrStr(supervisors.error()));
+    return false;
+  }
+  auto& step_supv_map = *supervisors;
 
   // All job ids from supervisor
   std::map<job_id_t, std::set<step_id_t>> supv_step_ids;
@@ -1538,6 +1538,7 @@ void Recover(const crane::grpc::ConfigureCranedRequest& config_from_ctld) {
                util::JobStepsToString(invalid_steps));
   }
   g_server->MarkSupervisorAsRecovered();
+  return true;
 }
 
 void GlobalVariableInit() {
@@ -1647,7 +1648,7 @@ void GlobalVariableInit() {
     }
     // Recover jobs and steps
     // Status synchronization is handled in CtldClient.cpp
-    Recover(request);
+    return Recover(request);
   });
   g_ctld_client->SetCranedId(g_config.CranedIdOfThisNode);
 

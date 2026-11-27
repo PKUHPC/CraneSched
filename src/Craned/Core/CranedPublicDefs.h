@@ -31,6 +31,13 @@
 
 namespace Craned {
 
+inline bool JobConfigIsSuspended(const crane::grpc::JobStepsToD& job_steps) {
+  return job_steps.suspended() ||
+         std::ranges::any_of(job_steps.step_status(), [](const auto& entry) {
+           return entry.second == crane::grpc::Suspended;
+         });
+}
+
 inline constexpr uint64_t kEvSigChldResendMs = 500;
 constexpr uint64_t kCtldClientTimeoutSec = 30;
 constexpr int64_t kCranedRpcTimeoutSeconds = 5;

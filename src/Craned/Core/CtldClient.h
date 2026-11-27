@@ -45,7 +45,7 @@ class CtldClientStateMachine {
   CtldClientStateMachine& operator=(CtldClientStateMachine const&) = delete;
   CtldClientStateMachine(CtldClientStateMachine&&) = delete;
   CtldClientStateMachine& operator=(CtldClientStateMachine&&) = delete;
-  void SetInitialRestore(std::function<void(const ConfigureRequest&)> restore);
+  void SetInitialRestore(std::function<bool(const ConfigureRequest&)> restore);
 
   // Dispatch under the same lock that replaces the handshake token. Wait
   // for dispatched cleanup futures after releasing this lock.
@@ -115,7 +115,7 @@ class CtldClientStateMachine {
   // All dispatch and the closing transition run under m_mtx_.
   void TrackAction_(std::future<void> action);
   CtldClient& m_client_;
-  std::function<void(const ConfigureRequest&)> m_initial_restore_;
+  std::function<bool(const ConfigureRequest&)> m_initial_restore_;
   std::vector<std::future<void>> m_actions_ ABSL_GUARDED_BY(m_mtx_);
   std::optional<ConfigureRequest> m_pending_config_ ABSL_GUARDED_BY(m_mtx_);
   std::thread m_recovery_thread_;
@@ -155,7 +155,7 @@ class CtldClient {
 
   void SetCranedId(CranedId const& craned_id) { m_craned_id_ = craned_id; }
 
-  void Init(std::function<void(const ConfigureRequest&)> restore);
+  void Init(std::function<bool(const ConfigureRequest&)> restore);
   bool Configure(const ConfigureRequest& request) {
     return m_state_machine_.EvRecvConfigFromCtld(request);
   }

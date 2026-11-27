@@ -19,6 +19,11 @@
 
 #include <protos/Supervisor.grpc.pb.h>
 
+#include <fstream>
+#include <sstream>
+
+#include "absl/cleanup/cleanup.h"
+
 namespace {
 
 std::filesystem::path SupervisorUnixSockDir() {
@@ -29,6 +34,70 @@ std::filesystem::path SupervisorUnixSockDir() {
 
 namespace Craned {
 using grpc::ClientContext;
+
+namespace {
+// Find the listening socket without connecting. Frozen supervisors cannot
+// drain their accept queue, including across repeated Craned restarts.
+CraneExpected<pid_t> FrozenListenerPid(const std::filesystem::path& socket,
+                                       const std::vector<pid_t>& members) {
+  std::ifstream table("/proc/net/unix");
+  std::string row;
+  while (std::getline(table, row)) {
+    std::istringstream fields(row);
+    std::string addr, refs, proto, flags, type, state, inode, path;
+    if (!(fields >> addr >> refs >> proto >> flags >> type >> state >> inode) ||
+        flags != "00010000" || type != "0001")
+      continue;
+    std::getline(fields >> std::ws, path);
+    if (std::filesystem::path(path) != socket) continue;
+    const auto target = "socket:[" + inode + "]";
+    for (pid_t pid : members) {
+      std::error_code ec;
+      const auto fds = std::filesystem::path(std::format("/proc/{}/fd", pid));
+      std::filesystem::directory_iterator fd(fds, ec), end;
+      for (; !ec && fd != end; fd.increment(ec)) {
+        std::error_code link_error;
+        if (std::filesystem::read_symlink(fd->path(), link_error) == target)
+          return pid;
+      }
+    }
+  }
+  return std::unexpected(CraneErrCode::ERR_RPC_FAILURE);
+}
+
+using SupervisorStatus = std::tuple<job_id_t, step_id_t, pid_t, StepStatus>;
+
+CraneExpected<std::optional<SupervisorStatus>> SuspendedSupervisorStatus(
+    const std::filesystem::path& socket, const crane::grpc::JobStepsToD& config,
+    step_id_t step, SupervisorStub& stub) {
+  namespace cg = Common::CgConstant;
+  const auto& job = config.job();
+  auto job_path = CgroupManager::MakeCgroupPathInfo(
+      job.job_id(), ResourceInNodeV3(job.res()).GetCpuSet());
+  const auto system =
+      cg::kSystemCgPathPrefix / cg::kRootCgNamePrefix /
+      CgroupManager::CgroupStrByStepId(job_path.cg_str, step, true);
+  const auto procs = CgroupManager::FreezerPath(system) / "cgroup.procs";
+  std::error_code ec;
+  if (!std::filesystem::exists(procs, ec) && !ec) return std::nullopt;
+  std::ifstream members_file(procs);
+  std::vector<pid_t> members{std::istream_iterator<pid_t>(members_file), {}};
+  if (!members_file.eof()) return std::unexpected(CraneErrCode::ERR_CGROUP);
+  if (members.empty()) return std::nullopt;
+
+  const auto frozen = CgroupManager::IsFullyFrozen(system);
+  if (!frozen) return std::unexpected(CraneErrCode::ERR_CGROUP);
+  if (!*frozen) {
+    auto status = stub.CheckStatus();
+    if (!status) return std::unexpected(status.error());
+    return *status;
+  }
+  auto pid = FrozenListenerPid(socket, members);
+  if (!pid) return std::unexpected(pid.error());
+  return SupervisorStatus{job.job_id(), step, *pid,
+                          config.step_status().at(step)};
+}
+}  // namespace
 
 SupervisorStub::SupervisorStub(job_id_t job_id, step_id_t step_id) {
   auto sock_path =
@@ -42,7 +111,8 @@ SupervisorStub::SupervisorStub(const std::string& endpoint) {
 
 CraneExpected<absl::flat_hash_map<std::pair<job_id_t, step_id_t>,
                                   SupervisorStub::SupervisorRecoverInfo>>
-SupervisorStub::InitAndGetRecoveredMap() {
+SupervisorStub::InitAndGetRecoveredMap(
+    const crane::grpc::ConfigureCranedRequest& config) {
   static constexpr LazyRE2 supervisor_sock_pattern(
       R"(step_(\d+)\.(\d+)\.sock$)");
   try {
@@ -63,16 +133,42 @@ SupervisorStub::InitAndGetRecoveredMap() {
     absl::flat_hash_map<std::pair<job_id_t, step_id_t>, SupervisorRecoverInfo>
         supervisor_status_map;
     supervisor_status_map.reserve(files.size());
+    std::atomic_bool retry_restore{false};
     std::latch latch(files.size());
     absl::Mutex mtx;
     for (const auto& file : files) {
-      g_thread_pool->detach_task([file, &latch, &mtx, &supervisor_status_map] {
+      g_thread_pool->detach_task([file, &config, &latch, &mtx, &retry_restore,
+                                  &supervisor_status_map] {
+        absl::Cleanup finished = [&] { latch.count_down(); };
         auto sock_path = fmt::format("unix://{}", file.string());
         std::shared_ptr stub = std::make_shared<SupervisorStub>(sock_path);
 
-        CraneExpected<std::tuple<job_id_t, step_id_t, pid_t, StepStatus>>
-            supv_ids = stub->CheckStatus();
-        if (!supv_ids) {
+        std::optional<SupervisorStatus> status;
+        job_id_t job;
+        step_id_t step;
+        if (RE2::FullMatch(file.filename().string(), *supervisor_sock_pattern,
+                           &job, &step)) {
+          const auto alloc = config.job_steps().find(job);
+          if (alloc != config.job_steps().end() &&
+              JobConfigIsSuspended(alloc->second) &&
+              alloc->second.step_status().contains(step)) {
+            auto recovered =
+                SuspendedSupervisorStatus(file, alloc->second, step, *stub);
+            if (!recovered) {
+              CRANE_WARN(
+                  "Cannot verify suspended supervisor {}, retrying discovery",
+                  file.string());
+              retry_restore = true;
+              return;
+            }
+            status = *recovered;
+          }
+        }
+        if (!status) {
+          auto reply = stub->CheckStatus();
+          if (reply) status = *reply;
+        }
+        if (!status) {
           CRANE_ERROR("CheckStepStatus for {} failed, removing it.",
                       file.string());
           std::error_code ec;
@@ -81,21 +177,20 @@ SupervisorStub::InitAndGetRecoveredMap() {
             CRANE_ERROR("Failed to remove socket file {}: {}", file.string(),
                         ec.message());
           }
-          latch.count_down();
           return;
         }
-        auto [job_id, step_id, pid, status] = supv_ids.value();
+        auto [job_id, step_id, pid, step_status] = *status;
         CRANE_DEBUG("[Step #{}.{}] Supervisor socket {} recovered, pid: {}",
                     job_id, step_id, file.string(), pid);
         absl::MutexLock lock(&mtx);
-        supervisor_status_map.emplace(std::make_pair(job_id, step_id),
-                                      SupervisorRecoverInfo{pid, status, stub});
-
-        latch.count_down();
+        supervisor_status_map.emplace(
+            std::make_pair(job_id, step_id),
+            SupervisorRecoverInfo{pid, step_status, stub});
       });
     }
 
     latch.wait();
+    if (retry_restore) return std::unexpected(CraneErrCode::ERR_RPC_FAILURE);
     return supervisor_status_map;
 
   } catch (const std::exception& e) {

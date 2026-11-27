@@ -2106,6 +2106,19 @@ std::vector<step_id_t> JobManager::GetAllocatedJobSteps(job_id_t job_id) {
   return result;
 }
 
+CraneExpected<std::filesystem::path> JobManager::RefreezeJobForRecovery(
+    job_id_t job_id) {
+  std::filesystem::path path;
+  {
+    auto job = m_job_map_.GetValueExclusivePtr(job_id);
+    if (!job || !job->cgroup) return std::unexpected(CraneErrCode::ERR_CGROUP);
+    path = job->cgroup->CgroupPath();
+  }
+  if (!CgroupManager::FreezeCgroupByPath(path.string()))
+    return std::unexpected(CraneErrCode::ERR_CGROUP);
+  return path;
+}
+
 CraneErrCode JobManager::SuspendJobByCgroup(job_id_t job_id) {
   std::shared_ptr<SupervisorStub> primary_stub;
   std::string job_cg_abs_path;
