@@ -199,10 +199,11 @@ class MongodbClient {
       job_id_t array_job_id);
 
   /* ----- Method of operating the step table ----------- */
+  bool ArchiveRequeueAttempt(JobInCtld* job);
   bool InsertRecoveredStep(
+      job_db_id_t job_db_id,
       crane::grpc::StepInEmbeddedDb const& step_in_embedded_db);
   bool InsertSteps(const std::unordered_set<StepInCtld*>& steps);
-  bool CheckStepExisted(job_id_t job_id, step_id_t step_id);
 
   bool QueryJobSizeSummary(
       const crane::grpc::QueryJobSizeSummaryRequest* request,

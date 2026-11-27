@@ -1850,6 +1850,8 @@ void JobInCtld::SetPrimaryStepStatus(crane::grpc::JobStatus val) {
 void JobInCtld::SetStatus(crane::grpc::JobStatus val) {
   status = val;
   runtime_attr.set_status(val);
+  if (IsFinishedStepStatus(val))
+    runtime_attr.set_requeue_eligible(RequeueEligible());
 }
 
 void JobInCtld::SetPrimaryStepExitCode(uint32_t val) {
@@ -1933,24 +1935,29 @@ std::string_view JobInCtld::HoldReason() const {
   return runtime_attr.held_by_admin() ? "JobHeldAdmin" : "JobHeldUser";
 }
 
-bool JobInCtld::ShouldRequeue() const {
-  if (type != crane::grpc::Batch) return false;
-  if (job_to_ctld.no_requeue()) return false;
+bool JobInCtld::RequeueEligible() const {
+  return IsBatch() && !job_to_ctld.no_requeue() &&
+         (g_config.CtldConf.JobRequeue || requeue_if_failed);
+}
 
-  bool requeue_allowed = g_config.CtldConf.JobRequeue || requeue_if_failed;
-  if (requeue_requested) return requeue_allowed;
+bool JobInCtld::ShouldRequeue() const {
+  if (!RequeueEligible()) return false;
+  if (requeue_requested) return true;
 
   // System-level failures trigger requeue if the cluster default allows
   // requeue or the job explicitly requested it.
   if (exit_code == ExitCode::EC_CRANED_DOWN ||
       exit_code == ExitCode::EC_RPC_ERR)
-    return requeue_allowed;
+    return true;
 
   return requeue_if_failed && status != crane::grpc::Completed &&
          status != crane::grpc::Cancelled;
 }
 
 void JobInCtld::ResetForRequeue() {
+  runtime_attr.clear_requeue_pending_archive();
+  runtime_attr.clear_requeue_final_steps();
+  runtime_attr.clear_requeue_eligible();
   requeue_count++;
   runtime_attr.set_requeue_count(requeue_count);
 
@@ -2117,6 +2124,12 @@ void JobInCtld::TriggerTerminalDependencyEvents(absl::Time end_time) {
 
 void JobInCtld::SetFieldsByJobToCtld(crane::grpc::JobToCtld const& val) {
   job_to_ctld = val;
+  if (val.requeue_policy() == crane::grpc::REQUEUE_POLICY_UNKNOWN) {
+    if (val.no_requeue())
+      job_to_ctld.set_requeue_policy(crane::grpc::REQUEUE_DISABLED);
+    else if (val.requeue_if_failed())
+      job_to_ctld.set_requeue_policy(crane::grpc::REQUEUE_ON_FAILURE);
+  }
 
   partition_id = (val.partition_name().empty()) ? g_config.DefaultPartition
                                                 : val.partition_name();
@@ -2380,6 +2393,9 @@ void JobInCtld::SetFieldsOfJobInfo(crane::grpc::JobInfo* job_info) const {
   job_info->set_ntasks(ntasks);
   job_info->set_requeue_count(requeue_count);
   job_info->set_requeue_if_failed(requeue_if_failed);
+  if (job_to_ctld.requeue_policy() != crane::grpc::REQUEUE_POLICY_UNKNOWN)
+    job_info->set_requeue_policy(job_to_ctld.requeue_policy());
+  job_info->set_requeue_eligible(RequeueEligible());
 }
 
 uint32_t JobInCtld::SchedulePendingSteps(

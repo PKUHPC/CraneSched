@@ -1244,7 +1244,12 @@ struct JobInCtld {
 
   int32_t RequeueCount() const { return requeue_count; }
 
+  bool RequeueEligible() const;
   bool ShouldRequeue() const;
+  void BeginRequeueArchive() { runtime_attr.set_requeue_pending_archive(true); }
+  void RetainRequeueStep(const crane::grpc::StepInEmbeddedDb& step) {
+    *runtime_attr.add_requeue_final_steps() = step;
+  }
   void ResetForRequeue();
 
   // Array job tracking accessors

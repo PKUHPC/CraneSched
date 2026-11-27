@@ -1293,6 +1293,38 @@ TEST(ShouldRequeueTest, NoRequeueByDefault) {
 
 // --- ResetForRequeue tests ---
 
+TEST(ResetForRequeueTest, CheckpointRetainsTerminalAttemptAcrossRestart) {
+  Ctld::JobInCtld job;
+  crane::grpc::JobToCtld request;
+  request.add_gids(0);
+  request.set_type(crane::grpc::Batch);
+  request.set_requeue_if_failed(true);
+  job.SetFieldsByJobToCtld(request);
+  job.SetStatus(crane::grpc::Failed);
+  job.BeginRequeueArchive();
+  crane::grpc::StepInEmbeddedDb final_step;
+  final_step.mutable_runtime_attr()->set_step_db_id(42);
+  final_step.mutable_runtime_attr()->set_exit_code(7);
+  job.RetainRequeueStep(final_step);
+
+  crane::grpc::RuntimeAttrOfJob persisted;
+  ASSERT_TRUE(persisted.ParseFromString(job.RuntimeAttr().SerializeAsString()));
+  Ctld::JobInCtld recovered;
+  recovered.SetFieldsByJobToCtld(job.JobToCtld());
+  recovered.SetFieldsByRuntimeAttrOfJob(persisted);
+  EXPECT_TRUE(recovered.RuntimeAttr().requeue_pending_archive());
+  EXPECT_TRUE(recovered.RuntimeAttr().requeue_eligible());
+  ASSERT_EQ(recovered.RuntimeAttr().requeue_final_steps_size(), 1);
+  EXPECT_EQ(
+      recovered.RuntimeAttr().requeue_final_steps(0).runtime_attr().exit_code(),
+      7U);
+  recovered.ResetForRequeue();
+  EXPECT_EQ(recovered.RequeueCount(), 1);
+  EXPECT_FALSE(recovered.RuntimeAttr().requeue_pending_archive());
+  EXPECT_FALSE(recovered.RuntimeAttr().has_requeue_eligible());
+  EXPECT_TRUE(recovered.RuntimeAttr().requeue_final_steps().empty());
+}
+
 TEST(ResetForRequeueTest, IncrementsCountAndResetsState) {
   Ctld::JobInCtld job;
   job.type = crane::grpc::Batch;

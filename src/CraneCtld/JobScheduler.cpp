@@ -244,6 +244,41 @@ bool JobScheduler::Init() {
     return false;
   }
 
+  EmbeddedDbClient::StepDbSnapshot step_snapshot;
+  ok = g_embedded_db_client->RetrieveStepInfo(&step_snapshot);
+  if (!ok) {
+    CRANE_ERROR("Failed to retrieve embedded DB step snapshot!");
+    return false;
+  }
+
+  // Claim every retained step for this job before orphan cleanup. Terminal
+  // results from the durable checkpoint supersede older step-store snapshots.
+  auto recover_requeue = [&](std::unique_ptr<JobInCtld> job) {
+    job->BeginRequeueArchive();
+    std::unordered_set<step_db_id_t> checkpointed;
+    for (const auto& step : job->RuntimeAttr().requeue_final_steps())
+      checkpointed.insert(step.runtime_attr().step_db_id());
+    if (auto it = step_snapshot.steps.find(job->JobId());
+        it != step_snapshot.steps.end()) {
+      for (const auto& step : it->second) {
+        if (step.runtime_attr().requeue_count() == job->RequeueCount() &&
+            !checkpointed.contains(step.runtime_attr().step_db_id()))
+          job->RetainRequeueStep(step);
+      }
+      step_snapshot.steps.erase(it);
+    }
+    if (!FinishRequeue_(job.get())) {
+      // Account for the recovered submission exactly once, including while
+      // MongoDB is unavailable. The retry path only inserts it into pending.
+      g_account_meta_container->MallocMetaSubmitResource(*job);
+      m_requeue_retries_.emplace_back(std::move(job));
+      return;
+    }
+    if (job->deadline_time != infiniteFuture)
+      deadline_timer_vec.emplace_back(job->JobId(),
+                                      absl::ToUnixSeconds(job->deadline_time));
+    RequeueRecoveredJobIntoPendingQueueLock_(std::move(job));
+  };
   auto& running_queue = snapshot.running_queue;
   std::unordered_map<job_id_t, std::unique_ptr<JobInCtld>>
       recovered_running_jobs;
@@ -307,6 +342,10 @@ bool JobScheduler::Init() {
         auto max_end_time = job->EndTime();
         auto end_time = std::min(now, max_end_time);
         job->SetEndTime(end_time);
+        if (job->ShouldRequeue()) {
+          recover_requeue(std::move(job));
+          continue;
+        }
         ok = g_embedded_db_client->UpdateRuntimeAttrOfJob(0, job_db_id,
                                                           job->RuntimeAttr());
         if (!ok) {
@@ -314,28 +353,6 @@ bool JobScheduler::Init() {
               "UpdateRuntimeAttrOfJob failed for job #{} when "
               "mark the job as FAILED.",
               job_id);
-        }
-
-        if (job->ShouldRequeue()) {
-          g_db_client->InsertJob(job.get());
-          bool requeue_ok = g_embedded_db_client->ResetJobStepIdCounter(job_id);
-          if (requeue_ok) {
-            job->ResetForRequeue();
-            requeue_ok = g_embedded_db_client->UpdateRuntimeAttrOfJob(
-                0, job_db_id, job->RuntimeAttr());
-          }
-          if (requeue_ok) {
-            if (job->RequeueCount() >= g_config.CtldConf.MaxRequeueCount)
-              job->SetHeld(true);
-            if (job->deadline_time != infiniteFuture)
-              deadline_timer_vec.emplace_back(
-                  job_id, absl::ToUnixSeconds(job->deadline_time));
-            RequeueRecoveredJobIntoPendingQueueLock_(std::move(job));
-          } else {
-            CRANE_ERROR("[Job #{}] Requeue DB ops failed, dropping.", job_id);
-            g_embedded_db_client->PurgeEndedJobs({{job_id, job_db_id}});
-          }
-          continue;
         }
 
         if (!result)
@@ -513,29 +530,12 @@ bool JobScheduler::Init() {
     std::unordered_map<job_id_t, job_db_id_t> db_ids;
     for (auto& [db_id, job_in_embedded_db] : snapshot.final_queue) {
       job_id_t job_id = job_in_embedded_db.runtime_attr().job_id();
-      if (job_in_embedded_db.runtime_attr().requeue_requested()) {
+      if (job_in_embedded_db.runtime_attr().requeue_pending_archive() ||
+          job_in_embedded_db.runtime_attr().requeue_requested()) {
         auto job = std::make_unique<JobInCtld>();
         job->SetFieldsByJobToCtld(job_in_embedded_db.job_to_ctld());
         job->SetFieldsByRuntimeAttrOfJob(job_in_embedded_db.runtime_attr());
-
-        g_db_client->InsertJob(job.get());
-        bool requeue_ok = g_embedded_db_client->ResetJobStepIdCounter(job_id);
-        if (requeue_ok) {
-          job->ResetForRequeue();
-          requeue_ok = g_embedded_db_client->UpdateRuntimeAttrOfJob(
-              0, db_id, job->RuntimeAttr());
-        }
-        if (requeue_ok) {
-          if (job->RequeueCount() >= g_config.CtldConf.MaxRequeueCount)
-            job->SetHeld(true);
-          if (job->deadline_time != infiniteFuture)
-            deadline_timer_vec.emplace_back(
-                job_id, absl::ToUnixSeconds(job->deadline_time));
-          RequeueRecoveredJobIntoPendingQueueLock_(std::move(job));
-        } else {
-          CRANE_ERROR("[Job #{}] Requeue DB ops failed, dropping.", job_id);
-          db_ids[job_id] = db_id;
-        }
+        recover_requeue(std::move(job));
         continue;
       }
 
@@ -560,12 +560,6 @@ bool JobScheduler::Init() {
     }
   }
 
-  EmbeddedDbClient::StepDbSnapshot step_snapshot;
-  ok = g_embedded_db_client->RetrieveStepInfo(&step_snapshot);
-  if (!ok) {
-    CRANE_ERROR("Failed to retrieve embedded DB step snapshot!");
-    return false;
-  }
   CRANE_INFO("{} step(s) fetched from DB.",
              std::ranges::fold_left(
                  step_snapshot.steps | std::views::values |
@@ -574,7 +568,8 @@ bool JobScheduler::Init() {
                  0, std::plus{}));
   std::unordered_map<job_id_t, std::vector<crane::grpc::StepInEmbeddedDb>>
       invalid_steps;
-  std::vector<crane::grpc::StepInEmbeddedDb> completed_steps;
+  std::vector<std::pair<job_db_id_t, crane::grpc::StepInEmbeddedDb>>
+      completed_steps;
   std::unordered_map<job_id_t, std::vector<step_db_id_t>>
       nonterminal_step_db_ids_by_job;
   std::vector<step_db_id_t> orphaned_recovered_step_db_ids;
@@ -660,7 +655,8 @@ bool JobScheduler::Init() {
       if (completed_step_status.contains(step_status)) {
         CRANE_INFO("[Step #{}{}] Step is completed, put to mongodb!", job_id,
                    step_id);
-        completed_steps.emplace_back(std::move(step_info));
+        completed_steps.emplace_back(job->JobDbId(), std::move(step_info));
+        continue;
       }
       std::unique_ptr<StepInCtld> step;
       if (step_type == crane::grpc::StepType::DAEMON) {
@@ -916,11 +912,12 @@ bool JobScheduler::Init() {
     for (auto& step_info : steps)
       purged_step_db_ids.push_back(step_info.runtime_attr().step_db_id());
   }
-  for (auto& step_info : completed_steps) {
-    purged_step_db_ids.push_back(step_info.runtime_attr().step_db_id());
-    if (!g_db_client->CheckStepExisted(step_info.step_to_ctld().job_id(),
-                                       step_info.runtime_attr().step_id())) {
-      g_db_client->InsertRecoveredStep(step_info);
+  for (auto& [job_db_id, step_info] : completed_steps) {
+    if (g_db_client->InsertRecoveredStep(job_db_id, step_info)) {
+      purged_step_db_ids.push_back(step_info.runtime_attr().step_db_id());
+    } else {
+      m_unarchived_steps_[step_info.step_to_ctld().job_id()].push_back(
+          std::move(step_info));
     }
   }
   purged_step_db_ids.insert(purged_step_db_ids.end(),
@@ -6123,6 +6120,12 @@ void JobScheduler::RetryCompletingSteps_() {
 }
 
 void JobScheduler::JobStatusChangeTimerCb_() {
+  if (!m_requeue_retries_.empty() && absl::Now() >= m_next_requeue_retry_) {
+    auto retries = std::move(m_requeue_retries_);
+    m_requeue_retries_.clear();
+    PersistAndRequeueJobs_(retries);
+    m_next_requeue_retry_ = absl::Now() + absl::Seconds(1);
+  }
   m_clean_job_status_change_handle_->send();
 }
 
@@ -6334,7 +6337,8 @@ void JobScheduler::CleanJobStatusChangeQueueCb_() {
 
           // Collect raw ptr for batch EmbeddedDB write (first write:
           // terminal status). PersistAndRequeueJobs_ handles the rest.
-          context.rn_job_raw_ptrs.insert(job.get());
+          job->BeginRequeueArchive();
+          context.rn_job_raw_ptrs.erase(job.get());
           context.requeue_jobs.emplace_back(std::move(job));
           m_running_job_map_.erase(iter);
         } else {
@@ -6721,6 +6725,25 @@ void JobScheduler::CleanJobStatusChangeQueueCb_() {
   db_commit_span.SetAttribute("step_runtime_update_ms", step_txn_ms);
   auto now = std::chrono::steady_clock::now();
 
+  // A requeued job and the last steps in the same callback must survive as
+  // one record. Older failed step transfers are included in the same replay.
+  auto step_record = [](const StepInCtld& step) {
+    crane::grpc::StepInEmbeddedDb record;
+    *record.mutable_step_to_ctld() = step.StepToCtld();
+    *record.mutable_runtime_attr() = step.RuntimeAttr();
+    return record;
+  };
+  std::erase_if(context.step_raw_ptrs, [&](StepInCtld* step) {
+    if (!step->job->RuntimeAttr().requeue_pending_archive()) return false;
+    step->job->RetainRequeueStep(step_record(*step));
+    return true;
+  });
+  for (auto& job : context.requeue_jobs) {
+    auto retained = m_unarchived_steps_.extract(job->JobId());
+    if (!retained.empty())
+      for (const auto& step : retained.mapped()) job->RetainRequeueStep(step);
+  }
+
   FinalTransferResult final_step_result;
   {
     CRANE_TRACE_CHILD_NAMED(final_steps_span, db_commit_span,
@@ -6728,6 +6751,11 @@ void JobScheduler::CleanJobStatusChangeQueueCb_() {
     final_steps_span.SetAttribute(
         "step_count", static_cast<int64_t>(context.step_raw_ptrs.size()));
     final_step_result = ProcessFinalSteps_(context.step_raw_ptrs);
+    if (!final_step_result.mongo_inserted)
+      for (auto* step : context.step_raw_ptrs)
+        m_unarchived_steps_[step->job_id].push_back(step_record(*step));
+    for (auto* job : context.job_raw_ptrs)
+      m_unarchived_steps_.erase(job->JobId());
     final_steps_span.SetAttribute("ok", final_step_result.ok);
     final_steps_span.SetAttribute("persist_ms", final_step_result.persist_ms);
     final_steps_span.SetAttribute("mongo_insert_ms",
@@ -8550,42 +8578,46 @@ JobScheduler::PersistAndTransferJobsToMongodb_(
   return result;
 }
 
+bool JobScheduler::FinishRequeue_(JobInCtld* job) {
+  // Keep the terminal record until the replacement Pending write succeeds.
+  // Reset a copy so repeated attempts always start at the same generation.
+  const auto& terminal = job->RuntimeAttr();
+  if (!g_embedded_db_client->UpdateRuntimeAttrOfJob(0, job->JobDbId(),
+                                                    terminal) ||
+      !g_db_client->ArchiveRequeueAttempt(job))
+    return false;
+  std::vector<step_db_id_t> ids;
+  for (const auto& step : terminal.requeue_final_steps())
+    ids.push_back(step.runtime_attr().step_db_id());
+  if ((!ids.empty() && !g_embedded_db_client->PurgeEndedSteps(ids)) ||
+      !g_embedded_db_client->ResetJobStepIdCounter(job->JobId()))
+    return false;
+  JobInCtld pending;
+  pending.SetFieldsByJobToCtld(job->JobToCtld());
+  pending.SetFieldsByRuntimeAttrOfJob(terminal);
+  pending.ResetForRequeue();
+  if (pending.RequeueCount() >= g_config.CtldConf.MaxRequeueCount)
+    pending.SetHeld(true);
+  if (!g_embedded_db_client->UpdateRuntimeAttrOfJob(0, job->JobDbId(),
+                                                    pending.RuntimeAttr()))
+    return false;
+  job->ResetForRequeue();
+  job->SetFieldsByRuntimeAttrOfJob(pending.RuntimeAttr());
+  return true;
+}
+
 void JobScheduler::PersistAndRequeueJobs_(
     std::vector<std::unique_ptr<JobInCtld>>& jobs) {
-  if (jobs.empty()) return;
-
   std::vector<std::unique_ptr<JobInCtld>> requeued;
-  std::unordered_map<job_id_t, job_db_id_t> drop_ids;
-
   for (auto& job : jobs) {
-    job_id_t job_id = job->JobId();
-    job_db_id_t job_db_id = job->JobDbId();
-
-    g_db_client->InsertJob(job.get());
-
-    bool ok = g_embedded_db_client->ResetJobStepIdCounter(job_id);
-    if (ok) {
-      job->ResetForRequeue();
-      ok = g_embedded_db_client->UpdateRuntimeAttrOfJob(0, job_db_id,
-                                                        job->RuntimeAttr());
-    }
-    if (ok) {
-      if (job->RequeueCount() >= g_config.CtldConf.MaxRequeueCount) {
-        job->SetHeld(true);
-        CRANE_INFO("[Job #{}] Requeued (count: {}), held (limit reached).",
-                   job_id, job->RequeueCount());
-      } else {
-        CRANE_INFO("[Job #{}] Requeued (count: {}).", job_id,
-                   job->RequeueCount());
-      }
+    if (FinishRequeue_(job.get())) {
       requeued.emplace_back(std::move(job));
     } else {
-      CRANE_ERROR("[Job #{}] Requeue DB ops failed, dropping.", job_id);
-      drop_ids[job_id] = job_db_id;
+      CRANE_WARN("[Job #{}] Retaining attempt {} for archive retry.",
+                 job->JobId(), job->RequeueCount());
+      m_requeue_retries_.emplace_back(std::move(job));
     }
   }
-
-  if (!drop_ids.empty()) g_embedded_db_client->PurgeEndedJobs(drop_ids);
 
   if (!requeued.empty()) {
     std::vector<DeadlineTimerQueueElem> deadline_timer_vec;

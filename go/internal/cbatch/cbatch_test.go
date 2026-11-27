@@ -110,3 +110,41 @@ func TestBuildCbatchJobResolvesWorkingDirectory(t *testing.T) {
 		})
 	}
 }
+
+func TestBuildCbatchJobRequeuePolicy(t *testing.T) {
+	oldRequeue, oldNoRequeue := FlagRequeue, FlagNoRequeue
+	t.Cleanup(func() { FlagRequeue, FlagNoRequeue = oldRequeue, oldNoRequeue })
+	for _, tc := range []struct {
+		name, directive, flag, policy string
+		onFailure, disabled           bool
+	}{
+		{name: "default", policy: "REQUEUE_DEFAULT"},
+		{name: "explicit false", flag: "--requeue=false", policy: "REQUEUE_ON_FAILURE_FALSE"},
+		{name: "on failure", flag: "--requeue", policy: "REQUEUE_ON_FAILURE", onFailure: true},
+		{name: "disabled", flag: "--no-requeue", policy: "REQUEUE_DISABLED", disabled: true},
+		{name: "directive", directive: "#CBATCH --requeue=false", policy: "REQUEUE_ON_FAILURE_FALSE"},
+		{name: "override", directive: "#CBATCH --no-requeue", flag: "--requeue", policy: "REQUEUE_ON_FAILURE", onFailure: true},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			cmd := &cobra.Command{}
+			cmd.Flags().BoolVar(&FlagRequeue, "requeue", false, "")
+			cmd.Flags().BoolVar(&FlagNoRequeue, "no-requeue", false, "")
+			if tc.flag != "" {
+				if err := cmd.ParseFlags([]string{tc.flag}); err != nil {
+					t.Fatal(err)
+				}
+			}
+			path := filepath.Join(t.TempDir(), "job.sh")
+			if err := os.WriteFile(path, []byte("#!/bin/sh\n"+tc.directive+"\ntrue\n"), 0600); err != nil {
+				t.Fatal(err)
+			}
+			job, err := BuildCbatchJob(cmd, []string{path}, &util.Config{})
+			if err != nil {
+				t.Fatal(err)
+			}
+			if job.GetRequeuePolicy().String() != tc.policy || job.GetRequeueIfFailed() != tc.onFailure || job.GetNoRequeue() != tc.disabled {
+				t.Fatalf("policy=%s requeue=%t no-requeue=%t", job.GetRequeuePolicy(), job.GetRequeueIfFailed(), job.GetNoRequeue())
+			}
+		})
+	}
+}

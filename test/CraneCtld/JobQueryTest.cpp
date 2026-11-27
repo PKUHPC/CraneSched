@@ -314,6 +314,27 @@ JobInfo MakeJob(uint32_t id = 71, uint32_t owner = 1001,
   return job;
 }
 
+TEST(JobQuery, RequeuePolicyRetainsUnknownAndExplicitFalse) {
+  crane::grpc::JobInfo source;
+  for (const auto uid : {0U, 1001U}) {
+    auto result = ProjectJobForQuery(source, uid, false);
+    EXPECT_FALSE(result.has_requeue_policy());
+    EXPECT_FALSE(result.has_requeue_if_failed());
+    EXPECT_FALSE(result.has_requeue_eligible());
+  }
+  source.set_requeue_policy(crane::grpc::REQUEUE_ON_FAILURE_FALSE);
+  source.set_requeue_if_failed(false);
+  source.set_requeue_eligible(false);
+  for (const auto uid : {0U, 1001U}) {
+    auto result = ProjectJobForQuery(source, uid, false);
+    EXPECT_EQ(result.requeue_policy(), crane::grpc::REQUEUE_ON_FAILURE_FALSE);
+    EXPECT_TRUE(result.has_requeue_if_failed());
+    EXPECT_FALSE(result.requeue_if_failed());
+    EXPECT_TRUE(result.has_requeue_eligible());
+    EXPECT_FALSE(result.requeue_eligible());
+  }
+}
+
 TEST(JobQuery, PublicViewPreservesEveryKnownSummaryField) {
   const auto source = MakeJob();
   auto expected = source;
@@ -603,6 +624,8 @@ TEST(JobQuery, QuerySchemaRequiresExplicitFieldClassification) {
                                        "deadline_time",
                                        "requeue_count",
                                        "requeue_if_failed",
+                                       "requeue_policy",
+                                       "requeue_eligible",
                                        "array_spec",
                                        "array_task",
                                        "query_visibility"});
