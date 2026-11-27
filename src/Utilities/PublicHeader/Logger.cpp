@@ -31,7 +31,14 @@ namespace {
 void PrepareLogFile(const spdlog::filename_t& filename, bool create,
                     LogFilePolicy policy) {
   int flags = O_WRONLY | O_APPEND | O_CLOEXEC | O_NOFOLLOW | O_NONBLOCK;
-  int fd = open(filename.c_str(), flags | (create ? O_CREAT : 0), 0600);
+  int fd = -1;
+  bool created = false;
+  if (create) {
+    fd = open(filename.c_str(), flags | O_CREAT | O_EXCL, 0600);
+    created = fd != -1;
+  }
+  if (!create || (fd == -1 && errno == EEXIST))
+    fd = open(filename.c_str(), flags);
   if (fd == -1) {
     if (!create && errno == ENOENT) return;
     throw spdlog::spdlog_ex("Failed to open private log " + filename, errno);
@@ -43,8 +50,9 @@ void PrepareLogFile(const spdlog::filename_t& filename, bool create,
   if (!S_ISREG(st.st_mode) || st.st_nlink != 1)
     throw spdlog::spdlog_ex("Log must be a regular, singly linked file: " +
                             filename);
-  if (policy == LogFilePolicy::PRIVATE_DIRECTORY &&
-      (fchown(fd, geteuid(), getegid()) != 0 || fchmod(fd, 0600) != 0))
+  const bool private_directory = policy == LogFilePolicy::PRIVATE_DIRECTORY;
+  if ((private_directory && fchown(fd, geteuid(), getegid()) != 0) ||
+      ((created || private_directory) && fchmod(fd, 0600) != 0))
     throw spdlog::spdlog_ex("Failed to secure log " + filename, errno);
 }
 

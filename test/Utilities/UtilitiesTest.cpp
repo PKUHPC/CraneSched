@@ -258,6 +258,36 @@ TEST_P(PrivateLogFileTest, ExistingLogsFollowPolicyOnReopenAndRotation) {
   Check(directory_ / "1.0.2.log", repair ? 0600 : 0644, owner, group);
 }
 
+TEST_F(FilePermissionsTest, NonRootCreationAndRotationWithOwnerWriteMasked) {
+  ASSERT_TRUE(std::filesystem::create_directory(directory_));
+  if (geteuid() == 0) ASSERT_EQ(chown(directory_.c_str(), 65534, 65534), 0);
+
+  EXPECT_EXIT(
+      {
+        if (geteuid() == 0 && (setgroups(0, nullptr) != 0 ||
+                               setgid(65534) != 0 || setuid(65534) != 0))
+          _exit(2);
+        umask(0200);
+        Init(LogFilePolicy::PRIVATE_ON_CREATE);
+        Check(log_, 0600);
+        spdlog::logger logger("rotation-test",
+                              spdlog::default_logger()->sinks().front());
+        for (int i = 0; i < 2; ++i)
+          logger.info("{} {}", i, std::string(80, 'x'));
+        logger.flush();
+        Check(log_, 0600);
+        Check(directory_ / "1.0.1.log", 0600);
+        std::ifstream input(log_);
+        const std::string contents(std::istreambuf_iterator<char>(input), {});
+        EXPECT_NE(contents.find("1 " + std::string(80, 'x')),
+                  std::string::npos);
+        EXPECT_EQ(umask(0200), 0200);
+        spdlog::shutdown();
+        _exit(::testing::Test::HasFailure() ? 1 : 0);
+      },
+      ::testing::ExitedWithCode(0), "");
+}
+
 TEST_P(PrivateLogFileTest, OrdinaryUserCannotReadLogEvenInServiceGroup) {
   if (geteuid() != 0) GTEST_SKIP() << "Requires root to test another UID";
   Init();
