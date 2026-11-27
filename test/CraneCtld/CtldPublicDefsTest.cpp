@@ -1232,6 +1232,43 @@ TEST(CtldStepStateMachineTest,
 
 // --- ShouldRequeue tests ---
 
+TEST(ShouldRequeueTest, ContainerCannotEnterManualOrAutomaticRequeue) {
+  Ctld::JobInCtld job;
+  job.type = crane::grpc::Container;
+  job.requeue_if_failed = true;
+  job.SetStatus(crane::grpc::Failed);
+  job.SetExitCode(ExitCode::EC_CRANED_DOWN);
+  EXPECT_EQ(job.RequeueRejectionReason(), "Only batch jobs can be requeued");
+  EXPECT_FALSE(job.RequeueEligible());
+  EXPECT_FALSE(job.ShouldRequeue());
+  job.SetRequeueRequested(true);
+  EXPECT_FALSE(job.ShouldRequeue());
+}
+
+TEST(ShouldRequeueTest, TerminalQueryPreservesRecordedEligibilityAndAbsence) {
+  crane::grpc::JobToCtld request;
+  request.add_gids(0);
+  request.set_type(crane::grpc::Batch);
+  request.set_no_requeue(true);
+  Ctld::JobInCtld job;
+  job.SetFieldsByJobToCtld(request);
+  crane::grpc::RuntimeAttrOfJob terminal;
+  terminal.set_status(crane::grpc::Failed);
+  terminal.set_requeue_eligible(true);
+  job.SetFieldsByRuntimeAttrOfJob(terminal);
+  crane::grpc::JobInfo info;
+  job.SetFieldsOfJobInfo(&info);
+  EXPECT_TRUE(info.requeue_eligible());
+  terminal.clear_requeue_eligible();
+  job.SetFieldsByRuntimeAttrOfJob(terminal);
+  job.SetFieldsOfJobInfo(&info);
+  EXPECT_FALSE(info.has_requeue_eligible());
+  job.SetStatus(crane::grpc::Pending);
+  job.SetFieldsOfJobInfo(&info);
+  EXPECT_TRUE(info.has_requeue_eligible());
+  EXPECT_FALSE(info.requeue_eligible());
+}
+
 TEST(ShouldRequeueTest, InteractiveJobNeverRequeues) {
   Ctld::JobInCtld job;
   job.type = crane::grpc::Interactive;

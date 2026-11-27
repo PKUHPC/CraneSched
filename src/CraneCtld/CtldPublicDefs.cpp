@@ -1938,9 +1938,15 @@ std::string_view JobInCtld::HoldReason() const {
   return runtime_attr.held_by_admin() ? "JobHeldAdmin" : "JobHeldUser";
 }
 
-bool JobInCtld::RequeueEligible() const {
-  return IsBatch() && !job_to_ctld.no_requeue() &&
-         (g_config.CtldConf.JobRequeue || requeue_if_failed);
+std::optional<std::string_view> JobInCtld::RequeueRejectionReason() const {
+  if (!IsBatch()) {
+    if (IsInteractive()) return "Interactive jobs cannot be requeued";
+    return "Only batch jobs can be requeued";
+  }
+  if (job_to_ctld.no_requeue()) return "Job requested no requeue";
+  if (!g_config.CtldConf.JobRequeue && !requeue_if_failed)
+    return "Job requeue is disabled by configuration";
+  return std::nullopt;
 }
 
 bool JobInCtld::ShouldRequeue() const {
@@ -1994,6 +2000,13 @@ void JobInCtld::ResetForRequeue() {
   SetEndTimeByUnixSecond(0);
   runtime_attr.mutable_suspend_time()->Clear();
   suspend_time = absl::InfinitePast();
+}
+
+void JobInCtld::TransferRequeueDependencies(JobInCtld& replacement) {
+  // The previous attempt already started. Its submission dependencies were
+  // satisfied, but jobs waiting for its terminal outcome still need events.
+  replacement.dependencies = {};
+  std::swap(dependents, replacement.dependents);
 }
 
 bool JobInCtld::ArrayMaterializationComplete() const {
@@ -2398,7 +2411,13 @@ void JobInCtld::SetFieldsOfJobInfo(crane::grpc::JobInfo* job_info) const {
   job_info->set_requeue_if_failed(requeue_if_failed);
   if (job_to_ctld.requeue_policy() != crane::grpc::REQUEUE_POLICY_UNKNOWN)
     job_info->set_requeue_policy(job_to_ctld.requeue_policy());
-  job_info->set_requeue_eligible(RequeueEligible());
+  if (!IsFinishedStepStatus(status)) {
+    job_info->set_requeue_eligible(RequeueEligible());
+  } else if (runtime_attr.has_requeue_eligible()) {
+    job_info->set_requeue_eligible(runtime_attr.requeue_eligible());
+  } else {
+    job_info->clear_requeue_eligible();
+  }
 }
 
 uint32_t JobInCtld::SchedulePendingSteps(

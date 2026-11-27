@@ -1500,7 +1500,11 @@ MongodbClient::FetchJobStatus(const std::unordered_set<job_id_t>& job_ids) {
       job_id_doc.append(kvp("$in", job_id_array));
     }));
 
+    filter.append(kvp("has_job_info", true));
     mongocxx::options::find options;
+    using bsoncxx::builder::basic::make_document;
+    // emplace below keeps the newest completed attempt for each submission.
+    options.sort(make_document(kvp("job_db_id", -1), kvp("requeue_count", -1)));
     document projection;
     projection.append(kvp("job_id", 1));
     projection.append(kvp("state", 1));

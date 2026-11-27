@@ -271,14 +271,9 @@ bool JobScheduler::Init() {
       step_snapshot.steps.erase(it);
     }
     m_recovered_requeues_.insert(job->JobId());
-    if (!FinishRequeue_(job)) {
-      m_requeue_retries_.emplace_back(std::move(job));
-      return;
-    }
-    if (job->deadline_time != infiniteFuture)
-      deadline_timer_vec.emplace_back(job->JobId(),
-                                      absl::ToUnixSeconds(job->deadline_time));
-    m_pending_job_map_.emplace(job->JobId(), std::move(job));
+    // Resume after the startup dependency graph, reservations and timers
+    // are ready. A completed attempt is still a live submission at this point.
+    m_requeue_retries_.emplace_back(std::move(job));
   };
   auto& running_queue = snapshot.running_queue;
   std::unordered_map<job_id_t, std::unique_ptr<JobInCtld>>
@@ -531,8 +526,9 @@ bool JobScheduler::Init() {
     std::unordered_map<job_id_t, job_db_id_t> db_ids;
     for (auto& [db_id, job_in_embedded_db] : snapshot.final_queue) {
       job_id_t job_id = job_in_embedded_db.runtime_attr().job_id();
-      if (job_in_embedded_db.runtime_attr().requeue_pending_archive() ||
-          job_in_embedded_db.runtime_attr().requeue_requested()) {
+      if (job_in_embedded_db.job_to_ctld().type() == crane::grpc::Batch &&
+          (job_in_embedded_db.runtime_attr().requeue_pending_archive() ||
+           job_in_embedded_db.runtime_attr().requeue_requested())) {
         auto job = std::make_unique<JobInCtld>();
         job->SetFieldsByJobToCtld(job_in_embedded_db.job_to_ctld());
         job->SetFieldsByRuntimeAttrOfJob(job_in_embedded_db.runtime_attr());
@@ -831,6 +827,10 @@ bool JobScheduler::Init() {
       }
     }
 
+    std::unordered_map<job_id_t, JobInCtld*> deferred_requeues;
+    for (const auto& job : m_requeue_retries_)
+      deferred_requeues.emplace(job->JobId(), job.get());
+
     std::unordered_set<job_id_t> missing_dependee_ids;
 
     for (const auto& [dependee_id, dependents] : dependee_to_dependents) {
@@ -844,7 +844,10 @@ bool JobScheduler::Init() {
           m_running_job_map_.at(dependee_id)
               ->AddDependent(dep_info.second, dep_info.first);
         }
-        continue;
+      } else if (auto it = deferred_requeues.find(dependee_id);
+                 it != deferred_requeues.end()) {
+        for (const auto& [dependent_id, type] : dependents)
+          it->second->AddDependent(type, dependent_id);
       } else {
         missing_dependee_ids.insert(dependee_id);
       }
@@ -1076,11 +1079,6 @@ bool JobScheduler::Init() {
         CleanJobStatusChangeQueueCb_();
       });
 
-  m_job_status_change_thread_ =
-      std::thread([this, loop = std::move(uvw_job_status_change_loop)]() {
-        JobStatusChangeThread_(loop);
-      });
-
   std::shared_ptr<uvw::loop> uvw_reservation_loop = uvw::loop::create();
 
   m_clean_resv_timer_queue_handle_ =
@@ -1143,9 +1141,6 @@ bool JobScheduler::Init() {
       [this](const uvw::async_event&, uvw::async_handle&) {
         CancelDeadlineJobCb_();
       });
-  m_job_deadline_timer_thread_ =
-      std::thread([this]() { DeadlineTimerThread_(); });
-
   m_job_deadline_timer_create_async_handle_ =
       uvw_deadline_loop->resource<uvw::async_handle>();
   m_job_deadline_timer_create_async_handle_->on<uvw::async_event>(
@@ -1166,7 +1161,14 @@ bool JobScheduler::Init() {
     m_job_deadline_timer_create_async_handle_->send();
   }
 
-  // Start schedule thread first.
+  m_job_deadline_timer_thread_ =
+      std::thread([this]() { DeadlineTimerThread_(); });
+
+  m_job_status_change_thread_ =
+      std::thread([this, loop = std::move(uvw_job_status_change_loop)]() {
+        JobStatusChangeThread_(loop);
+      });
+
   m_schedule_thread_ = std::thread([this] { ScheduleThread_(); });
   m_step_schedule_thread_ = std::thread([this] { StepScheduleThread_(); });
   return true;
@@ -4437,21 +4439,8 @@ crane::grpc::RequeueJobReply JobScheduler::RequeueJob(
       }
     }
 
-    // Interactive jobs cannot be requeued
-    if (job->type == crane::grpc::Interactive) {
-      (*reply.mutable_not_requeued_jobs())[job_id] =
-          "Interactive jobs cannot be requeued";
-      continue;
-    }
-
-    if (job->JobToCtld().no_requeue()) {
-      (*reply.mutable_not_requeued_jobs())[job_id] = "Job requested no requeue";
-      continue;
-    }
-
-    if (!g_config.CtldConf.JobRequeue && !job->requeue_if_failed) {
-      (*reply.mutable_not_requeued_jobs())[job_id] =
-          "Job requeue is disabled by configuration";
+    if (auto reason = job->RequeueRejectionReason()) {
+      (*reply.mutable_not_requeued_jobs())[job_id] = *reason;
       continue;
     }
 
@@ -8583,45 +8572,76 @@ JobScheduler::PersistAndTransferJobsToMongodb_(
 }
 
 bool JobScheduler::FinishRequeue_(std::unique_ptr<JobInCtld>& job) {
-  // Keep the terminal record until the replacement Pending write succeeds.
-  // Reset a copy so repeated attempts always start at the same generation.
-  const auto& terminal = job->RuntimeAttr();
-  if (!g_embedded_db_client->UpdateRuntimeAttrOfJob(0, job->JobDbId(),
-                                                    terminal) ||
-      !g_db_client->ArchiveRequeueAttempt(job.get()))
-    return false;
-  std::vector<step_db_id_t> ids;
-  for (const auto& step : terminal.requeue_final_steps())
-    ids.push_back(step.runtime_attr().step_db_id());
-  if ((!ids.empty() && !g_embedded_db_client->PurgeEndedSteps(ids)) ||
-      !g_embedded_db_client->ResetJobStepIdCounter(job->JobId()))
-    return false;
-  auto pending = std::make_unique<JobInCtld>();
-  pending->SetFieldsByJobToCtld(job->JobToCtld());
-  pending->SetFieldsByRuntimeAttrOfJob(terminal);
-  pending->ResetForRequeue();
-  if (pending->RequeueCount() >= g_config.CtldConf.MaxRequeueCount)
-    pending->SetHeld(true);
-  const bool recovered = m_recovered_requeues_.contains(job->JobId());
-  if (recovered && (!AcquireJobAttributes(pending.get()) ||
-                    !CheckJobValidity(pending.get()))) {
-    CRANE_ERROR("[Job #{}] Cannot restore pending attributes after requeue.",
-                job->JobId());
-    return false;
-  }
-  if (!g_embedded_db_client->UpdateRuntimeAttrOfJob(0, job->JobDbId(),
-                                                    pending->RuntimeAttr()))
-    return false;
-  if (recovered) {
-    m_recovered_requeues_.erase(job->JobId());
-    if (!pending->IsArrayChild()) {
-      g_account_meta_container->UserAddJob(pending->Username());
-      g_account_meta_container->MallocMetaSubmitResource(*pending);
+  // An invalid replacement already has its own durable terminal record.
+  // On a storage failure resume only that record's archive and cleanup.
+  if (job->RuntimeAttr().requeue_pending_archive()) {
+    // Keep the terminal record until the replacement Pending write succeeds.
+    // Reset a copy so repeated attempts always start at the same generation.
+    const auto& terminal = job->RuntimeAttr();
+    if (!g_embedded_db_client->UpdateRuntimeAttrOfJob(0, job->JobDbId(),
+                                                      terminal) ||
+        !g_db_client->ArchiveRequeueAttempt(job.get()))
+      return false;
+    std::vector<step_db_id_t> ids;
+    for (const auto& step : terminal.requeue_final_steps())
+      ids.push_back(step.runtime_attr().step_db_id());
+    if ((!ids.empty() && !g_embedded_db_client->PurgeEndedSteps(ids)) ||
+        !g_embedded_db_client->ResetJobStepIdCounter(job->JobId()))
+      return false;
+    auto pending = std::make_unique<JobInCtld>();
+    pending->SetFieldsByJobToCtld(job->JobToCtld());
+    pending->SetFieldsByRuntimeAttrOfJob(terminal);
+    pending->ResetForRequeue();
+    if (pending->RequeueCount() >= g_config.CtldConf.MaxRequeueCount)
+      pending->SetHeld(true);
+    const bool recovered = m_recovered_requeues_.contains(job->JobId());
+    if (recovered) {
+      auto validation = AcquireJobAttributes(pending.get());
+      if (validation) validation = CheckJobValidity(pending.get());
+      if (!validation) {
+        CRANE_ERROR(
+            "[Job #{}] Replacement attempt {} failed recovery validation: {}",
+            job->JobId(), pending->RequeueCount(),
+            validation.error().description());
+        const auto now = absl::Now();
+        pending->SetStartTime(now);
+        pending->SetEndTime(now);
+        pending->SetExitCode(ExitCode::EC_EXEC_ERR);
+        pending->SetStatus(crane::grpc::Failed);
+      }
     }
-    job = std::move(pending);
-  } else {
-    job->ResetForRequeue();
-    job->SetFieldsByRuntimeAttrOfJob(pending->RuntimeAttr());
+    if (!g_embedded_db_client->UpdateRuntimeAttrOfJob(0, job->JobDbId(),
+                                                      pending->RuntimeAttr()))
+      return false;
+    if (recovered) {
+      m_recovered_requeues_.erase(job->JobId());
+      if (pending->Status() == crane::grpc::Pending &&
+          !pending->IsArrayChild()) {
+        g_account_meta_container->UserAddJob(pending->Username());
+        g_account_meta_container->MallocMetaSubmitResource(*pending);
+      }
+      job->TransferRequeueDependencies(*pending);
+      job = std::move(pending);
+    } else {
+      job->ResetForRequeue();
+      job->SetFieldsByRuntimeAttrOfJob(pending->RuntimeAttr());
+    }
+  }
+  if (job->Status() == crane::grpc::Failed) {
+    if (!g_db_client->ArchiveRequeueAttempt(job.get()) ||
+        !g_embedded_db_client->PurgeEndedJobs({{job->JobId(), job->JobDbId()}}))
+      return false;
+    job->TriggerTerminalDependencyEvents(job->EndTime());
+    CallPluginHookForFinalJobs_({job.get()});
+    if (job->IsArrayChild()) {
+      std::vector<ArrayManager::FinalizedArrayParent> parents;
+      {
+        LockGuard guard(&m_pending_job_map_mtx_);
+        parents = m_array_manager_->OnChildTerminal(job.get(), {job.get()});
+        SpliceFinalArrayParentsFromPendingMapNoLock_(parents);
+      }
+      ArrayManager::ProcessFinalParents(parents);
+    }
   }
   return true;
 }
@@ -8631,7 +8651,8 @@ void JobScheduler::PersistAndRequeueJobs_(
   std::vector<std::unique_ptr<JobInCtld>> requeued;
   for (auto& job : jobs) {
     if (FinishRequeue_(job)) {
-      requeued.emplace_back(std::move(job));
+      if (job->Status() == crane::grpc::Pending)
+        requeued.emplace_back(std::move(job));
     } else {
       CRANE_WARN("[Job #{}] Retaining attempt {} for archive retry.",
                  job->JobId(), job->RequeueCount());
