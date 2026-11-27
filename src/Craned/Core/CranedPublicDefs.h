@@ -31,6 +31,13 @@
 
 namespace Craned {
 
+inline bool JobConfigIsSuspended(const crane::grpc::JobStepsToD& job_steps) {
+  return job_steps.suspended() ||
+         std::ranges::any_of(job_steps.step_status(), [](const auto& entry) {
+           return entry.second == crane::grpc::Suspended;
+         });
+}
+
 inline constexpr uint64_t kEvSigChldResendMs = 500;
 constexpr uint64_t kCtldClientTimeoutSec = 30;
 constexpr int64_t kCranedRpcTimeoutSeconds = 5;
@@ -40,16 +47,6 @@ using ::Craned::Common::CgroupManager;
 using ::Craned::Common::EnvMap;
 using RegToken = google::protobuf::Timestamp;
 using StepStatus = crane::grpc::JobStatus;
-
-enum class CallbackInvokeMode : std::uint8_t { SYNC = 0, ASYNC };
-
-template <typename Cb, typename... Args>
-  requires std::invocable<Cb, Args...>
-struct CallbackWrapper {
-  Cb cb;
-  CallbackInvokeMode mode;
-  bool consume;
-};
 
 inline std::string GetStepIdStr(const crane::grpc::StepToD& step) {
   return fmt::format("{}.{}", step.job_id(), step.step_id());

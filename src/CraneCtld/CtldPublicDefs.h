@@ -798,6 +798,16 @@ struct StepInCtld {
   void StepOnNodeFinish(const CranedId& node);
   bool AllNodesFinished() const { return m_running_nodes_.empty(); }
 
+  // Once all nodes have reported terminal, Completing can still be waiting
+  // for the final cleanup acknowledgement.
+  bool ExpectsSupervisorOn(const CranedId& node) const {
+    return m_running_nodes_.contains(node) ||
+           (Status() == crane::grpc::Completing && m_running_nodes_.empty() &&
+            m_execute_nodes_.contains(node));
+  }
+  bool PrepareForReportedLoss(const CranedId& node,
+                              StepStatusChangeContext* context) const;
+
   void StepOnNodeCompleting(const CranedId& node);
   bool AllNodesCompleting() const;
 

@@ -1283,12 +1283,12 @@ class JobScheduler {
                              std::unordered_map<CranedId, std::set<task_id_t>>*
                                  craned_task_map = nullptr);
 
-  void QueryRnJobOnCtldForNodeConfig(const CranedId& craned_id,
+  bool QueryRnJobOnCtldForNodeConfig(const CranedId& craned_id,
                                      crane::grpc::ConfigureCranedRequest* req);
 
-  void TerminateStepsOnOtherNodes(
+  void ReportLostStepsAsync(
       const std::unordered_map<job_id_t, std::set<step_id_t>>& steps,
-      const CranedId& excluded_node);
+      const CranedId& reporting_node);
 
   crane::grpc::CancelJobReply CancelPendingOrRunningJob(
       const crane::grpc::CancelJobRequest& request);
@@ -1515,6 +1515,9 @@ class JobScheduler {
   std::unordered_map<job_id_t, std::unordered_set<step_id_t>>
       m_completing_step_ids_ ABSL_GUARDED_BY(m_running_job_map_mtx_);
 
+  std::unordered_set<job_id_t> m_suspend_transitions_
+      ABSL_GUARDED_BY(m_running_job_map_mtx_);
+
   // Owns all array metas and drives child materialization/lifecycle.
   // Uses references to the above pending/running maps and must be
   // constructed after them. Accesses require m_pending_job_map_mtx_
@@ -1681,6 +1684,7 @@ class JobScheduler {
     CranedId craned_index;
     std::string reason;
     google::protobuf::Timestamp timestamp;
+    bool reported_lost_on_register{false};
   };
 
   absl::Mutex m_job_status_change_queue_mtx_;

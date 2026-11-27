@@ -52,7 +52,7 @@ class SupervisorStub {
    */
   [[nodiscard]] static CraneExpected<absl::flat_hash_map<
       std::pair<job_id_t, step_id_t>, SupervisorRecoverInfo>>
-  InitAndGetRecoveredMap();
+  InitAndGetRecoveredMap(const crane::grpc::ConfigureCranedRequest& config);
   CraneErrCode ExecuteStep();
   ExecuteStepRpcResult ExecuteStepWithStatus();
   CraneExpected<EnvMap> QueryStepEnv();
@@ -66,6 +66,7 @@ class SupervisorStub {
   CraneErrCode MigrateSshProcToCg(pid_t pid);
   CraneErrCode ShutdownSupervisor();
   CraneErrCode ReceivePmixPort(
+      grpc::ClientContext& context,
       const std::vector<std::pair<CranedId, std::string>>& pmix_ports);
 
  private:

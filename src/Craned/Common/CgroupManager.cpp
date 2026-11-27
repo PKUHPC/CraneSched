@@ -1185,6 +1185,7 @@ bool WriteFreezerValue(const std::filesystem::path& file_path,
     return false;
   }
   ofs << value;
+  ofs.close();
   if (ofs.fail()) {
     CRANE_ERROR("Failed to write '{}' to freezer file: {}", value,
                 file_path.string());
@@ -1297,6 +1298,31 @@ bool ChangeChildCgroupsFreezerState(const std::string& cg_path, bool freeze) {
 }
 
 }  // namespace
+
+std::filesystem::path CgroupManager::FreezerPath(
+    const std::filesystem::path& cg_path) {
+  if (IsCgV2()) return cg_path;
+  return CgConstant::kSystemCgPathPrefix / "freezer" /
+         cg_path.lexically_relative(CgConstant::kSystemCgPathPrefix);
+}
+
+std::optional<bool> CgroupManager::IsFullyFrozen(
+    const std::filesystem::path& cg_path) {
+  const auto path = FreezerPath(cg_path);
+  if (IsCgV2()) {
+    std::ifstream events(path / "cgroup.events");
+    std::string key;
+    int value;
+    while (events >> key >> value) {
+      if (key == "frozen") return value == 1;
+    }
+  } else {
+    std::ifstream freezer(path / "freezer.state");
+    std::string state;
+    if (freezer >> state) return state == "FROZEN";
+  }
+  return std::nullopt;
+}
 
 bool CgroupManager::FreezeCgroupByPath(const std::string& cg_path) {
   CRANE_DEBUG("Freezing cgroup: {}", cg_path);

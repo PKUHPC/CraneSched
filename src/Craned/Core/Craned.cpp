@@ -1435,7 +1435,7 @@ void CreateRequiredDirectories() {
   if (!ok) std::exit(1);
 }
 
-void Recover(const crane::grpc::ConfigureCranedRequest& config_from_ctld) {
+bool Recover(const crane::grpc::ConfigureCranedRequest& config_from_ctld) {
   // FIXME: Ctld cancel job after Configure Request sent, will keep invalid jobs
   // FIXME: Add API InitAndRetryToRecoverJobs(Expected Job List) -> Result
   using Craned::SupervisorStub;
@@ -1449,14 +1449,14 @@ void Recover(const crane::grpc::ConfigureCranedRequest& config_from_ctld) {
   CRANE_DEBUG("CraneCtld claimed [{}] are running on this node.",
               util::JobStepsToString(ctld_step_ids));
 
-  CraneExpected<absl::flat_hash_map<std::pair<job_id_t, step_id_t>,
-                                    SupervisorStub::SupervisorRecoverInfo>>
-      steps = SupervisorStub::InitAndGetRecoveredMap();
-
-  absl::flat_hash_map<std::pair<job_id_t, step_id_t>,
-                      SupervisorStub::SupervisorRecoverInfo>
-      step_supv_map;
-  if (steps.has_value()) step_supv_map = steps.value();
+  auto supervisors = SupervisorStub::InitAndGetRecoveredMap(config_from_ctld);
+  if (!supervisors) {
+    CRANE_WARN(
+        "Supervisor discovery incomplete, waiting for a new configuration: {}",
+        CraneErrStr(supervisors.error()));
+    return false;
+  }
+  auto& step_supv_map = *supervisors;
 
   // All job ids from supervisor
   std::map<job_id_t, std::set<step_id_t>> supv_step_ids;
@@ -1542,6 +1542,7 @@ void Recover(const crane::grpc::ConfigureCranedRequest& config_from_ctld) {
                util::JobStepsToString(invalid_steps));
   }
   g_server->MarkSupervisorAsRecovered();
+  return true;
 }
 
 void GlobalVariableInit() {
@@ -1632,43 +1633,31 @@ void GlobalVariableInit() {
     }
   }
 
-  g_server = std::make_unique<Craned::CranedServer>(g_config.ListenConf);
-
   g_job_mgr = std::make_unique<Craned::JobManager>();
-  g_job_mgr->SetSigintCallback([] {
-    g_server->Shutdown();
-    g_craned_for_pam_server->Shutdown();
-    CRANE_INFO("Grpc Server Shutdown() was called.");
-  });
-
-  g_ctld_client_sm = std::make_unique<Craned::CtldClientStateMachine>();
   g_ctld_client = std::make_unique<Craned::CtldClient>();
-
-  g_ctld_client_sm->AddActionConfigureCb(
-      [](const Craned::CtldClientStateMachine::ConfigureArg& arg) {
-        if (arg.req.has_trace_config()) {
-          auto applied_config =
-              crane::ApplyRuntimeTraceConfig(arg.req.trace_config());
-          g_config.Tracing.Enabled = applied_config.enabled;
-          g_config.Tracing.Level = applied_config.runtime_level;
-          if (applied_config.clamped) {
-            CRANE_WARN(
-                "Tracing runtime level {} exceeds compiled max level {}; "
-                "effective level is {}.",
-                crane::TraceLevelToString(applied_config.runtime_level),
-                crane::TraceLevelToString(applied_config.compiled_max_level),
-                crane::TraceLevelToString(applied_config.effective_level));
-          }
-        }
-        // Recover jobs and steps
-        // Status synchronization is handled in CtldClient.cpp
-        Recover(arg.req);
-      },
-      Craned::CallbackInvokeMode::SYNC, true);
-
-  g_ctld_client->Init();
+  g_ctld_client->Init([](const Craned::ConfigureRequest& request) {
+    if (request.has_trace_config()) {
+      auto applied_config =
+          crane::ApplyRuntimeTraceConfig(request.trace_config());
+      g_config.Tracing.Enabled = applied_config.enabled;
+      g_config.Tracing.Level = applied_config.runtime_level;
+      if (applied_config.clamped) {
+        CRANE_WARN(
+            "Tracing runtime level {} exceeds compiled max level {}; "
+            "effective level is {}.",
+            crane::TraceLevelToString(applied_config.runtime_level),
+            crane::TraceLevelToString(applied_config.compiled_max_level),
+            crane::TraceLevelToString(applied_config.effective_level));
+      }
+    }
+    // Recover jobs and steps
+    // Status synchronization is handled in CtldClient.cpp
+    return Recover(request);
+  });
   g_ctld_client->SetCranedId(g_config.CranedIdOfThisNode);
 
+  g_server = std::make_unique<Craned::CranedServer>();
+  g_server->Start(g_config.ListenConf);
   g_ctld_client->InitGrpcChannel(g_config.ControlMachineAddr,
                                  g_config.ControlMachine);
 
@@ -1710,29 +1699,18 @@ void GlobalVariableInit() {
 }
 
 void WaitForStopAndDoGvarFini() {
-  /*
-   * JobMgr is ending
-   * g_server and g_craned_for_pam_server Shutdown() called
-   */
-  g_server->Wait();
-
-  /*
-   * No more status change from supervisor, clean up CtldClient, stop register
-   * this craned
-   */
-  g_ctld_client->Shutdown();
+  g_job_mgr->WaitForStopRequest();
+  g_server->CloseWorkAdmission();
+  g_craned_for_pam_server->Shutdown();
   g_craned_for_pam_server->Wait();
-  g_ctld_client_sm->Shutdown();
-  g_ctld_client->Wait();
 
-  /* Called from
-   * PAM_SERVER, G_SERVER
-   * CtldClient: ActionConfigureCb
-   */
-  g_job_mgr->Wait();
-
-  // The controller client can still have callbacks queued on the thread pool.
+  // Recovery can wait on JobManager's event loop and submit terminal reports.
+  g_ctld_client->StopHandshakesAndWait();
+  g_job_mgr->DrainAndStop();
+  g_server->Shutdown();
+  g_server->Wait();
   g_thread_pool->wait();
+  g_ctld_client->Shutdown();
 
   g_server.reset();
   g_craned_for_pam_server.reset();
@@ -1740,8 +1718,6 @@ void WaitForStopAndDoGvarFini() {
   g_job_mgr.reset();
 
   g_ctld_client.reset();
-  // After ctld client destroyed, it is ok to destroy ctld client state machine
-  g_ctld_client_sm.reset();
 
   g_thread_pool.reset();
 

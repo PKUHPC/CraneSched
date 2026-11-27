@@ -126,6 +126,28 @@ TEST_F(JobSchedulerTest, SchedulesFewerTasksWithInheritedNodeMemory) {
   EXPECT_EQ(allocation.GetCpuSet().cpu_count, cpu_t{2});
 }
 
+TEST_F(JobSchedulerTest,
+       ReconnectingConfiguringStepNeedsOnlyUnfinishedSupervisors) {
+  SetJobAllocation(2);
+  auto step = MakeStep(Request(2, 2), 2);
+  ASSERT_TRUE(Admit(step.get()).has_value());
+  job_.AddStep(std::move(step));
+  std::vector<Ctld::CommonStepInCtld*> scheduled;
+  ASSERT_EQ(job_.SchedulePendingSteps(&scheduled), 1);
+  ASSERT_EQ(scheduled.size(), 1);
+  auto* active = scheduled.front();
+  Ctld::StepStatusChangeContext context;
+  active->StepStatusChange(crane::grpc::Completing, 0, "", "node0", {},
+                           &context);
+  EXPECT_TRUE(active->ExpectsSupervisorOn("node0"));
+  active->StepStatusChange(crane::grpc::Completed, 0, "", "node0", {},
+                           &context);
+  EXPECT_FALSE(active->ExpectsSupervisorOn("node0"));
+  EXPECT_TRUE(active->ExpectsSupervisorOn("node1"));
+  EXPECT_FALSE(active->PrepareForReportedLoss("node0", &context));
+  EXPECT_TRUE(context.craned_cancel_steps.empty());
+}
+
 TEST_F(JobSchedulerTest, PreservesMemoryPerCpuAbovePartitionLimit) {
   auto request = Request();
   request.clear_mem_per_node();

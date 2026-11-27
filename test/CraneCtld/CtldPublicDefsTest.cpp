@@ -1082,6 +1082,10 @@ TEST(CtldStepStateMachineTest,
   auto result = primary_step->StepStatusChange(crane::grpc::JobStatus::Failed,
                                                7U, "terminal first", "node-a",
                                                TimestampAt(420), &context);
+  EXPECT_FALSE(primary_step->ExpectsSupervisorOn("node-a"));
+  EXPECT_TRUE(primary_step->ExpectsSupervisorOn("node-b"));
+  EXPECT_FALSE(primary_step->PrepareForReportedLoss("node-a", &context));
+  EXPECT_TRUE(context.craned_cancel_steps.empty());
   EXPECT_FALSE(result.has_value());
   EXPECT_EQ(primary_step->Status(), crane::grpc::JobStatus::Running);
   EXPECT_TRUE(context.craned_step_free_map.empty());
@@ -1129,6 +1133,12 @@ TEST(CtldStepStateMachineTest,
   auto result = primary_step->StepStatusChange(
       crane::grpc::JobStatus::Completing, 1U, "synthetic", "node-a",
       TimestampAt(430), &context);
+  // Cleanup intent alone still requires a supervisor. A real loss on A
+  // must terminate the unfinished peer, and never target A itself.
+  Ctld::StepStatusChangeContext lost;
+  EXPECT_TRUE(primary_step->PrepareForReportedLoss("node-a", &lost));
+  ExpectStepCancelRequested(lost, "node-b", kJobId, Ctld::kPrimaryStepId);
+  EXPECT_FALSE(lost.craned_cancel_steps.contains("node-a"));
   EXPECT_FALSE(result.has_value());
   EXPECT_EQ(primary_step->Status(), crane::grpc::JobStatus::Running);
   EXPECT_NE(job.PrimaryStep(), nullptr);

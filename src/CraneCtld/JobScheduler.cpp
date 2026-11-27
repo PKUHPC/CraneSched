@@ -2868,6 +2868,13 @@ std::vector<CraneErrCode> JobScheduler::SuspendRunningJobs(
   std::vector<CraneErrCode> results;
   results.reserve(job_ids.size());
   for (task_id_t job_id : job_ids) {
+    bool transition_started = false;
+    absl::Cleanup finish_transition = [&] {
+      if (transition_started) {
+        LockGuard lock(&m_running_job_map_mtx_);
+        m_suspend_transitions_.erase(job_id);
+      }
+    };
     std::vector<CranedId> executing_nodes;
 
     auto persist_status = [&](crane::grpc::JobStatus status,
@@ -2959,6 +2966,11 @@ std::vector<CraneErrCode> JobScheduler::SuspendRunningJobs(
         continue;
       }
 
+      transition_started = m_suspend_transitions_.insert(job_id).second;
+      if (!transition_started) {
+        results.emplace_back(CraneErrCode::ERR_INVALID_PARAM);
+        continue;
+      }
       executing_nodes = job->executing_craned_ids;
     }
 
@@ -3134,6 +3146,13 @@ std::vector<CraneErrCode> JobScheduler::ResumeSuspendedJobs(
   std::vector<CraneErrCode> results;
   results.reserve(job_ids.size());
   for (task_id_t job_id : job_ids) {
+    bool transition_started = false;
+    absl::Cleanup finish_transition = [&] {
+      if (transition_started) {
+        LockGuard lock(&m_running_job_map_mtx_);
+        m_suspend_transitions_.erase(job_id);
+      }
+    };
     std::vector<CranedId> executing_nodes;
     int64_t new_time_limit_secs = 0;
     std::optional<int64_t> new_deadline_secs;
@@ -3219,6 +3238,11 @@ std::vector<CraneErrCode> JobScheduler::ResumeSuspendedJobs(
         continue;
       }
 
+      transition_started = m_suspend_transitions_.insert(job_id).second;
+      if (!transition_started) {
+        results.emplace_back(CraneErrCode::ERR_INVALID_PARAM);
+        continue;
+      }
       executing_nodes = job->executing_craned_ids;
       if (executing_nodes.empty()) {
         CRANE_WARN("Job #{} has no executing craned when resuming", job_id);
@@ -6225,14 +6249,23 @@ void JobScheduler::CleanJobStatusChangeQueueCb_() {
 
       std::optional<std::pair<crane::grpc::JobStatus, uint32_t /*exit code*/>>
           job_finished_status{std::nullopt};
+      auto apply_status = [&](auto* step) {
+        if (arg.reported_lost_on_register) {
+          // Registration and terminal reports share the FIFO. Recheck the
+          // snapshot before both peer cancellation and synthetic failure.
+          if (!step->PrepareForReportedLoss(craned_index, &context)) return;
+          step->StepStatusChange(crane::grpc::Completing, exit_code, reason,
+                                 craned_index, timestamp, &context);
+        }
+        job_finished_status = step->StepStatusChange(
+            new_status, exit_code, reason, craned_index, timestamp, &context);
+      };
       if (job->DaemonStep() != nullptr &&
           step_id == job->DaemonStep()->StepId()) {
         CRANE_TRACE(
             "[Step #{}.{}] Daemon step status change received, status: {}.",
             job->JobId(), step_id, new_status);
-        auto* step = job->DaemonStep();
-        job_finished_status = step->StepStatusChange(
-            new_status, exit_code, reason, craned_index, timestamp, &context);
+        apply_status(job->DaemonStep());
       } else {
         CommonStepInCtld* step = job->GetStep(step_id);
         if (step == nullptr) {
@@ -6244,8 +6277,7 @@ void JobScheduler::CleanJobStatusChangeQueueCb_() {
           continue;
         }
 
-        job_finished_status = step->StepStatusChange(
-            new_status, exit_code, reason, craned_index, timestamp, &context);
+        apply_status(step);
       }
 
       if (job_finished_status.has_value()) {
@@ -7383,13 +7415,13 @@ void JobScheduler::QueryQueueStateSummary(
   }
 }
 
-void JobScheduler::QueryRnJobOnCtldForNodeConfig(
+bool JobScheduler::QueryRnJobOnCtldForNodeConfig(
     const CranedId& craned_id, crane::grpc::ConfigureCranedRequest* req) {
   LockGuard running_job_guard(&m_running_job_map_mtx_);
   LockGuard indexes_guard(&m_job_indexes_mtx_);
 
   auto it = m_node_to_jobs_map_.find(craned_id);
-  if (it == m_node_to_jobs_map_.end()) return;
+  if (it == m_node_to_jobs_map_.end()) return true;
 
   auto& job_steps = *req->mutable_job_steps();
   absl::Time now = absl::Now();
@@ -7420,6 +7452,11 @@ void JobScheduler::QueryRnJobOnCtldForNodeConfig(
           absl::FormatTime(expected_end_time), absl::FormatTime(now));
     }
 
+    if (!daemon_step->ExpectsSupervisorOn(craned_id)) continue;
+    if (std::ranges::contains(job->executing_craned_ids, craned_id)) {
+      if (m_suspend_transitions_.contains(job_id)) return false;
+      job_steps[job_id].set_suspended(job->Status() == crane::grpc::Suspended);
+    }
     *job_steps[job_id].mutable_job() = daemon_step->GetJobToD(craned_id);
     auto& steps = *job_steps[job_id].mutable_steps();
     auto& step_status = *job_steps[job_id].mutable_step_status();
@@ -7429,79 +7466,43 @@ void JobScheduler::QueryRnJobOnCtldForNodeConfig(
     step_status[daemon_step->StepId()] = daemon_step->Status();
 
     if (job->PrimaryStep() &&
-        std::ranges::contains(job->PrimaryStep()->ExecutionNodes(),
-                              craned_id)) {
+        job->PrimaryStep()->ExpectsSupervisorOn(craned_id)) {
       const auto* step = job->PrimaryStep();
       steps[step->StepId()] = step->GetStepToD(craned_id);
       step_status[step->StepId()] = step->Status();
     }
     for (const auto& step : job->Steps() | std::views::values)
-      if (std::ranges::contains(step->ExecutionNodes(), craned_id)) {
+      if (step->ExpectsSupervisorOn(craned_id)) {
         steps[step->StepId()] = step->GetStepToD(craned_id);
         step_status[step->StepId()] = step->Status();
       }
   }
+  return true;
 }
 
-void JobScheduler::TerminateStepsOnOtherNodes(
+void JobScheduler::ReportLostStepsAsync(
     const std::unordered_map<job_id_t, std::set<step_id_t>>& steps,
-    const CranedId& excluded_node) {
-  CRANE_INFO("Terminate steps on other nodes: [{}] excluding {}.",
-             util::JobStepsToString(steps), excluded_node);
-
-  std::unordered_map<CranedId,
-                     std::unordered_map<job_id_t, std::set<step_id_t>>>
-      craned_steps_map;
+    const CranedId& reporting_node) {
+  const auto now = google::protobuf::util::TimeUtil::GetCurrentTime();
   {
-    LockGuard running_job_guard(&m_running_job_map_mtx_);
-    LockGuard indexes_guard(&m_job_indexes_mtx_);
+    absl::MutexLock lock(&m_job_status_change_queue_mtx_);
     for (const auto& [job_id, step_ids] : steps) {
-      auto job_it = m_running_job_map_.find(job_id);
-      if (job_it == m_running_job_map_.end()) {
-        CRANE_WARN("Job {} not found in running job map.", job_id);
-        continue;
+      for (const auto step_id : step_ids | std::views::reverse) {
+        m_job_status_change_incoming_.push_back(
+            {.job_id = job_id,
+             .step_id = step_id,
+             .exit_code = ExitCode::EC_CRANED_DOWN,
+             .new_status = crane::grpc::Failed,
+             .craned_index = reporting_node,
+             .reason = "Craned re-registered but step lost.",
+             .timestamp = now,
+             .reported_lost_on_register = true});
       }
-
-      auto& job = job_it->second;
-      for (const auto& step_id : step_ids) {
-        StepInCtld* step{nullptr};
-        if (auto* daemon_step = job->DaemonStep();
-            daemon_step != nullptr && daemon_step->StepId() == step_id) {
-          step = daemon_step;
-        } else if (auto* primary_step = job->PrimaryStep();
-                   primary_step != nullptr &&
-                   step_id == primary_step->StepId()) {
-          step = primary_step;
-        } else {
-          step = job->GetStep(step_id);
-        }
-
-        if (step == nullptr) {
-          CRANE_WARN("[Step #{}.{}] Step not found in job.", job_id, step_id);
-          continue;
-        }
-
-        for (const auto& craned_id : step->ExecutionNodes()) {
-          craned_steps_map[craned_id][job_id].insert(step_id);
-        }
-      }
+      m_job_status_change_queue_size_.fetch_add(step_ids.size(),
+                                                std::memory_order_relaxed);
     }
   }
-
-  for (auto& [craned_id, craned_steps] : craned_steps_map) {
-    if (craned_id == excluded_node) continue;
-    g_thread_pool->detach_task(
-        [craned_id, node_job_steps = std::move(craned_steps)] {
-          auto stub = g_craned_keeper->GetCranedStub(craned_id);
-          if (stub && !stub->Invalid()) {
-            if (auto err = stub->TerminateSteps(node_job_steps);
-                err != CraneErrCode::SUCCESS) {
-              CRANE_ERROR("Failed to terminate steps [{}] on node {}.",
-                          util::JobStepsToString(node_job_steps), craned_id);
-            }
-          }
-        });
-  }
+  m_job_status_change_async_handle_->send();
 }
 
 bool SchedulerAlgo::LocalScheduler::CalculateRunningNodesAndStartTime_(

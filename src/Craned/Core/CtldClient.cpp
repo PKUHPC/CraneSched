@@ -54,6 +54,14 @@ std::optional<NodeTelemetry> ReadNodeTelemetry() {
                                          sample.mem_unit / (1U << 20)};
 }
 
+void ObserveAction(std::future<void>& action) {
+  try {
+    action.get();
+  } catch (const std::exception& ex) {
+    CRANE_ERROR("Controller session action failed: {}", ex.what());
+  }
+}
+
 int64_t NowUnixMs() {
   return std::chrono::duration_cast<std::chrono::milliseconds>(
              std::chrono::system_clock::now().time_since_epoch())
@@ -69,7 +77,8 @@ int64_t ElapsedMs(std::chrono::steady_clock::time_point begin,
 
 }  // namespace
 
-CtldClientStateMachine::CtldClientStateMachine() {
+CtldClientStateMachine::CtldClientStateMachine(CtldClient& client)
+    : m_client_(client) {
   m_logger_ = g_runtime_status.conn_logger;
   m_uvw_loop_ = uvw::loop::create();
 
@@ -106,35 +115,38 @@ CtldClientStateMachine::CtldClientStateMachine() {
   });
 }
 
-CtldClientStateMachine::~CtldClientStateMachine() { Shutdown(); }
+CtldClientStateMachine::~CtldClientStateMachine() { StopHandshakesAndWait(); }
 
-void CtldClientStateMachine::Shutdown() {
-  m_stopping_ = true;
+void CtldClientStateMachine::StopHandshakesAndWait() {
+  std::vector<std::future<void>> actions;
+  {
+    absl::MutexLock lock(&m_mtx_);
+    m_stopping_ = true;
+    actions.swap(m_actions_);
+  }
   if (m_uvw_thread_.joinable()) m_uvw_thread_.join();
+  if (m_recovery_thread_.joinable()) m_recovery_thread_.join();
+  for (auto& action : actions) ObserveAction(action);
 }
 
-void CtldClientStateMachine::SetActionRequestConfigCb(
-    std::function<void(RegToken const&)>&& cb) {
-  m_action_request_config_cb_ = std::move(cb);
+void CtldClientStateMachine::TrackAction_(std::future<void> action) {
+  std::erase_if(m_actions_, [](std::future<void>& completed) {
+    if (completed.wait_for(0s) != std::future_status::ready) return false;
+    ObserveAction(completed);
+    return true;
+  });
+  m_actions_.emplace_back(std::move(action));
 }
 
-void CtldClientStateMachine::SetActionReadyCb(std::function<void()>&& cb) {
-  m_action_ready_cb_ = std::move(cb);
-}
-
-void CtldClientStateMachine::SetActionDisconnectedCb(
-    std::function<void()>&& cb) {
-  m_action_disconnected_cb_ = std::move(cb);
-}
-
-void CtldClientStateMachine::SetActionRegisterCb(
-    std::function<void(RegisterArg const&)>&& cb) {
-  m_action_register_cb_ = std::move(cb);
+void CtldClientStateMachine::SetInitialRestore(
+    std::function<bool(const ConfigureRequest&)> restore) {
+  m_initial_restore_ = std::move(restore);
 }
 
 bool CtldClientStateMachine::EvRecvConfigFromCtld(
     const crane::grpc::ConfigureCranedRequest& request) {
   absl::MutexLock lk(&m_mtx_);
+  if (m_stopping_) return false;
   m_last_op_time_ = std::chrono::steady_clock::now();
 
   if (m_state_ != State::REQUESTING_CONFIG) {
@@ -199,6 +211,8 @@ bool CtldClientStateMachine::EvConfigurationDone(
     return false;
   }
 
+  // An accepted configuration may still enqueue status reports while draining.
+  if (m_stopping_) return true;
   if (lost_jobs.has_value() && lost_steps.has_value()) {
     m_state_ = State::REGISTERING;
     ActionRegister_(std::move(lost_jobs.value()),
@@ -214,6 +228,7 @@ bool CtldClientStateMachine::EvConfigurationDone(
 bool CtldClientStateMachine::EvGetRegisterReply(
     const crane::grpc::CranedRegisterReply& reply, const RegToken& token) {
   absl::MutexLock lk(&m_mtx_);
+  if (m_stopping_) return false;
   m_last_op_time_ = std::chrono::steady_clock::now();
 
   if (m_state_ != State::REGISTERING) {
@@ -243,6 +258,7 @@ bool CtldClientStateMachine::EvGetRegisterReply(
 
 void CtldClientStateMachine::EvGrpcConnected() {
   absl::MutexLock lk(&m_mtx_);
+  if (m_stopping_) return;
   m_last_op_time_ = std::chrono::steady_clock::now();
 
   if (m_state_ != State::DISCONNECTED) {
@@ -258,6 +274,7 @@ void CtldClientStateMachine::EvGrpcConnected() {
 
 void CtldClientStateMachine::EvGrpcConnectionFailed() {
   absl::MutexLock lk(&m_mtx_);
+  if (m_stopping_) return;
   m_last_op_time_ = std::chrono::steady_clock::now();
 
   m_state_ = State::DISCONNECTED;
@@ -266,6 +283,7 @@ void CtldClientStateMachine::EvGrpcConnectionFailed() {
 
 void CtldClientStateMachine::EvTimeout_() {
   absl::MutexLock lk(&m_mtx_);
+  if (m_stopping_) return;
   if (!m_last_op_time_.has_value() || m_state_ == State::DISCONNECTED) return;
   if (m_last_op_time_.value() +
           std::chrono::seconds(g_config.CranedConf.CtldTimeoutSec) >
@@ -283,6 +301,7 @@ void CtldClientStateMachine::EvTimeout_() {
 
 void CtldClientStateMachine::EvPingFailed() {
   absl::MutexLock lk(&m_mtx_);
+  if (m_stopping_) return;
   CRANE_LOGGER_DEBUG(m_logger_,
                      "Ping failed, current state {}, starting new handshake.",
                      StateToString(m_state_));
@@ -312,33 +331,44 @@ void CtldClientStateMachine::ActionRequestConfig_() {
   m_check_reg_timeout_ = true;
   if (m_reg_token_.has_value()) CRANE_DEBUG("Reset register token.");
   m_reg_token_ = ToProtoTimestamp(std::chrono::steady_clock::now());
-  if (m_action_request_config_cb_)
-    g_thread_pool->detach_task([tok = m_reg_token_.value(), this] {
-      m_action_request_config_cb_(tok);
-    });
+  TrackAction_(g_thread_pool->submit_task([this, token = *m_reg_token_] {
+    m_client_.RequestConfigFromCtld_(token);
+  }));
 }
 
-void CtldClientStateMachine::ActionConfigure_(
-    const crane::grpc::ConfigureCranedRequest& config_req) {
-  CRANE_LOGGER_DEBUG(m_logger_,
-                     "Ctld client state machine has entered state {}",
-                     StateToString(m_state_));
+void CtldClientStateMachine::ActionConfigure_(const ConfigureRequest& request) {
+  if (m_initial_restore_) {
+    if (!m_initial_restore_(request)) return;
+    m_initial_restore_ = {};
+  }
+  m_pending_config_ = request;
+  if (!m_recovery_thread_.joinable())
+    m_recovery_thread_ =
+        std::thread(&CtldClientStateMachine::RunRecovery_, this);
+}
 
-  absl::MutexLock lk(&m_cb_mutex_);
-  auto it = m_action_configure_cb_list_.begin();
-  while (it != m_action_configure_cb_list_.end()) {
-    auto& cb_wrapper = *it;
-    if (cb_wrapper.mode == CallbackInvokeMode::SYNC) {
-      cb_wrapper.cb({config_req});
-    } else {
-      g_thread_pool->detach_task(
-          [cb = cb_wrapper.cb, config_req] { cb({config_req}); });
+void CtldClientStateMachine::RunRecovery_() {
+  util::SetCurrentThreadName("CfgCleanupThr");
+  for (;;) {
+    ConfigureRequest request;
+    {
+      absl::MutexLock lock(&m_mtx_);
+      auto ready = [this]() ABSL_SHARED_LOCKS_REQUIRED(m_mtx_) {
+        return m_pending_config_.has_value() || m_stopping_.load();
+      };
+      m_mtx_.Await(absl::Condition(&ready));
+      if (!m_pending_config_) return;
+      request = std::move(*m_pending_config_);
+      m_pending_config_.reset();
+      if (m_state_ != State::CONFIGURING || m_reg_token_ != request.token())
+        continue;
     }
-
-    if (cb_wrapper.consume)
-      it = m_action_configure_cb_list_.erase(it);
-    else
-      ++it;
+    // Reconciliation waits for RPCs on the shared pool.
+    try {
+      m_client_.Reconcile_(request);
+    } catch (const std::exception& ex) {
+      CRANE_ERROR("Configuration recovery failed: {}", ex.what());
+    }
   }
 }
 
@@ -348,12 +378,11 @@ void CtldClientStateMachine::ActionRegister_(
   CRANE_LOGGER_DEBUG(m_logger_,
                      "Ctld client state machine has entered state {}",
                      StateToString(m_state_));
-  if (m_action_register_cb_)
-    g_thread_pool->detach_task(
-        [tok = m_reg_token_.value(), lost_jobs, lost_steps, this] mutable {
-          m_action_register_cb_(
-              {.token = tok, .lost_jobs = lost_jobs, .lost_steps = lost_steps});
-        });
+  TrackAction_(g_thread_pool->submit_task([this, token = *m_reg_token_,
+                                           jobs = std::move(lost_jobs),
+                                           steps = std::move(lost_steps)] {
+    m_client_.CranedRegister_(token, jobs, steps);
+  }));
 }
 
 void CtldClientStateMachine::ActionReady_() {
@@ -363,10 +392,8 @@ void CtldClientStateMachine::ActionReady_() {
                      StateToString(m_state_));
   m_check_reg_timeout_ = false;
   g_server->SetGrpcSrvReady(true);
-  g_ctld_client->StartPingCtld();
-  g_ctld_client->StartHealthCheck();
-  if (m_action_ready_cb_)
-    g_thread_pool->detach_task([this] { m_action_ready_cb_(); });
+  m_client_.StartPingCtld();
+  m_client_.StartHealthCheck();
 }
 
 void CtldClientStateMachine::ActionDisconnected_() {
@@ -376,22 +403,19 @@ void CtldClientStateMachine::ActionDisconnected_() {
                      StateToString(m_state_));
   m_check_reg_timeout_ = false;
   g_server->SetGrpcSrvReady(false);
-  if (m_action_disconnected_cb_)
-    g_thread_pool->detach_task([this] { m_action_disconnected_cb_(); });
+}
+
+void CtldClient::StopHandshakesAndWait() {
+  m_state_machine_.StopHandshakesAndWait();
+  StopPingCtld();
 }
 
 void CtldClient::Shutdown() {
   m_stopping_ = true;
-  m_step_status_change_mtx_.Lock();
-  CRANE_INFO("Cleaning up status changes in CtldClient");
-
-  std::list<StepStatusChangeQueueElem> changes;
-  changes.splice(changes.begin(), std::move(m_step_status_change_list_));
-  m_step_status_change_mtx_.Unlock();
-  SendStatusChanges_(std::move(changes));
+  Wait();
 }
 
-CtldClient::CtldClient() {
+CtldClient::CtldClient() : m_state_machine_(*this) {
   m_uvw_loop_ = uvw::loop::create();
 
   m_ping_handle_ = m_uvw_loop_->resource<uvw::timer_handle>();
@@ -502,7 +526,10 @@ CtldClient::CtldClient() {
   }
 }
 
-CtldClient::~CtldClient() { Wait(); }
+CtldClient::~CtldClient() {
+  StopHandshakesAndWait();
+  Shutdown();
+}
 
 void CtldClient::Wait() {
   CRANE_TRACE("Waiting for CtldClient thread to finish.");
@@ -514,372 +541,340 @@ void CtldClient::Wait() {
     m_node_health_check_thread_.join();
 }
 
-void CtldClient::Init() {
-  g_ctld_client_sm->SetActionRequestConfigCb(
-      [this](RegToken const& token) { RequestConfigFromCtld_(token); });
+void CtldClient::Init(std::function<bool(const ConfigureRequest&)> restore) {
+  m_state_machine_.SetInitialRestore(std::move(restore));
+}
 
-  g_ctld_client_sm->AddActionConfigureCb(
-      [](CtldClientStateMachine::ConfigureArg const& arg) {
-        // FIXME: step recovery
-        auto token = arg.req.token();
-        CRANE_LOGGER_DEBUG(g_runtime_status.conn_logger,
-                           "Configuring action for token {}.",
-                           ProtoTimestampToString(token));
-        std::map<job_id_t, std::map<step_id_t, StepStatus>>
-            ctld_job_steps_id_map;
-        for (const auto& [job_id, job_steps] : arg.req.job_steps()) {
-          for (const auto& [step_id, status] : job_steps.step_status()) {
-            ctld_job_steps_id_map[job_id][step_id] = status;
-            CRANE_LOGGER_TRACE(g_runtime_status.conn_logger,
-                               "[Step #{}.{}] status from Ctld: {}", job_id,
-                               step_id, status);
+void CtldClient::Reconcile_(const ConfigureRequest& request) {
+  // FIXME: step recovery
+  auto token = request.token();
+  CRANE_LOGGER_DEBUG(g_runtime_status.conn_logger,
+                     "Configuring action for token {}.",
+                     ProtoTimestampToString(token));
+  std::map<job_id_t, std::map<step_id_t, StepStatus>> ctld_job_steps_id_map;
+  for (const auto& [job_id, job_steps] : request.job_steps()) {
+    for (const auto& [step_id, status] : job_steps.step_status()) {
+      ctld_job_steps_id_map[job_id][step_id] = status;
+      CRANE_LOGGER_TRACE(g_runtime_status.conn_logger,
+                         "[Step #{}.{}] status from Ctld: {}", job_id, step_id,
+                         status);
+    }
+  }
+  auto ctld_job_ids = ctld_job_steps_id_map | std::views::keys;
+
+  // std::map keys are ordered, so we can use set difference.
+  std::map exact_job_steps = g_job_mgr->GetAllocatedJobSteps();
+
+  for (auto status_change_steps = GetAllStepStatusChange();
+       auto& [job_id, step_status_map] : status_change_steps) {
+    for (auto& [step_id, status] : step_status_map) {
+      exact_job_steps[job_id][step_id] = status;
+    }
+  }
+  auto craned_job_ids = exact_job_steps | std::views::keys;
+  std::set<job_id_t> lost_jobs{};
+  std::set<job_id_t> invalid_jobs{};
+  std::set<job_id_t> valid_jobs{};
+
+  std::ranges::set_difference(ctld_job_ids, craned_job_ids,
+                              std::inserter(lost_jobs, lost_jobs.end()));
+  std::ranges::set_difference(craned_job_ids, ctld_job_ids,
+                              std::inserter(invalid_jobs, invalid_jobs.end()));
+  std::ranges::set_intersection(ctld_job_ids, craned_job_ids,
+                                std::inserter(valid_jobs, valid_jobs.end()));
+
+  std::unordered_map<job_id_t, std::set<step_id_t>> lost_steps{};
+  std::unordered_map<job_id_t, std::set<step_id_t>> invalid_steps{};
+  std::unordered_map<job_id_t, std::set<step_id_t>> valid_job_steps{};
+
+  // For lost jobs, all steps are lost
+  for (auto job_id : lost_jobs) {
+    for (auto step_id : ctld_job_steps_id_map.at(job_id) | std::views::keys)
+      lost_steps[job_id].insert(step_id);
+  }
+
+  // For valid jobs, do step-level comparison
+  for (auto job_id : valid_jobs) {
+    const auto& ctld_steps =
+        ctld_job_steps_id_map.at(job_id) | std::views::keys;
+    const auto& craned_steps = exact_job_steps.at(job_id) | std::views::keys;
+    std::ranges::set_difference(
+        ctld_steps, craned_steps,
+        std::inserter(lost_steps[job_id], lost_steps[job_id].end()));
+    std::ranges::set_difference(
+        craned_steps, ctld_steps,
+        std::inserter(invalid_steps[job_id], invalid_steps[job_id].end()));
+    std::ranges::set_intersection(
+        ctld_steps, craned_steps,
+        std::inserter(valid_job_steps[job_id], valid_job_steps[job_id].end()));
+  }
+  std::unordered_map<job_id_t, std::unordered_set<step_id_t>>
+      completing_steps{};
+  std::unordered_map<job_id_t, std::unordered_map<step_id_t, StepStatus>>
+      steps_to_sync{};
+
+  // Define status priority for intelligent merging
+  // Ctld valid status:
+  //   - Completing
+  //   - Running
+  //   - Starting
+  //   - Configuring
+  // Craned valid status:
+  //   - Finished states (see IsFinishedStepStatus())
+  //   - Completing (All steps finished on CommonStep / Asked to exit on
+  //     DaemonStep, during Epilog)
+  //   - Running
+  //   - Starting (Only for CommonStep)
+  //   - Configuring
+  auto GetStatusPriority = [](StepStatus status) -> int {
+    if (IsFinishedStepStatus(status))
+      return 100;  // Terminal states - highest priority
+
+    switch (status) {
+    case StepStatus::Completing:
+      return 90;  // Almost terminal
+
+    case StepStatus::Running:
+      return 50;  // Active execution
+
+    case StepStatus::Starting:
+      return 30;  // Configuration completed
+
+    case StepStatus::Configuring:
+      return 20;  // Being starting
+
+    case StepStatus::Pending:
+      return 10;  // Lowest priority
+
+    default:
+      return 0;
+    }
+  };
+
+  // Request all freezes before waiting for the kernel. A frozen parent
+  // covers its descendants, including supervisors.
+  std::vector<std::filesystem::path> freezing;
+  bool freeze_failed = false;
+  for (const auto& [job_id, steps] : valid_job_steps) {
+    if (!JobConfigIsSuspended(request.job_steps().at(job_id))) continue;
+    if (!m_state_machine_.WithCurrentConfig(token, [&] {
+          auto path = g_job_mgr->RefreezeJobForRecovery(job_id);
+          if (path) {
+            freezing.emplace_back(std::move(*path));
+          } else {
+            CRANE_WARN("[Job #{}] Failed to request recovery freeze: {}",
+                       job_id, CraneErrStr(path.error()));
+            freeze_failed = true;
           }
-        }
-        auto ctld_job_ids = ctld_job_steps_id_map | std::views::keys;
+        }))
+      return;
+  }
+  if (freeze_failed) return;
+  const auto freeze_deadline = std::chrono::steady_clock::now() + 1s;
+  while (!freezing.empty()) {
+    std::erase_if(freezing, [](const auto& path) {
+      return CgroupManager::IsFullyFrozen(path).value_or(false);
+    });
+    if (freezing.empty()) break;
+    if (std::chrono::steady_clock::now() >= freeze_deadline) {
+      CRANE_WARN(
+          "Waiting for {} job cgroups to finish freezing before registration",
+          freezing.size());
+      return;
+    }
+    std::this_thread::sleep_for(10ms);
+  }
 
-        // std::map keys are ordered, so we can use set difference.
-        std::map exact_job_steps = g_job_mgr->GetAllocatedJobSteps();
+  // Intelligent status synchronization for valid steps
+  for (const auto& [job_id, steps] : valid_job_steps) {
+    for (const auto& step_id : steps) {
+      auto ctld_status =
+          request.job_steps().at(job_id).step_status().at(step_id);
+      auto craned_status = exact_job_steps.at(job_id).at(step_id);
+      CRANE_TRACE("[Step #{}.{}] Ctld status: {}, Craned status: {}.", job_id,
+                  step_id, ctld_status, craned_status);
 
-        for (auto status_change_steps = g_ctld_client->GetAllStepStatusChange();
-             auto& [job_id, step_status_map] : status_change_steps) {
-          for (auto& [step_id, status] : step_status_map) {
-            exact_job_steps[job_id][step_id] = status;
+      if (ctld_status == StepStatus::Completing) {
+        if (craned_status == StepStatus::Running) {
+          if (step_id == kDaemonStepId) {
+            CRANE_INFO(
+                "[Step #{}.{}] Ctld is Completing while daemon is still "
+                "Running. Replay daemon cleanup.",
+                job_id, step_id);
+            completing_steps[job_id].insert(step_id);
+            continue;
           }
-        }
-        auto craned_job_ids = exact_job_steps | std::views::keys;
-        std::set<job_id_t> lost_jobs{};
-        std::set<job_id_t> invalid_jobs{};
-        std::set<job_id_t> valid_jobs{};
 
-        std::ranges::set_difference(ctld_job_ids, craned_job_ids,
-                                    std::inserter(lost_jobs, lost_jobs.end()));
-        std::ranges::set_difference(
-            craned_job_ids, ctld_job_ids,
-            std::inserter(invalid_jobs, invalid_jobs.end()));
-        std::ranges::set_intersection(
-            ctld_job_ids, craned_job_ids,
-            std::inserter(valid_jobs, valid_jobs.end()));
-
-        std::unordered_map<job_id_t, std::set<step_id_t>> lost_steps{};
-        std::unordered_map<job_id_t, std::set<step_id_t>> invalid_steps{};
-        std::unordered_map<job_id_t, std::set<step_id_t>> valid_job_steps{};
-
-        // For lost jobs, all steps are lost
-        for (auto job_id : lost_jobs) {
-          for (auto step_id :
-               ctld_job_steps_id_map.at(job_id) | std::views::keys)
-            lost_steps[job_id].insert(step_id);
+          // Non-daemon steps may still have live user processes. Let
+          // Ctld continue through the terminate path before cleanup.
+          CRANE_INFO(
+              "[Step #{}.{}] Ctld is Completing while Craned is still "
+              "Running. Skip FreeSteps replay and let Ctld drive the "
+              "terminate path.",
+              job_id, step_id);
+          continue;
         }
 
-        // For valid jobs, do step-level comparison
-        for (auto job_id : valid_jobs) {
-          const auto& ctld_steps =
-              ctld_job_steps_id_map.at(job_id) | std::views::keys;
-          const auto& craned_steps =
-              exact_job_steps.at(job_id) | std::views::keys;
-          std::ranges::set_difference(
-              ctld_steps, craned_steps,
-              std::inserter(lost_steps[job_id], lost_steps[job_id].end()));
-          std::ranges::set_difference(
-              craned_steps, ctld_steps,
-              std::inserter(invalid_steps[job_id],
-                            invalid_steps[job_id].end()));
-          std::ranges::set_intersection(
-              ctld_steps, craned_steps,
-              std::inserter(valid_job_steps[job_id],
-                            valid_job_steps[job_id].end()));
-        }
-        std::unordered_map<job_id_t, std::unordered_set<step_id_t>>
-            completing_steps{};
-        std::unordered_map<job_id_t, std::unordered_map<step_id_t, StepStatus>>
-            steps_to_sync{};
-        std::unordered_set<job_id_t> refrozen_jobs{};
-
-        // Define status priority for intelligent merging
-        // Ctld valid status:
-        //   - Completing
-        //   - Running
-        //   - Starting
-        //   - Configuring
-        // Craned valid status:
-        //   - Finished states (see IsFinishedStepStatus())
-        //   - Completing (All steps finished on CommonStep / Asked to exit on
-        //     DaemonStep, during Epilog)
-        //   - Running
-        //   - Starting (Only for CommonStep)
-        //   - Configuring
-        auto GetStatusPriority = [](StepStatus status) -> int {
-          if (IsFinishedStepStatus(status))
-            return 100;  // Terminal states - highest priority
-
-          switch (status) {
-          case StepStatus::Completing:
-            return 90;  // Almost terminal
-
-          case StepStatus::Running:
-            return 50;  // Active execution
-
-          case StepStatus::Starting:
-            return 30;  // Configuration completed
-
-          case StepStatus::Configuring:
-            return 20;  // Being starting
-
-          case StepStatus::Pending:
-            return 10;  // Lowest priority
-
-          default:
-            return 0;
-          }
-        };
-
-        // Intelligent status synchronization for valid steps
-        for (const auto& [job_id, steps] : valid_job_steps) {
-          for (const auto& step_id : steps) {
-            auto ctld_status =
-                arg.req.job_steps().at(job_id).step_status().at(step_id);
-            auto craned_status = exact_job_steps.at(job_id).at(step_id);
-            CRANE_TRACE("[Step #{}.{}] Ctld status: {}, Craned status: {}.",
-                        job_id, step_id, ctld_status, craned_status);
-
-            if (ctld_status == StepStatus::Completing) {
-              if (craned_status == StepStatus::Running) {
-                if (step_id == kDaemonStepId) {
-                  CRANE_INFO(
-                      "[Step #{}.{}] Ctld is Completing while daemon is still "
-                      "Running. Replay daemon cleanup.",
-                      job_id, step_id);
-                  completing_steps[job_id].insert(step_id);
-                  continue;
-                }
-
-                // Non-daemon steps may still have live user processes. Let
-                // Ctld continue through the terminate path before cleanup.
-                CRANE_INFO(
-                    "[Step #{}.{}] Ctld is Completing while Craned is still "
-                    "Running. Skip FreeSteps replay and let Ctld drive the "
-                    "terminate path.",
+        CRANE_TRACE("[Step #{}.{}] Ctld is completing, replay local cleanup.",
                     job_id, step_id);
-                continue;
-              }
+        completing_steps[job_id].insert(step_id);
+        continue;
+      }
 
-              CRANE_TRACE(
-                  "[Step #{}.{}] Ctld is completing, replay local cleanup.",
-                  job_id, step_id);
-              completing_steps[job_id].insert(step_id);
-              continue;
-            }
+      if (ctld_status == StepStatus::Running &&
+          craned_status == StepStatus::Starting) {
+        CRANE_WARN(
+            "[Step #{}.{}] Ctld is Running but Craned is still "
+            "Starting. Starting recovery is unsupported; report lost "
+            "step and clean up local residue.",
+            job_id, step_id);
+        invalid_steps[job_id].insert(step_id);
+        lost_steps[job_id].insert(step_id);
+        continue;
+      }
 
-            if (ctld_status == StepStatus::Running &&
-                craned_status == StepStatus::Starting) {
-              CRANE_WARN(
-                  "[Step #{}.{}] Ctld is Running but Craned is still "
-                  "Starting. Starting recovery is unsupported; report lost "
-                  "step and clean up local residue.",
-                  job_id, step_id);
-              invalid_steps[job_id].insert(step_id);
-              lost_steps[job_id].insert(step_id);
-              continue;
-            }
+      if (ctld_status == StepStatus::Suspended) continue;
+      if (craned_status == ctld_status) {
+        continue;
+      }
 
-            // Handle Suspended status from Ctld: re-freeze cgroup to ensure
-            // consistency after Craned restart
-            if (ctld_status == StepStatus::Suspended) {
-              if (refrozen_jobs.insert(job_id).second) {
-                CRANE_INFO(
-                    "[Job #{}] Ctld reports Suspended, re-freezing by "
-                    "job cgroup during recovery.",
-                    job_id);
-                auto err = g_job_mgr->SuspendJobByCgroup(job_id);
-                if (err != CraneErrCode::SUCCESS) {
-                  CRANE_WARN(
-                      "[Job #{}] Failed to re-freeze job cgroup during "
-                      "recovery: {}",
-                      job_id, CraneErrStr(err));
-                }
-              }
-              continue;
-            }
+      int ctld_priority = GetStatusPriority(ctld_status);
+      int craned_priority = GetStatusPriority(craned_status);
 
-            if (craned_status == ctld_status) {
-              continue;
-            }
+      if (craned_priority > ctld_priority) {
+        // Craned has more advanced state
+        CRANE_INFO(
+            "[Step #{}.{}] Craned has more advanced status {} (Ctld has "
+            "{}), sent a statuschange to kick ctld step status machine",
+            job_id, step_id, craned_status, ctld_status);
+        steps_to_sync[job_id][step_id] = craned_status;
+      } else if (craned_status == StepStatus::Starting) {
+        CRANE_WARN(
+            "[Step #{}.{}] is Starting while Ctld has {}. Starting "
+            "recovery is unsupported; report lost step and clean up "
+            "locally.",
+            job_id, step_id, ctld_status);
+        invalid_steps[job_id].insert(step_id);
+        lost_steps[job_id].insert(step_id);
+      } else {
+        CRANE_WARN(
+            "[Step #{}.{}] Status mismatch: Ctld has {}, Craned has {}. "
+            "Terminating step to maintain consistency.",
+            job_id, step_id, ctld_status, craned_status);
+        invalid_steps[job_id].insert(step_id);
+        lost_steps[job_id].insert(step_id);
+      }
+    }
+  }
 
-            int ctld_priority = GetStatusPriority(ctld_status);
-            int craned_priority = GetStatusPriority(craned_status);
-
-            if (craned_priority > ctld_priority) {
-              // Craned has more advanced state
-              CRANE_INFO(
-                  "[Step #{}.{}] Craned has more advanced status {} (Ctld has "
-                  "{}), sent a statuschange to kick ctld step status machine",
-                  job_id, step_id, craned_status, ctld_status);
-              steps_to_sync[job_id][step_id] = craned_status;
-            } else if (craned_status == StepStatus::Starting) {
-              CRANE_WARN(
-                  "[Step #{}.{}] is Starting while Ctld has {}. Starting "
-                  "recovery is unsupported; report lost step and clean up "
-                  "locally.",
-                  job_id, step_id, ctld_status);
-              invalid_steps[job_id].insert(step_id);
-              lost_steps[job_id].insert(step_id);
-            } else {
-              CRANE_WARN(
-                  "[Step #{}.{}] Status mismatch: Ctld has {}, Craned has {}. "
-                  "Terminating step to maintain consistency.",
-                  job_id, step_id, ctld_status, craned_status);
-              invalid_steps[job_id].insert(step_id);
-              lost_steps[job_id].insert(step_id);
-            }
-          }
+  auto wait_job_futures = [](JobCleanupFutureMap&& futures) -> CraneErrCode {
+    CraneErrCode result = CraneErrCode::SUCCESS;
+    for (auto& [job_id, future] : futures) {
+      try {
+        auto job_result = future.get();
+        if (job_result != CraneErrCode::SUCCESS &&
+            result == CraneErrCode::SUCCESS) {
+          result = job_result;
         }
+      } catch (const std::exception& ex) {
+        CRANE_ERROR("[Job #{}] Cleanup future failed: {}", job_id, ex.what());
+        if (result == CraneErrCode::SUCCESS)
+          result = CraneErrCode::ERR_SYSTEM_ERR;
+      }
+    }
+    return result;
+  };
 
-        std::thread([token, lost_jobs = std::move(lost_jobs),
-                     lost_steps = std::move(lost_steps),
-                     invalid_steps = std::move(invalid_steps),
-                     invalid_jobs = std::move(invalid_jobs),
-                     completing_steps = std::move(completing_steps),
-                     steps_to_sync = std::move(steps_to_sync)]() mutable {
-          util::SetCurrentThreadName("CfgCleanupThr");
+  auto free_steps_silently =
+      [&](std::unordered_map<job_id_t, std::set<step_id_t>>& steps)
+      -> CraneErrCode {
+    if (steps.empty()) return CraneErrCode::SUCCESS;
 
-          auto wait_step_futures =
-              [](StepCleanupFutureMap&& futures) -> CraneErrCode {
-            CraneErrCode result = CraneErrCode::SUCCESS;
-            for (auto& [job_id, step_futures] : futures) {
-              for (auto& [step_id, future] : step_futures) {
-                try {
-                  auto step_result = future.get();
-                  if (step_result != CraneErrCode::SUCCESS &&
-                      result == CraneErrCode::SUCCESS) {
-                    result = step_result;
-                  }
-                } catch (const std::exception& ex) {
-                  CRANE_ERROR("[Step #{}.{}] Cleanup future failed: {}", job_id,
-                              step_id, ex.what());
-                  if (result == CraneErrCode::SUCCESS)
-                    result = CraneErrCode::ERR_SYSTEM_ERR;
-                }
-              }
-            }
-            return result;
-          };
-
-          auto wait_job_futures =
-              [](JobCleanupFutureMap&& futures) -> CraneErrCode {
-            CraneErrCode result = CraneErrCode::SUCCESS;
-            for (auto& [job_id, future] : futures) {
-              try {
-                auto job_result = future.get();
-                if (job_result != CraneErrCode::SUCCESS &&
-                    result == CraneErrCode::SUCCESS) {
-                  result = job_result;
-                }
-              } catch (const std::exception& ex) {
-                CRANE_ERROR("[Job #{}] Cleanup future failed: {}", job_id,
-                            ex.what());
-                if (result == CraneErrCode::SUCCESS)
-                  result = CraneErrCode::ERR_SYSTEM_ERR;
-              }
-            }
-            return result;
-          };
-
-          auto free_steps_silently =
-              [&](std::unordered_map<job_id_t, std::set<step_id_t>>& steps)
-              -> CraneErrCode {
-            if (steps.empty()) return CraneErrCode::SUCCESS;
-
-            std::unordered_map<job_id_t, std::unordered_set<step_id_t>>
-                non_daemon_steps;
-            std::unordered_map<job_id_t, std::unordered_set<step_id_t>>
-                daemon_steps;
-            for (auto& [job_id, step_ids] : steps) {
-              for (auto step_id : step_ids) {
+    std::unordered_map<job_id_t, std::unordered_set<step_id_t>>
+        non_daemon_steps;
+    std::unordered_map<job_id_t, std::unordered_set<step_id_t>> daemon_steps;
+    for (const auto& [job_id, step_ids] : steps) {
+      for (auto step_id : step_ids)
+        (step_id == kDaemonStepId ? daemon_steps : non_daemon_steps)[job_id]
+            .insert(step_id);
+    }
+    for (auto* batch : {&non_daemon_steps, &daemon_steps}) {
+      if (batch->empty()) continue;
+      StepCleanupFutureMap futures;
+      if (!m_state_machine_.WithCurrentConfig(token, [&] {
+            for (const auto& [job_id, step_ids] : *batch)
+              for (auto step_id : step_ids)
                 g_job_mgr->MarkStepSilentCleanup(job_id, step_id);
-                if (step_id == kDaemonStepId)
-                  daemon_steps[job_id].insert(step_id);
-                else
-                  non_daemon_steps[job_id].insert(step_id);
-              }
-            }
+            futures = g_job_mgr->FreeSteps(std::move(*batch));
+          }))
+        return CraneErrCode::ERR_SHUTTING_DOWN;
+      auto result = WaitStepCleanupFutures(std::move(futures));
+      if (result != CraneErrCode::SUCCESS) return result;
+    }
+    return CraneErrCode::SUCCESS;
+  };
 
-            CraneErrCode result = CraneErrCode::SUCCESS;
-            if (!non_daemon_steps.empty()) {
-              result = wait_step_futures(
-                  g_job_mgr->FreeSteps(std::move(non_daemon_steps)));
-            }
-            if (result == CraneErrCode::SUCCESS && !daemon_steps.empty()) {
-              result = wait_step_futures(
-                  g_job_mgr->FreeSteps(std::move(daemon_steps)));
-            }
-            return result;
-          };
+  // Only terminate truly invalid steps (those not tracked by Ctld).
+  // Recovery waits for these local cleanups before Craned can become
+  // READY, so stale local supervisors cannot survive startup.
+  if (!invalid_steps.empty()) {
+    CRANE_INFO("Terminating invalid steps (not tracked by Ctld): [{}].",
+               util::JobStepsToString(invalid_steps));
+    auto cleanup_result = free_steps_silently(invalid_steps);
+    if (cleanup_result != CraneErrCode::SUCCESS) {
+      CRANE_ERROR("Invalid step cleanup failed: {}",
+                  CraneErrStr(cleanup_result));
+      return;
+    }
+  }
 
-          // Only terminate truly invalid steps (those not tracked by Ctld).
-          // Recovery waits for these local cleanups before Craned can become
-          // READY, so stale local supervisors cannot survive startup.
-          if (!invalid_steps.empty()) {
-            CRANE_INFO("Terminating invalid steps (not tracked by Ctld): [{}].",
-                       util::JobStepsToString(invalid_steps));
-            auto cleanup_result = free_steps_silently(invalid_steps);
-            if (cleanup_result != CraneErrCode::SUCCESS) {
-              CRANE_ERROR("Invalid step cleanup failed: {}",
-                          CraneErrStr(cleanup_result));
-              return;
-            }
-          }
+  if (!invalid_jobs.empty()) {
+    CRANE_INFO("Freeing invalid jobs: [{}].", absl::StrJoin(invalid_jobs, ","));
+    JobCleanupFutureMap futures;
+    if (!m_state_machine_.WithCurrentConfig(token, [&] {
+          futures = g_job_mgr->FreeInvalidJobs(std::move(invalid_jobs));
+        }))
+      return;
+    auto cleanup_result = wait_job_futures(std::move(futures));
+    if (cleanup_result != CraneErrCode::SUCCESS) {
+      CRANE_ERROR("Invalid job cleanup failed: {}",
+                  CraneErrStr(cleanup_result));
+      return;
+    }
+  }
 
-          if (!invalid_jobs.empty()) {
-            CRANE_INFO("Freeing invalid jobs: [{}].",
-                       absl::StrJoin(invalid_jobs, ","));
-            auto cleanup_result = wait_job_futures(
-                g_job_mgr->FreeInvalidJobs(std::move(invalid_jobs)));
-            if (cleanup_result != CraneErrCode::SUCCESS) {
-              CRANE_ERROR("Invalid job cleanup failed: {}",
-                          CraneErrStr(cleanup_result));
-              return;
-            }
-          }
+  if (!m_state_machine_.EvConfigurationDone(token, lost_jobs, lost_steps)) {
+    return;
+  }
 
-          if (!g_ctld_client_sm->EvConfigurationDone(token, lost_jobs,
-                                                     lost_steps)) {
-            return;
-          }
+  // Report status changes to Ctld for steps that need synchronization
+  m_state_machine_.WithCurrentConfig(token, [&] {
+    for (const auto& [job_id, step_status_map] : steps_to_sync) {
+      for (const auto& [step_id, status] : step_status_map) {
+        uint32_t exit_code = g_job_mgr->GetStepExitCode(job_id, step_id);
+        google::protobuf::Timestamp end_time =
+            g_job_mgr->GetStepEndTime(job_id, step_id);
+        CRANE_INFO(
+            "[Step #{}.{}] Reporting status {} to Ctld during recovery "
+            "sync",
+            job_id, step_id, status);
+        StepStatusChangeQueueElem elem{
+            .job_id = job_id,
+            .step_id = step_id,
+            .new_status = status,
+            .exit_code = exit_code,
+            .reason = "Status synced from Craned during recovery",
+            .timestamp = end_time};
+        StepStatusChangeAsync(std::move(elem));
+      }
+    }
 
-          // Report status changes to Ctld for steps that need synchronization
-          for (const auto& [job_id, step_status_map] : steps_to_sync) {
-            for (const auto& [step_id, status] : step_status_map) {
-              uint32_t exit_code = g_job_mgr->GetStepExitCode(job_id, step_id);
-              google::protobuf::Timestamp end_time =
-                  g_job_mgr->GetStepEndTime(job_id, step_id);
-              CRANE_INFO(
-                  "[Step #{}.{}] Reporting status {} to Ctld during recovery "
-                  "sync",
-                  job_id, step_id, status);
-              StepStatusChangeQueueElem elem{
-                  .job_id = job_id,
-                  .step_id = step_id,
-                  .new_status = status,
-                  .exit_code = exit_code,
-                  .reason = "Status synced from Craned during recovery",
-                  .timestamp = end_time};
-              g_ctld_client->StepStatusChangeAsync(std::move(elem));
-            }
-          }
-
-          if (!completing_steps.empty()) {
-            CRANE_INFO("Terminating completing steps: [{}].",
-                       util::JobStepsToString(completing_steps));
-            g_job_mgr->FreeSteps(std::move(completing_steps));
-          }
-        }).detach();
-      },
-      CallbackInvokeMode::ASYNC, false);
-
-  g_ctld_client_sm->SetActionRegisterCb(
-      [this](CtldClientStateMachine::RegisterArg const& arg) {
-        CranedRegister_(arg.token, arg.lost_jobs, arg.lost_steps);
-      });
+    if (!completing_steps.empty()) {
+      CRANE_INFO("Terminating completing steps: [{}].",
+                 util::JobStepsToString(completing_steps));
+      g_job_mgr->FreeSteps(std::move(completing_steps));
+    }
+  });
 }
 
 void CtldClient::InitGrpcChannel(const std::string& server_address,
@@ -910,9 +905,10 @@ void CtldClient::InitGrpcChannel(const std::string& server_address,
         server_address, g_config.CraneCtldForInternalListenPort, channel_args);
   }
 
-  // std::unique_ptr will automatically release the dangling stub.
   m_stub_ = CraneCtldForInternal::NewStub(m_ctld_channel_);
+}
 
+void CtldClient::StartGrpcCtldConnection() {
   m_async_send_thread_ = std::thread([this] { AsyncSendThread_(); });
 }
 
@@ -1093,13 +1089,11 @@ bool CtldClient::CranedRegister_(
     return false;
   }
 
-  return g_ctld_client_sm->EvGetRegisterReply(ready_reply, token);
+  return m_state_machine_.EvGetRegisterReply(ready_reply, token);
 }
 
 void CtldClient::AsyncSendThread_() {
   util::SetCurrentThreadName("SendCtldThr");
-  // Wait Craned grpc server initialization.
-  m_connection_start_notification_.WaitForNotification();
 
   // Variables for grpc channel maintaining.
   grpc_connectivity_state prev_grpc_state{GRPC_CHANNEL_IDLE};
@@ -1115,8 +1109,13 @@ void CtldClient::AsyncSendThread_() {
 
   while (true) {
     if (m_stopping_) {
-      absl::MutexLock lock(&m_step_status_change_mtx_);
-      if (m_step_status_change_list_.empty()) break;
+      std::list<StepStatusChangeQueueElem> final_changes;
+      {
+        absl::MutexLock lock(&m_step_status_change_mtx_);
+        final_changes.swap(m_step_status_change_list_);
+      }
+      SendStatusChanges_(std::move(final_changes));
+      break;
     }
 
     // Try to connect when not connected.
@@ -1130,8 +1129,8 @@ void CtldClient::AsyncSendThread_() {
         // Update prev disconnected grpc state
         prev_grpc_state = grpc_state;
         prev_connected = false;
-        g_ctld_client->StopPingCtld();
-        g_ctld_client_sm->EvGrpcConnectionFailed();
+        StopPingCtld();
+        m_state_machine_.EvGrpcConnectionFailed();
         for (const auto& cb : m_on_ctld_disconnected_cb_chain_) cb();
       }
       // Disconnected state: waiting for conntected state change
@@ -1150,13 +1149,13 @@ void CtldClient::AsyncSendThread_() {
       CRANE_LOGGER_INFO(g_runtime_status.conn_logger,
                         "Channel to CraneCtlD is connected.");
       prev_connected = true;
-      g_ctld_client_sm->EvGrpcConnected();
+      m_state_machine_.EvGrpcConnected();
       for (const auto& cb : m_on_ctld_connected_cb_chain_) cb();
     }
 
     prev_grpc_state = grpc_state;
 
-    if (g_ctld_client_sm->IsReadyNow() == false) continue;
+    if (m_state_machine_.IsReadyNow() == false) continue;
 
     // StepStatusChange sending is done in this grpc channel maintaining thread
     // if the channel is connected.
@@ -1401,15 +1400,15 @@ bool CtldClient::Ping_() {
   if (!status.ok()) {
     CRANE_LOGGER_ERROR(g_runtime_status.conn_logger, "Craned Ping failed: {}",
                        status.error_message());
-    g_ctld_client_sm->EvPingFailed();
+    m_state_machine_.EvPingFailed();
     return false;
   }
   CRANE_LOGGER_TRACE(g_runtime_status.conn_logger, "Craned Ping {}.",
                      reply.ok());
   if (reply.ok()) {
-    g_ctld_client_sm->EvPingSuccess();
+    m_state_machine_.EvPingSuccess();
   } else
-    g_ctld_client_sm->EvPingFailed();
+    m_state_machine_.EvPingFailed();
   return reply.ok();
 }
 
