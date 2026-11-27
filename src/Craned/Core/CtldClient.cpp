@@ -1147,14 +1147,27 @@ bool CtldClient::RequestConfigFromCtld_(RegToken const& token) {
   }
   *req.mutable_token() = token;
 
-  grpc::ClientContext context;
-  context.set_deadline(std::chrono::system_clock::now() +
-                       std::chrono::seconds(1));
-
   google::protobuf::Empty reply;
+  grpc::Status status;
 
-  grpc::Status status =
-      m_stub_->CranedTriggerReverseConn(&context, req, &reply);
+  // The FUTURE node may be created shortly after this craned starts, so retry
+  // briefly instead of waiting for the next register timeout.
+  for (int retry = 0;; ++retry) {
+    grpc::ClientContext context;
+    context.set_deadline(std::chrono::system_clock::now() +
+                         std::chrono::seconds(1));
+
+    status = m_stub_->CranedTriggerReverseConn(&context, req, &reply);
+    if (!g_config.FutureMode ||
+        status.error_code() != grpc::StatusCode::FAILED_PRECONDITION ||
+        retry == kFutureConfigRetryTimes || m_stopping_)
+      break;
+    CRANE_LOGGER_INFO(g_runtime_status.conn_logger,
+                      "No matching FUTURE node yet; retrying config request: "
+                      "{}",
+                      status.error_message());
+    std::this_thread::sleep_for(kFutureConfigRetryInterval);
+  }
   if (!status.ok()) {
     CRANE_LOGGER_ERROR(
         g_runtime_status.conn_logger, "Notify CranedConnected failed: {}, {}",

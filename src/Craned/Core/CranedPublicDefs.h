@@ -34,6 +34,10 @@ namespace Craned {
 inline constexpr uint64_t kEvSigChldResendMs = 500;
 constexpr uint64_t kCtldClientTimeoutSec = 30;
 constexpr int64_t kCranedRpcTimeoutSeconds = 5;
+// Kept shorter in total than CraneCtldTimeout, so that a retrying config
+// request does not overlap the one issued by the register timeout.
+constexpr int kFutureConfigRetryTimes = 8;
+constexpr std::chrono::milliseconds kFutureConfigRetryInterval{500};
 
 using ::Craned::Common::CgroupInterface;
 using ::Craned::Common::CgroupManager;

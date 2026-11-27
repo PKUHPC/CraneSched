@@ -1159,14 +1159,14 @@ std::vector<std::string> CranedMetaContainer::DeleteOrResetNodes_(
         errors[i] = "Only FUTURE nodes can have their machine binding reset.";
       else if (!reset_to_future && !node->static_meta.flags[NodeFlags::Dynamic])
         errors[i] = "Only manually created nodes can be deleted.";
-      else if (node->alive)
-        errors[i] = "Node is online. Stop its craned first.";
       else if (!node->rn_job_res_map.empty())
         errors[i] = "Node has allocated or completing jobs.";
       else if (!node->resv_in_node_map.empty())
         errors[i] = "Node belongs to a reservation.";
       else if (pending_nodes.contains(ids[i]))
         errors[i] = "Node is required by the nodelist of pending jobs.";
+      else if (node->alive)
+        errors[i] = "Node is online. Stop its craned first.";
       else if (!reset_to_future || node->future_mapped)
         changed_ids.emplace(ids[i]);
     }
