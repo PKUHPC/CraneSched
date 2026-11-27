@@ -262,6 +262,16 @@ bool StepInCtld::AllNodesCompleting() const {
          m_completing_nodes_ == m_execute_nodes_;
 }
 
+bool StepInCtld::PrepareForReportedLoss(
+    const CranedId& node, StepStatusChangeContext* context) const {
+  if (!ExpectsSupervisorOn(node)) return false;
+  for (const auto& peer : m_execute_nodes_) {
+    if (peer != node && ExpectsSupervisorOn(peer))
+      context->craned_cancel_steps[peer][job_id].insert(StepId());
+  }
+  return true;
+}
+
 void StepInCtld::SetSubmitTime(absl::Time submit_time) {
   m_submit_time_ = submit_time;
   this->m_runtime_attr_.mutable_submit_time()->set_seconds(

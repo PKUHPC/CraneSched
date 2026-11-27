@@ -1286,9 +1286,9 @@ class JobScheduler {
   void QueryRnJobOnCtldForNodeConfig(const CranedId& craned_id,
                                      crane::grpc::ConfigureCranedRequest* req);
 
-  void TerminateStepsOnOtherNodes(
+  void ReportLostStepsAsync(
       const std::unordered_map<job_id_t, std::set<step_id_t>>& steps,
-      const CranedId& excluded_node);
+      const CranedId& reporting_node);
 
   crane::grpc::CancelJobReply CancelPendingOrRunningJob(
       const crane::grpc::CancelJobRequest& request);
@@ -1681,6 +1681,7 @@ class JobScheduler {
     CranedId craned_index;
     std::string reason;
     google::protobuf::Timestamp timestamp;
+    bool reported_lost_on_register{false};
   };
 
   absl::Mutex m_job_status_change_queue_mtx_;

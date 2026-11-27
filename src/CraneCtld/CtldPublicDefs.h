@@ -798,6 +798,17 @@ struct StepInCtld {
   void StepOnNodeFinish(const CranedId& node);
   bool AllNodesFinished() const { return m_running_nodes_.empty(); }
 
+  // A terminal report removes a completing node from the running set.
+  // Configuring steps may not have populated running_nodes yet, so an
+  // empty set alone cannot prove that a supervisor has finished.
+  bool ExpectsSupervisorOn(const CranedId& node) const {
+    return m_execute_nodes_.contains(node) &&
+           (m_running_nodes_.empty() || m_running_nodes_.contains(node) ||
+            !m_completing_nodes_.contains(node));
+  }
+  bool PrepareForReportedLoss(const CranedId& node,
+                              StepStatusChangeContext* context) const;
+
   void StepOnNodeCompleting(const CranedId& node);
   bool AllNodesCompleting() const;
 

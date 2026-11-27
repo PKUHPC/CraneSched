@@ -143,22 +143,8 @@ grpc::Status CtldForInternalServiceImpl::CranedRegister(
   }
   CRANE_INFO("Craned {} lost executing step: [{}]", request->craned_id(),
              util::JobStepsToString(orphaned_steps));
-  if (!orphaned_steps.empty()) {
-    auto now = google::protobuf::util::TimeUtil::GetCurrentTime();
-    // Terminate steps on other alive nodes (normal cancel flow)
-    g_job_scheduler->TerminateStepsOnOtherNodes(orphaned_steps,
-                                                request->craned_id());
-    // For the crashed node: enqueue ordinary outer-status events in order.
-    // CTLD status handling only reads JobStatusChangeArg::new_status.
-    for (const auto& [job_id, steps] : orphaned_steps) {
-      for (const auto step_id : steps | std::views::reverse) {
-        g_job_scheduler->StepCompletingAndStatusChangeAsync(
-            job_id, step_id, request->craned_id(),
-            crane::grpc::JobStatus::Failed, ExitCode::EC_CRANED_DOWN,
-            "Craned re-registered but step lost.", now);
-      }
-    }
-  }
+  if (!orphaned_steps.empty())
+    g_job_scheduler->ReportLostStepsAsync(orphaned_steps, request->craned_id());
 
   stub->SetReady();
   g_meta_container->CranedUp(request->craned_id(), request->remote_meta());
