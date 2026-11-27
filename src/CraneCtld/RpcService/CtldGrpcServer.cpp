@@ -1741,7 +1741,15 @@ crane::grpc::JobInfo ProjectJobForQuery(
     if (source.has_allocated_res_view())
       CopyResource(source.allocated_res_view(),
                    result.mutable_allocated_res_view());
-    *result.mutable_licenses_count() = source.licenses_count();
+    if (source.has_requested_licenses()) {
+      auto* request = result.mutable_requested_licenses();
+      request->set_any_of(source.requested_licenses().any_of());
+      for (const auto& entry : source.requested_licenses().entries()) {
+        auto* copy = request->add_entries();
+        copy->set_name(entry.name());
+        copy->set_count(entry.count());
+      }
+    }
     *result.mutable_req_nodes() = source.req_nodes();
     *result.mutable_exclude_nodes() = source.exclude_nodes();
     if (source.has_pending_reason())

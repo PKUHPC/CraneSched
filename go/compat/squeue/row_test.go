@@ -5,6 +5,7 @@
 package squeue
 
 import (
+	"cmp"
 	"io"
 	"slices"
 	"testing"
@@ -151,5 +152,39 @@ func TestStateTableArrayBitmap(t *testing.T) {
 				t.Errorf("%s = %q, %v; want %q", field, got, err, want)
 			}
 		}
+	}
+}
+
+func TestLicenseRequestAndAllocation(t *testing.T) {
+	request := &pb.LicenseRequest{Entries: []*pb.LicenseRequest_Entry{
+		{Name: "fluent", Count: 2}, {Name: "ansys", Count: 1},
+	}}
+	for _, tc := range []struct {
+		name                   string
+		anyOf                  bool
+		granted                map[string]uint32
+		wantRequest, wantGrant string
+		matchSecond            bool
+	}{
+		{"pending alternatives", true, nil, "fluent:2|ansys:1", "", false},
+		{"second alternative granted", true, map[string]uint32{"ansys": 1}, "fluent:2|ansys:1", "ansys:1", false},
+		{"both required and granted", false, map[string]uint32{"ansys": 1, "fluent": 2}, "fluent:2,ansys:1", "fluent:2;ansys:1", true},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			request.AnyOf = tc.anyOf
+			r := row{job: &pb.JobInfo{RequestedLicenses: request, AllocatedLicenses: tc.granted}}
+			for field, want := range map[string]string{"Licenses": tc.wantRequest, "LicensesAlloc": cmp.Or(tc.wantGrant, "(null)")} {
+				if got, err := r.value(field, &options{}); err != nil || got != want {
+					t.Errorf("%s = %q, %v; want %q", field, got, err, want)
+				}
+			}
+			if !matchesLicenses([]string{"fluent"}, request) || matchesLicenses([]string{"ansys"}, request) != tc.matchSecond {
+				t.Errorf("unexpected -L match for request %s", tc.wantRequest)
+			}
+			report := jobReport(r, &options{})
+			if report.Licenses != tc.wantRequest || report.LicensesAllocated != tc.wantGrant {
+				t.Errorf("structured licenses = %q, %q", report.Licenses, report.LicensesAllocated)
+			}
+		})
 	}
 }

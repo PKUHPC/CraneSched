@@ -752,7 +752,7 @@ func CheckMailType(mailtype string) bool {
 	return true
 }
 
-func ParseLicensesString(val string) ([]*protos.JobToCtld_License, bool, error) {
+func ParseLicensesString(val string) (*protos.LicenseRequest, error) {
 	tmpStr := strings.ReplaceAll(val, " ", "")
 	var licenseVec []string
 
@@ -760,7 +760,7 @@ func ParseLicensesString(val string) ([]*protos.JobToCtld_License, bool, error) 
 	hasPipe := strings.Contains(tmpStr, "|")
 
 	if hasComma && hasPipe {
-		return nil, hasPipe, fmt.Errorf("cannot mix AND (,) and OR (|) in licenses string")
+		return nil, fmt.Errorf("cannot mix AND (,) and OR (|) in licenses string")
 	}
 
 	if hasPipe {
@@ -769,32 +769,29 @@ func ParseLicensesString(val string) ([]*protos.JobToCtld_License, bool, error) 
 		licenseVec = strings.Split(tmpStr, ",")
 	}
 
-	var licCount []*protos.JobToCtld_License
+	request := &protos.LicenseRequest{AnyOf: hasPipe}
 	pattern := regexp.MustCompile(`^([a-zA-Z]+(?:@[a-zA-Z0-9_]+)?):(\d+)$`)
 
 	for _, licenseCount := range licenseVec {
-		if !pattern.MatchString(licenseCount) {
-			return nil, hasPipe, fmt.Errorf("invalid licenses string format")
-		}
 		matches := pattern.FindStringSubmatch(licenseCount)
-		if len(matches) != 3 {
-			return nil, hasPipe, fmt.Errorf("invalid licenses string format")
+		if matches == nil {
+			return nil, fmt.Errorf("invalid licenses string format")
 		}
 		name := matches[1]
 		count, err := strconv.ParseUint(matches[2], 10, 32)
 		if err != nil {
-			return nil, hasPipe, err
+			return nil, err
 		}
 		if count <= 0 {
-			return nil, hasPipe, fmt.Errorf("license count must > 0")
+			return nil, fmt.Errorf("license count must > 0")
 		}
-		licCount = append(licCount, &protos.JobToCtld_License{
-			Key:   name,
+		request.Entries = append(request.Entries, &protos.LicenseRequest_Entry{
+			Name:  name,
 			Count: uint32(count),
 		})
 	}
 
-	return licCount, hasPipe, nil
+	return request, nil
 }
 
 // CheckNodeList checks a comma-separated node list or hostlist expression.

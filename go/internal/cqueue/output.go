@@ -173,7 +173,7 @@ func AppendDynamicColumns(config *TableConfig, reply *protos.QueryJobsInfoReply,
 		header = append(header, "Licenses")
 		for i, job := range reply.JobInfoList {
 			var parts []string
-			for name, count := range job.LicensesCount {
+			for name, count := range job.AllocatedLicenses {
 				parts = append(parts, fmt.Sprintf("%s:%d", name, count))
 			}
 			licStr := strings.Join(parts, ",")

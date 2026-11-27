@@ -239,7 +239,14 @@ JobInfo MakeJob(uint32_t id = 71, uint32_t owner = 1001,
   job.add_exclude_nodes("node2");
   job.add_execution_node("node1");
   job.set_craned_list("node1");
-  (*job.mutable_licenses_count())["test-license"] = 2;
+  auto* request = job.mutable_requested_licenses();
+  request->set_any_of(true);
+  auto* entry = request->add_entries();
+  entry->set_name("first-license");
+  entry->set_count(1);
+  entry = request->add_entries();
+  entry->set_name("test-license");
+  entry->set_count(2);
   job.mutable_time_limit()->set_seconds(3600);
   job.mutable_start_time()->set_seconds(100);
   job.mutable_end_time()->set_seconds(200);
@@ -440,6 +447,8 @@ TEST(JobQuery, UnknownNestedFieldsCannotLeakOrAlterSource) {
   AddUnknown(source.mutable_array_spec());
   AddUnknown(source.mutable_array_task());
   AddUnknown(source.mutable_submitted_size());
+  AddUnknown(source.mutable_requested_licenses());
+  AddUnknown(source.mutable_requested_licenses()->mutable_entries(0));
   AddUnknown(source.mutable_dependency_status()->mutable_pending(0));
   AddUnknown(source.mutable_dependency_status()->mutable_ready_time());
   AddUnknown(source.mutable_step_info_list(0));
@@ -642,7 +651,7 @@ TEST(JobQuery, QuerySchemaRequiresExplicitFieldClassification) {
                                        "username",
                                        "qos",
                                        "req_total_res_view",
-                                       "licenses_count",
+                                       "requested_licenses",
                                        "req_nodes",
                                        "exclude_nodes",
                                        "extra_attr",
@@ -717,6 +726,10 @@ TEST(JobQuery, QuerySchemaRequiresExplicitFieldClassification) {
                {"cpu_count", "memory_bytes", "memory_sw_bytes", "gres_map"});
   ExpectFields(crane::grpc::SubmittedJobSize::descriptor(),
                {"max_nodes", "tasks", "tasks_per_node"});
+  ExpectFields(crane::grpc::LicenseRequest::descriptor(),
+               {"entries", "any_of"});
+  ExpectFields(crane::grpc::LicenseRequest::Entry::descriptor(),
+               {"name", "count"});
   ExpectFields(crane::grpc::GresMap::descriptor(), {"name_gres_map"});
   ExpectFields(crane::grpc::GresCount::descriptor(), {"total", "specified"});
   ExpectFields(crane::grpc::ArraySpec::descriptor(),

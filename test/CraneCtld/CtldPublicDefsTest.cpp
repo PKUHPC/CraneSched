@@ -1250,6 +1250,45 @@ TEST(StepExitStatusTest, RetainsHighestProcessStatusAcrossRecovery) {
   EXPECT_FALSE(recovered.RecordStepExitStatus(crane::grpc::Completed, 0));
 }
 
+TEST(JobInfoTest,
+     RecoversLegacyLicenseAlternativesAndClearsOnlyGrantsOnRequeue) {
+  // Persisted JobToCtld tags 40 (name/count entries) and 41 (OR).
+  const std::string old_fields =
+      "\xc2\x02\x05\x0a\x01"
+      "z"
+      "\x10\x02"
+      "\xc2\x02\x05\x0a\x01"
+      "a"
+      "\x10\x01"
+      "\xc8\x02\x01";
+  crane::grpc::JobToCtld submission;
+  ASSERT_TRUE(submission.ParseFromString(old_fields));
+  submission.add_gids(0);
+  Ctld::JobInCtld job{};
+  job.SetFieldsByJobToCtld(submission);
+  EXPECT_EQ(job.JobToCtld().legacy_licenses_size(), 0);
+  const auto& request = job.JobToCtld().requested_licenses();
+  ASSERT_EQ(request.entries_size(), 2);
+  EXPECT_TRUE(request.any_of());
+  EXPECT_EQ(request.entries(0).name(), "z");
+  EXPECT_EQ(request.entries(0).count(), 2U);
+  EXPECT_EQ(request.entries(1).name(), "a");
+  EXPECT_EQ(request.entries(1).count(), 1U);
+
+  job.SetActualLicenses({{"a", 1}});
+  crane::grpc::JobInfo running;
+  job.SetFieldsOfJobInfo(&running);
+  ASSERT_EQ(running.allocated_licenses_size(), 1);
+  EXPECT_EQ(running.allocated_licenses().at("a"), 1U);
+  job.ResetForRequeue();
+  crane::grpc::JobInfo pending;
+  job.SetFieldsOfJobInfo(&pending);
+  EXPECT_EQ(pending.requested_licenses().SerializeAsString(),
+            request.SerializeAsString());
+  EXPECT_TRUE(pending.allocated_licenses().empty());
+  EXPECT_TRUE(job.licenses_count.empty());
+}
+
 TEST(JobInfoTest, MemoryPerCpuReflectsEffectiveTaskRequest) {
   constexpr uint64_t gib = 1ULL << 30;
   Ctld::JobInCtld job{};

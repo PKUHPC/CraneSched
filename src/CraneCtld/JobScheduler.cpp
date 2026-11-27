@@ -8899,9 +8899,9 @@ CraneExpectedRich<void> JobScheduler::AcquireJobAttributes(JobInCtld* job) {
         absl::StrJoin(invalid_nodes, ", "), job->partition_id));
   }
 
-  if (!job->JobToCtld().licenses_count().empty()) {
+  if (job->JobToCtld().has_requested_licenses()) {
     auto check_licenses_result = g_license_manager->CheckLicensesLegal(
-        job->JobToCtld().licenses_count(), job->JobToCtld().is_licenses_or());
+        job->JobToCtld().requested_licenses());
     if (!check_licenses_result) {
       CRANE_ERROR("Failed to call CheckLicensesLegal: {}",
                   check_licenses_result.error());

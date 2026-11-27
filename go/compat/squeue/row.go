@@ -7,6 +7,7 @@ package squeue
 import (
 	"cmp"
 	"fmt"
+	"maps"
 	"math"
 	"os/user"
 	"path"
@@ -181,6 +182,34 @@ func (r row) userName() string {
 		return account.Username
 	}
 	return uid
+}
+
+func requestedLicenses(request *pb.LicenseRequest) string {
+	parts := make([]string, 0, len(request.GetEntries()))
+	for _, entry := range request.GetEntries() {
+		parts = append(parts, entry.Name+":"+num(entry.Count))
+	}
+	if request.GetAnyOf() {
+		return strings.Join(parts, "|")
+	}
+	return strings.Join(parts, ",")
+}
+
+func allocatedLicenses(job *pb.JobInfo) string {
+	// Allocations are keyed by name. Use submission order when rendering.
+	remaining := maps.Clone(job.AllocatedLicenses)
+	var parts []string
+	for _, entry := range job.RequestedLicenses.GetEntries() {
+		if count, ok := remaining[entry.Name]; ok {
+			parts = append(parts, entry.Name+":"+num(count))
+			delete(remaining, entry.Name)
+		}
+	}
+	// Records without submission metadata can still carry actual allocations.
+	for _, name := range slices.Sorted(maps.Keys(remaining)) {
+		parts = append(parts, name+":"+num(remaining[name]))
+	}
+	return strings.Join(parts, ";")
 }
 
 func (r row) minMemory() uint64 {
@@ -447,17 +476,10 @@ func (r row) value(f string, o *options) (string, error) {
 		return cmp.Or(value, "(null)"), nil
 	case "MinMemory":
 		return memory(r.minMemory(), o.noConvert), nil
-	case "Licenses", "LicensesAlloc":
-		licenses := j.LicensesCount
-		if f == "LicensesAlloc" {
-			licenses = j.AllocatedLicenses
-		}
-		var result []string
-		for k, n := range licenses {
-			result = append(result, k+":"+num(n))
-		}
-		slices.Sort(result)
-		return cmp.Or(strings.Join(result, ","), "(null)"), nil
+	case "Licenses":
+		return cmp.Or(requestedLicenses(j.RequestedLicenses), "(null)"), nil
+	case "LicensesAlloc":
+		return cmp.Or(allocatedLicenses(j), "(null)"), nil
 	case "Dependency":
 		d := j.DependencyStatus
 		var parts []string

@@ -56,9 +56,7 @@ class LicenseManager {
                        crane::grpc::QueryLicensesInfoReply* response);
 
   std::expected<void, std::string> CheckLicensesLegal(
-      const google::protobuf::RepeatedPtrField<crane::grpc::JobToCtld::License>&
-          lic_id_to_count,
-      bool is_license_or);
+      const crane::grpc::LicenseRequest& request);
 
   void CheckLicenseCountSufficient(std::vector<PdJobInScheduler*>* job_ptr_vec);
 

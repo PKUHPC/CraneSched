@@ -538,12 +538,11 @@ func MainCalloc(cmd *cobra.Command, args []string) error {
 	}
 
 	if FlagLicenses != "" {
-		licCount, isLicenseOr, err := util.ParseLicensesString(FlagLicenses)
+		licenses, err := util.ParseLicensesString(FlagLicenses)
 		if err != nil {
 			return util.NewCraneErr(util.ErrorCmdArg, fmt.Sprintf("Invalid argument: --licenses value '%s'", FlagLicenses))
 		}
-		job.LicensesCount = licCount
-		job.IsLicensesOr = isLicenseOr
+		job.RequestedLicenses = licenses
 	}
 
 	job.SubmitDir, err = os.Getwd()

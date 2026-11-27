@@ -357,7 +357,7 @@ void LuaJobHandler::RegisterTypes_(const crane::LuaEnvironment& lua_env) {
     }),
     "licenses_count", sol::property([&](const JobInfo& t) {
       sol::table tbl = lua_env.GetLuaState().create_table();
-            for (const auto& [name, value] : t.licenses_count()) {
+            for (const auto& [name, value] : t.allocated_licenses()) {
               tbl[name] = value;
             }
             return tbl;

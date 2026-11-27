@@ -1928,6 +1928,7 @@ void JobInCtld::SetSuspendTime(absl::Time const& val) {
 void JobInCtld::SetActualLicenses(
     std::unordered_map<LicenseId, uint32_t>&& actual_licenses) {
   auto* mutable_map = runtime_attr.mutable_actual_licenses();
+  mutable_map->clear();
   for (const auto& [id, count] : actual_licenses) {
     mutable_map->insert({id, count});
   }
@@ -2007,6 +2008,7 @@ void JobInCtld::ResetForRequeue() {
   allocated_res_view = ResourceView{};
   pending_reason.clear();
 
+  licenses_count.clear();
   runtime_attr.mutable_actual_licenses()->clear();
   runtime_attr.mutable_task_node_list()->Clear();
 
@@ -2160,6 +2162,14 @@ void JobInCtld::SetMemoryPerCpu(uint64_t bytes, uint64_t partition_max) {
 
 void JobInCtld::SetFieldsByJobToCtld(crane::grpc::JobToCtld const& val) {
   job_to_ctld = val;
+  if (!job_to_ctld.has_requested_licenses() &&
+      !job_to_ctld.legacy_licenses().empty()) {
+    auto* request = job_to_ctld.mutable_requested_licenses();
+    request->mutable_entries()->Swap(job_to_ctld.mutable_legacy_licenses());
+    request->set_any_of(job_to_ctld.legacy_licenses_or());
+  }
+  job_to_ctld.clear_legacy_licenses();
+  job_to_ctld.clear_legacy_licenses_or();
   runtime_attr.set_max_step_wait_status(0);
 
   partition_id = (val.partition_name().empty()) ? g_config.DefaultPartition
@@ -2355,6 +2365,8 @@ void JobInCtld::SetFieldsOfJobInfo(crane::grpc::JobInfo* job_info) const {
   if (Status() == crane::grpc::Pending)
     job_info->mutable_scheduled_nodes()->Assign(scheduled_nodes.begin(),
                                                 scheduled_nodes.end());
+  if (job_to_ctld.has_requested_licenses())
+    *job_info->mutable_requested_licenses() = job_to_ctld.requested_licenses();
   *job_info->mutable_allocated_licenses() = runtime_attr.actual_licenses();
 
   if (const auto* array_spec = GetArraySpec(); array_spec != nullptr) {
@@ -2428,9 +2440,6 @@ void JobInCtld::SetFieldsOfJobInfo(crane::grpc::JobInfo* job_info) const {
   if (using_default_wckey) wckey_info += "*";
   if (!wckey.empty()) wckey_info += wckey;
   job_info->set_wckey(wckey_info);
-
-  job_info->mutable_licenses_count()->insert(licenses_count.begin(),
-                                             licenses_count.end());
 
   auto* mutable_env = job_info->mutable_env();
   for (auto const& [k, v] : env) {

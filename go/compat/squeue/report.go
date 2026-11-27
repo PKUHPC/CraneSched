@@ -185,12 +185,8 @@ func jobReport(r row, o *options) v45.QueueJob {
 	if len(j.ExecutionNode) > 0 {
 		result.BatchHost = j.ExecutionNode[0]
 	}
-	if len(j.LicensesCount) > 0 {
-		result.Licenses, _ = r.value("Licenses", o)
-	}
-	if len(j.AllocatedLicenses) > 0 {
-		result.LicensesAllocated, _ = r.value("LicensesAlloc", o)
-	}
+	result.Licenses = requestedLicenses(j.RequestedLicenses)
+	result.LicensesAllocated = allocatedLicenses(j)
 	if len(j.DependencyStatus.GetPending()) > 0 {
 		result.Dependency, _ = r.value("Dependency", o)
 	}

@@ -195,6 +195,16 @@ message SubmittedJobSize {
   uint32 tasks_per_node = 3;
 }
 
+message LicenseRequest {
+  message Entry {
+    string name = 1;
+    uint32 count = 2;
+  }
+  // Preserve submission order: the scheduler tries alternatives from the front.
+  repeated Entry entries = 1;
+  bool any_of = 2;
+}
+
 message JobToCtld {
   /* -------- Fields that are set at the submission time. ------- */
   google.protobuf.Duration time_limit = 1;
@@ -247,12 +257,9 @@ message JobToCtld {
   bool hold = 38;
   google.protobuf.Timestamp begin_time = 39;
 
-  message License {
-    string key = 1;
-    uint32 count = 2;
-  }
-  repeated License licenses_count = 40;
-  bool is_licenses_or = 41;
+  // Read only to recover job submissions persisted before LicenseRequest.
+  repeated LicenseRequest.Entry legacy_licenses = 40;
+  bool legacy_licenses_or = 41;
   optional string wckey = 42;
   string submit_hostname = 43;
   string submit_dir = 44;
@@ -271,6 +278,7 @@ message JobToCtld {
   // Array submission spec for this job. Child identity is runtime-only.
   ArraySpec array_spec = 58;
   SubmittedJobSize submitted_size = 60;
+  LicenseRequest requested_licenses = 61;
 }
 
 message JobInEmbeddedDb {
@@ -679,7 +687,7 @@ message JobInfo {
   string username = 15;
   string qos = 16;
   ResourceView req_total_res_view = 17;
-  map<string, uint32> licenses_count = 18;
+  map<string, uint32> allocated_licenses = 18;
   repeated string req_nodes = 19;
   repeated string exclude_nodes = 20;
 
@@ -729,7 +737,7 @@ message JobInfo {
   optional uint64 memory_per_cpu = 56;
   GresMap gres_per_node = 57;
   repeated string scheduled_nodes = 58;
-  map<string, uint32> allocated_licenses = 59;
+  LicenseRequest requested_licenses = 59;
   optional bool requeue_eligible = 60;
   optional string script_path = 61;
   optional double cpus_per_task = 62;

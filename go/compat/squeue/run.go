@@ -381,7 +381,7 @@ func (o *options) rows(reply *pb.QueryJobsInfoReply) ([]row, error) {
 		if len(o.req.FilterPartitions) > 0 && !slices.Contains(o.req.FilterPartitions, j.Partition) {
 			continue
 		}
-		if len(o.req.FilterLicenses) > 0 && !slices.ContainsFunc(o.req.FilterLicenses, func(s string) bool { _, ok := j.LicensesCount[s]; return ok }) {
+		if !matchesLicenses(o.licenses, j.RequestedLicenses) {
 			continue
 		}
 		if !matchesFold(o.accounts, j.Account) || !matchesFold(o.qos, j.Qos) || !matchesFold(o.names, j.Name) {
@@ -673,6 +673,23 @@ func (r row) sortNumber(field string) int64 {
 	default:
 		return int64(r.minMemory() >> 20)
 	}
+}
+
+// Slurm 26.05.4 applies -L to comma-separated requested names. An OR
+// expression is one token, so only its first counted alternative matches.
+func matchesLicenses(filter []string, request *pb.LicenseRequest) bool {
+	if len(filter) == 0 {
+		return true
+	}
+	for _, entry := range request.GetEntries() {
+		if slices.Contains(filter, entry.Name) {
+			return true
+		}
+		if request.AnyOf {
+			break
+		}
+	}
+	return false
 }
 
 func matchesFold(filter []string, value string) bool {

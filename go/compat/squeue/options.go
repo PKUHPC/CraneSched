@@ -73,7 +73,7 @@ type options struct {
 	parserAttached, customFormat, customLong, customSort bool
 	iterate, verbose                                     int
 	under, over                                          int64
-	reservations, users, names, accounts, qos            []string
+	licenses, reservations, users, names, accounts, qos  []string
 	nodes                                                *utils.HostList
 	states                                               []pb.JobStatus
 	raw                                                  map[string]string
@@ -257,7 +257,7 @@ func parse(args []string, env map[string]string, diag io.Writer) (*options, erro
 		o.all = true
 	}
 	o.qos = list(values["qos"])
-	o.req.FilterLicenses = list(values["licenses"])
+	o.licenses = list(values["licenses"])
 	o.names = list(values["name"])
 	if values["users"] != "" {
 		o.users = []string{}
@@ -281,14 +281,14 @@ func parse(args []string, env map[string]string, diag io.Writer) (*options, erro
 	if err := o.selectStates(values["states"]); err != nil {
 		return nil, err
 	}
-	if o.onlyState && (o.notUser != "" || o.all || o.long || o.steps || o.start || len(o.accounts)+len(o.req.FilterPartitions)+len(o.qos)+len(o.names)+len(o.req.FilterLicenses)+len(o.users)+len(o.reservations) > 0 || o.nodes != nil || o.priority || o.over > 0 || o.under > 0) {
+	if o.onlyState && (o.notUser != "" || o.all || o.long || o.steps || o.start || len(o.accounts)+len(o.req.FilterPartitions)+len(o.qos)+len(o.names)+len(o.licenses)+len(o.users)+len(o.reservations) > 0 || o.nodes != nil || o.priority || o.over > 0 || o.under > 0) {
 		return nil, fmt.Errorf("squeue: fatal: Option --only-job-state only works alone, with -j (--jobs) and/or -t (--states) parameters, parameters for cluster/federation selection, and the printing options.")
 	}
 	if o.under > 0 && o.over > o.under {
 		return nil, fmt.Errorf("squeue: fatal: --running-over=%02d:%02d:%02d and --running-under=%02d:%02d:%02d will return 0 jobs.", o.over/3600, o.over/60%60, o.over%60, o.under/3600, o.under/60%60, o.under%60)
 	}
 	if o.steps {
-		o.req.FilterLicenses = nil
+		o.licenses = nil
 	}
 	o.req.OptionQueryStepsOnly = o.steps
 	return o, nil
